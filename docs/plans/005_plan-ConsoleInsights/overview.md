@@ -223,7 +223,7 @@ Scope: internal work for every phase; ECharts and PostgreSQL facts are verified 
 | R1 | Does the installed ECharts support `axisLabel.hideOverlap`, slider `labelFormatter`, `tooltip.confine`, `markLine` on line series? required | CONFIRMED | D2, D3 / 1.2 |
 | R2 | Can the Tier 0 monitoring role read `data_directory`? required | CONFIRMED | D6 / 2.1 |
 | R4 | Does a Google Chat incoming webhook accept `{"text": "…"}` (HTTP 200) from the sandbox network? required for 0.3 done only | UNVERIFIED until the live post in 0.3 S6 (no external documentation lookup: outbound access is limited to the webhook itself) | D19 / 0.3, 11.5 |
-| R3 | Local experiments on the `postgres:18` image: `pg_basebackup -R -X stream -C -S` replica bootstrap, `primary_conninfo` change on reload, `pg_promote`, `pg_rewind` prerequisites (`wal_log_hints`), timeline following without restart, behaviour of a read-write/read-only endpoint pair with a controller; required 7.1+ | UNVERIFIED until 7.0 S1 records the command outputs (then CONFIRMED in this table) | D9 / 7.0–7.4 |
+| R3 | Local experiments on the `postgres:18` image: `pg_basebackup -R -X stream -C -S` replica bootstrap, `primary_conninfo` change on reload, `pg_promote`, `pg_rewind` prerequisites (`wal_log_hints`), timeline following without restart, behaviour of a read-write/read-only endpoint pair with a controller; required 7.1+ | CONFIRMED 2026-11-06 (7.0 S1, `ha/r3*.log`): replica bootstrap, reload re-point, `pg_promote`, timeline following without restart, `pg_rewind` after a crash with `wal_keep_size` set by `ALTER SYSTEM` (fails when it is a `-c` flag only or absent → re-clone fallback); the RW/RO endpoint pair is `hactl`'s own contract (`ha/DESIGN.md` §4), proven by HACTL-* in 7.1 | D9 / 7.0–7.4 |
 
 ### R1 — ECharts options
 - Sources: `web/node_modules/echarts/types/dist/shared.d.ts` (installed `echarts` 6.1.0, `web/package.json` line 34): `hideOverlap` appears in the axis label typings (3 occurrences), `labelFormatter?: string | ((value: number, valueStr: string) => string)` at line 10829 (slider), `MarkLineComponent` and `MarkPointComponent` are already registered in `echarts.ts`.
@@ -239,7 +239,7 @@ Scope: internal work for every phase; ECharts and PostgreSQL facts are verified 
 
 ### R3 — HA lab behaviour (local)
 - Sources: local experiments on `postgres:18` (7.0 S1); PostgreSQL manual pages for `pg_basebackup`, `pg_promote`, `pg_rewind` as shipped with the image (`--help`); outputs recorded in STATE §7.
-- Unresolved/replacement: UNVERIFIED until the supervisor records the 7.0 experiment outputs; dependent units 7.1–7.5 start only after that.
+- Result: CONFIRMED 2026-11-06 (STATE §7 7.0; `/home/agent/pglens-odoo-stack/ha/DESIGN.md` §3). Finding that changes the design: `wal_keep_size`/`wal_log_hints` are persisted with `ALTER SYSTEM`, because `pg_rewind`'s single-user crash recovery ignores command-line `-c` flags.
 
 ## Invariants
 
