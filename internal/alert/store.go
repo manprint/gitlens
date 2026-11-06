@@ -150,6 +150,28 @@ func purgeBatches(ctx context.Context, db storeDB, batch int, query string, befo
 	}
 }
 
+var _ recentResolver = (*pgStore)(nil)
+
+// RecentlyResolved returns, per alert key with an episode resolved at or after
+// since, the newest started_at of those episodes.
+func (s *pgStore) RecentlyResolved(ctx context.Context, since time.Time) (map[string]time.Time, error) {
+	rows, err := s.pool.Query(ctx, `SELECT alert_key, max(started_at) FROM alerts WHERE tenant_id='default' AND state='resolved' AND resolved_at >= $1 GROUP BY alert_key`, since)
+	if err != nil {
+		return nil, fmt.Errorf("read resolved alerts: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var key string
+		var at time.Time
+		if err := rows.Scan(&key, &at); err != nil {
+			return nil, err
+		}
+		out[key] = at
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) Active(ctx context.Context, f Filter) ([]Alert, error) {
 	query := `SELECT alert_key, rule_id, severity, state, cluster_id, instance_id, datname, labels, value, summary, started_at, last_eval_at, resolved_at FROM alerts WHERE tenant_id='default'`
 	// An explicit resolved state must not be combined with the default

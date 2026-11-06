@@ -37,6 +37,7 @@ const (
 type evalState struct {
 	first  time.Time
 	seen   time.Time // the pass that last sampled this subject
+	last   time.Time // the newest sample stamp of the episode
 	firing bool
 	alert  Alert
 }
@@ -66,6 +67,7 @@ func (e *Evaluator) Restore(a Alert, now time.Time) {
 	defer e.mu.Unlock()
 	e.states[a.Key] = evalState{
 		first:  a.StartedAt,
+		last:   a.StartedAt,
 		seen:   now,
 		firing: a.State == StateFiring,
 		alert:  a,
@@ -94,6 +96,7 @@ func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 		if st.first.IsZero() {
 			st.first = now
 		}
+		st.last = st.first
 		st.alert = Alert{Key: k, RuleID: r.ID, Severity: r.Severity, State: StatePending, ClusterID: s.ClusterID, InstanceID: s.InstanceID, Datname: s.Datname, Labels: s.Labels, Value: s.Value, Summary: r.Summary, StartedAt: st.first, LastEvalAt: now}
 		if r.For == 0 {
 			st.firing = true
@@ -105,6 +108,9 @@ func (e *Evaluator) Step(r Rule, s Sample, now time.Time) (*Alert, Transition) {
 		return &st.alert, TransitionOpened
 	}
 	st.seen = now
+	if s.TS.After(st.last) {
+		st.last = s.TS
+	}
 	st.alert.LastEvalAt = now
 	st.alert.Value = s.Value
 	if !st.firing && now.Sub(st.first) >= r.For {
@@ -175,6 +181,28 @@ func (e *Evaluator) Firing() []Alert {
 		}
 	}
 	return out
+}
+
+// Open returns the open (pending or firing) episodes of rule, as copies in key
+// order.
+func (e *Evaluator) Open(ruleID string) []Alert {
+	return e.Unsampled(func(id string) bool { return id == ruleID }, time.Unix(1<<62, 0))
+}
+
+// Holds reports whether an episode of key is open.
+func (e *Evaluator) Holds(key string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.states[key]
+	return ok
+}
+
+// Last returns the newest sample stamp of the open episode of key.
+func (e *Evaluator) Last(key string) (time.Time, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st, ok := e.states[key]
+	return st.last, ok
 }
 
 // Unsampled returns the episodes of the rules that include selects whose

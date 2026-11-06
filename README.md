@@ -990,6 +990,28 @@ none is left the engine holds the episode for its ten-minute metric grace: the
 alert resolves about twelve minutes after the last deadlock, and deadlocks that
 recur within that hold extend the open alert instead of notifying again.
 
+Event rules come in two kinds. A *spell* (`instance_unreachable`,
+`no_primary_in_cluster`, `slot_inactive`, `slot_lost`) is written once, when
+its condition begins, so its alert closes on the state the event describes,
+not on the event: on every pass the engine asks whether each open spell still
+holds (the instance reports again, a primary reports, no slot of the instance
+is inactive or lost in its latest reports) once the alert is two passes old,
+and resolves it on the first pass that says no, even while its event is still
+in the lookback window. One event opens at most one alert: an event stamped no
+later than the newest event of the alert just closed opens nothing, and a
+server that restarts or takes over the evaluation reads the alerts resolved
+within the lookback for that. A new outage writes a
+new event, so it opens a new alert of the same key with its own start and
+notifies again. Every other event type is a *pulse*: its alert closes on the
+first pass whose lookback holds no occurrence of it, so two occurrences closer
+than the lookback plus one pass share one alert (`split_brain_detected` is
+written every minute while it lasts and must not page every minute). Limits: a
+stored spell rule with a duration (`for`) counts it only while its event is in
+the window; the check reads the database clock, so a skew between it and the
+event writer above two passes can close an alert as it opens; after a restart,
+an event that came while the closed alert was open, after its start, may
+reopen it once.
+
 Configure Slack, Google Chat or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
 
 Alerts are persisted and evaluated even when no delivery channel is configured.

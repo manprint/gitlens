@@ -299,6 +299,65 @@ func TestINTALERT018_SpellClosesAfterARestartDuringTheOutage(t *testing.T) {
 	})
 }
 
+// TestINTALERT023_ASpellClosedWhileItsEventIsInTheWindowStaysClosed (HA-V-12,
+// GAP-7): the instance answers again while its instance_unreachable event is
+// still in the window; the spell resolves on that pass, the store reports it
+// as recently resolved, and a fresh engine (restart, new leader) does not
+// reopen it from the same event. A later outage opens a new episode.
+func TestINTALERT023_ASpellClosedWhileItsEventIsInTheWindowStaysClosed(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx, pool, _, _, _, _, _ := setupEngineIntegration(t, pg)
+		_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS events (event_id bigserial, ts timestamptz NOT NULL, type text NOT NULL, cluster_id bigint, instance_id uuid); TRUNCATE events`)
+		require.NoError(t, err)
+		createAlertTables(t, pool)
+		agent, instance := uuid.New(), uuid.New()
+		_, err = pool.Exec(ctx, `INSERT INTO agents (agent_id) VALUES ($1)`, agent)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO instances (instance_id, cluster_id, agent_id, role, last_seen) VALUES ($1, 106, $2, 'standby', now() - interval '10 minutes')`, instance, agent)
+		require.NoError(t, err)
+		clk := clock.NewFake(time.Now())
+		_, err = pool.Exec(ctx, `INSERT INTO events (ts, type, cluster_id, instance_id) VALUES ($1, 'instance_unreachable', 106, $2)`, clk.Now(), instance)
+		require.NoError(t, err)
+
+		sources := []Source{NewEventSource(pool, 30*time.Second)}
+		first := &engineNotifier{}
+		e1 := NewEngineWithInterval(pool, clk, 30*time.Second, NewPgStore(pool), first, sources)
+		t.Cleanup(e1.Stop)
+		require.NoError(t, e1.Tick(ctx))
+		require.Len(t, first.alerts, 1)
+
+		_, err = pool.Exec(ctx, `UPDATE instances SET last_seen = now() WHERE instance_id = $1`, instance)
+		require.NoError(t, err)
+		clk.Advance(clearAfter(30 * time.Second))
+		require.NoError(t, e1.Tick(ctx))
+		require.Len(t, first.alerts, 2, "the spell resolves while its event is in the window")
+		require.Equal(t, StateResolved, first.alerts[1].State)
+		key := first.alerts[0].Key
+
+		resolved, err := NewPgStore(pool).(recentResolver).RecentlyResolved(ctx, clk.Now().Add(-lookback(30*time.Second)))
+		require.NoError(t, err)
+		require.Contains(t, resolved, key)
+		e1.Stop()
+
+		second := &engineNotifier{}
+		e2 := NewEngineWithInterval(pool, clk, 30*time.Second, NewPgStore(pool), second, sources)
+		t.Cleanup(e2.Stop)
+		clk.Advance(30 * time.Second)
+		require.NoError(t, e2.Tick(ctx))
+		require.Empty(t, second.alerts, "a fresh engine does not reopen the spell from the same event")
+
+		_, err = pool.Exec(ctx, `UPDATE instances SET last_seen = now() - interval '10 minutes' WHERE instance_id = $1`, instance)
+		require.NoError(t, err)
+		clk.Advance(30 * time.Second)
+		_, err = pool.Exec(ctx, `INSERT INTO events (ts, type, cluster_id, instance_id) VALUES ($1, 'instance_unreachable', 106, $2)`, clk.Now(), instance)
+		require.NoError(t, err)
+		require.NoError(t, e2.Tick(ctx))
+		require.Len(t, second.alerts, 1, "a new outage opens a new episode")
+		require.Equal(t, StateFiring, second.alerts[0].State)
+		require.True(t, second.alerts[0].StartedAt.After(first.alerts[0].StartedAt))
+	})
+}
+
 // TestINTALERT021_LeaderWithADeadSessionGivesUpTheLock: the server ends the
 // leader's session without pgx seeing it close, so the connection still looks
 // open. Once another session holds the engine's lock, the dead leader must not

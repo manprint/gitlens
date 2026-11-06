@@ -56,7 +56,10 @@ type Clearer interface {
 // spellEvents are the event types whose condition outlives the event that
 // opened it. Each is emitted once, when the condition begins, so once the
 // event leaves the lookback window nothing shows whether the condition still
-// holds. Their episodes close only when a Clearer confirms it. Every other
+// holds. Their episodes close only when a Clearer confirms it, and the engine
+// asks it on every pass while one is open, whether or not its event is still in
+// the window. One occurrence opens at most one episode: an occurrence no later
+// than the last close of its key is skipped (see Engine.closedAt). Every other
 // event type is a pulse: its episode closes as soon as its occurrence leaves
 // the lookback window (see endGrace). split_brain_detected is re-emitted every
 // minute while it persists, so its episode stays open for as long as it lasts.
@@ -102,6 +105,16 @@ type retrier interface {
 // when it has a delivery queued.
 type settler interface {
 	Settle(firing func() []Alert)
+}
+
+// recentResolver is implemented by a store that can tell, for each alert key
+// with an episode resolved since a cutoff, the newest start of such an
+// episode. A newly loaded engine seeds its spell watermarks from it; a store
+// that cannot leaves them empty, and an occurrence whose episode another term
+// closed may then reopen. An occurrence that came while the episode was open,
+// after its start, is not in the store and may reopen it after a restart.
+type recentResolver interface {
+	RecentlyResolved(context.Context, time.Time) (map[string]time.Time, error)
 }
 
 // purger is implemented by a store that can remove the history older than a
@@ -159,6 +172,13 @@ type Engine struct {
 	stateLoaded bool
 	// purgedAt is when a purge of the history was last attempted; zero until the first.
 	purgedAt time.Time
+	// closedAt is, per key, the newest occurrence stamp of its last closed
+	// episode. A spell occurrence stamped no later than it belongs to that
+	// episode and opens nothing. Both stamps come from the event's writer, so
+	// a clock skew between it and the engine does not matter. Entries older
+	// than the lookback are dropped: their events have left the window.
+	// Guarded by mu.
+	closedAt map[string]time.Time
 }
 
 func NewEngine(pool *pgxpool.Pool, clk clock.Clock, st Store, n Notifier, srcs []Source) *Engine {
@@ -347,6 +367,16 @@ func (e *Engine) Tick(ctx context.Context) error {
 	e.mu.Unlock()
 	now := e.clock.Now()
 	if !loaded {
+		// The resolved episodes are read first: a failure here leaves the
+		// evaluator untouched for the next pass's retry.
+		closed := map[string]time.Time{}
+		if rr, ok := e.store.(recentResolver); ok {
+			recent, err := rr.RecentlyResolved(ctx, now.Add(-lookback(e.interval)))
+			if err != nil {
+				return fmt.Errorf("restore resolved alerts: %w", err)
+			}
+			closed = recent
+		}
 		if e.store != nil {
 			active, err := e.store.Active(ctx, Filter{})
 			if err != nil {
@@ -357,6 +387,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 			}
 		}
 		e.mu.Lock()
+		e.closedAt = closed
 		e.stateLoaded = true
 		e.mu.Unlock()
 	}
@@ -399,6 +430,15 @@ func (e *Engine) Tick(ctx context.Context) error {
 	var errs []error
 	for _, rule := range rules {
 		live[rule.ID] = struct{}{}
+		// A spell's Clearer reads the state, not the events, so its open
+		// episodes are checked even when the rule's sampling fails below.
+		spell := spellEvents[rule.EventType]
+		if spell {
+			errs = append(errs, e.closeCleared(ctx, rule, silences, now)...)
+			if ctx.Err() != nil {
+				return errors.Join(append(errs, ctx.Err())...)
+			}
+		}
 		observed, failed := 0, false
 		for _, source := range e.sources {
 			if (rule.EventType != "" && source.Kind() != "event") || (rule.EventType == "" && source.Kind() != "metric") {
@@ -415,6 +455,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 			}
 			observed++
 			for _, sample := range samples {
+				if spell && e.closedBy(Key(rule, sample), sample.TS) {
+					continue
+				}
 				undo := e.eval.Checkpoint(Key(rule, sample))
 				alertValue, transition := e.eval.Step(rule, sample, now)
 				if alertValue != nil && transition == TransitionNone && alertValue.State == StateFiring {
@@ -432,16 +475,19 @@ func (e *Engine) Tick(ctx context.Context) error {
 		}
 		// A subject that a complete pass did not sample has left the rule's
 		// data. A source that failed, or a rule no source served, says nothing
-		// about its subjects, so only a fully observed rule may close them.
-		if observed > 0 && !failed {
-			errs = append(errs, e.endUnsampled(ctx, &rule, silences, now, e.eval.Unsampled(func(id string) bool { return id == rule.ID }, now.Add(-endGrace(rule, e.interval))))...)
+		// about its subjects, so only a fully observed rule may close them. A
+		// spell closed above what its Clearer confirmed, and nothing else.
+		if observed > 0 && !failed && !spell {
+			errs = append(errs, e.closeEpisodes(ctx, silences, now, e.eval.Unsampled(func(id string) bool { return id == rule.ID }, now.Add(-endGrace(rule, e.interval))), false)...)
 		}
 	}
-	errs = append(errs, e.endUnsampled(ctx, nil, silences, now, e.eval.Unsampled(func(id string) bool {
+	// An episode whose rule is gone closes at once.
+	errs = append(errs, e.closeEpisodes(ctx, silences, now, e.eval.Unsampled(func(id string) bool {
 		_, ok := live[id]
 		return !ok
-	}, now))...)
+	}, now), true)...)
 	e.eval.Forget(now.Add(-time.Hour))
+	e.forgetClosed(now.Add(-lookback(e.interval)))
 	if err := e.purgeHistory(ctx, now); err != nil {
 		errs = append(errs, err)
 	}
@@ -484,31 +530,83 @@ func (e *Engine) purgeHistory(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-// endUnsampled closes the episodes that a pass did not confirm. rule is the
-// configured rule of those episodes, or nil when the rule is gone, and then
-// they close at once. A spell episode closes only when its source confirms
-// that the condition cleared: its event aged out of the window, but the
-// condition may well still hold. If the check fails, nothing closes.
-func (e *Engine) endUnsampled(ctx context.Context, rule *Rule, silences []Silence, now time.Time, unsampled []Alert) []error {
-	if len(unsampled) == 0 {
+// clearAfter is the age an episode must reach before its Clearer is asked.
+// The Clearer reads the state at the database's clock, the event was written
+// at its writer's: a skew between them shorter than this cannot close an
+// episode the moment it opens.
+func clearAfter(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		interval = defaultEngineInterval
+	}
+	return 2 * interval
+}
+
+// closeCleared asks the Clearer about every open episode of a spell rule old
+// enough (see clearAfter) and closes those whose condition no longer holds.
+// If the check fails, nothing closes and the failure is the pass's.
+func (e *Engine) closeCleared(ctx context.Context, rule Rule, silences []Silence, now time.Time) []error {
+	var open []Alert
+	for _, a := range e.eval.Open(rule.ID) {
+		if now.Sub(a.StartedAt) >= clearAfter(e.interval) {
+			open = append(open, a)
+		}
+	}
+	if len(open) == 0 {
 		return nil
 	}
-	closing := unsampled
-	if rule != nil && spellEvents[rule.EventType] {
-		cleared, err := e.clearedBy(ctx, *rule, unsampled)
-		if err != nil {
-			return []error{fmt.Errorf("check cleared %s: %w", rule.ID, err)}
-		}
-		closing = cleared
+	cleared, err := e.clearedBy(ctx, rule, open)
+	if err != nil {
+		return []error{fmt.Errorf("check cleared %s: %w", rule.ID, err)}
 	}
+	return e.closeEpisodes(ctx, silences, now, cleared, true)
+}
+
+// closeEpisodes ends each episode: a firing one resolves and is published, a
+// pending one is cancelled. With mark, each key whose episode is gone records
+// the newest occurrence stamp of that episode (see Engine.closedAt); a
+// resolution that could not be persisted is undone, keeps its episode and
+// records nothing.
+func (e *Engine) closeEpisodes(ctx context.Context, silences []Silence, now time.Time, closing []Alert, mark bool) []error {
 	var errs []error
 	for _, a := range closing {
+		last, held := e.eval.Last(a.Key)
 		undo := e.eval.Checkpoint(a.Key)
 		if resolved, transition := e.eval.End(a.Key, now); transition == TransitionResolved && resolved != nil {
 			errs = append(errs, e.publish(ctx, *resolved, silences, now, undo)...)
 		}
+		if mark && held && !e.eval.Holds(a.Key) {
+			e.mu.Lock()
+			if e.closedAt == nil {
+				e.closedAt = map[string]time.Time{}
+			}
+			if last.After(e.closedAt[a.Key]) {
+				e.closedAt[a.Key] = last
+			}
+			e.mu.Unlock()
+		}
 	}
 	return errs
+}
+
+// closedBy reports whether an occurrence of key stamped ts belongs to an
+// episode that has already closed.
+func (e *Engine) closedBy(key string, ts time.Time) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	at, ok := e.closedAt[key]
+	return ok && !ts.After(at)
+}
+
+// forgetClosed drops the watermarks before cutoff: no occurrence that old is
+// still in the window.
+func (e *Engine) forgetClosed(cutoff time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for k, at := range e.closedAt {
+		if at.Before(cutoff) {
+			delete(e.closedAt, k)
+		}
+	}
 }
 
 // clearedBy asks the event source whether any of the episodes has cleared.

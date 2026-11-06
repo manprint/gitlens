@@ -551,10 +551,12 @@ interface PglensEvent {
 }
 
 interface PglensAlert {
+  alert_key: string
   rule_id: string
   instance_id: string | null
   state: string
   started_at: string
+  resolved_at: string | null
 }
 
 async function hactlStatus(page: Page): Promise<HactlStatus | null> {
@@ -644,6 +646,58 @@ async function deliveredSince(rule: string, since: Date): Promise<number> {
     `SELECT count(*) FROM notifications WHERE channel = 'google_chat' AND alert_key LIKE '${rule}/%' AND phase = 'fire' AND ok AND sent_at >= '${since.toISOString()}';`,
   ])
   return Number(out.stdout.trim())
+}
+
+/**
+ * GAP-7 (7.5.6): a spell closes on the instance's state, within 90 s of rejoin.sh. The old engine
+ * waited for its event to leave the lookback (2 min) plus the grace (2 min), so it could not
+ * resolve before event + 240 s; that bound tells the two apart only when the rejoin came early
+ * enough, else it is recorded and not asserted.
+ */
+function expectPromptClose(label: string, rejoined: Date, eventTs: string, resolvedAt: number) {
+  expect(
+    resolvedAt - rejoined.getTime(),
+    `${label} resolved within 90 s of rejoin.sh`,
+  ).toBeLessThan(90_000)
+  const lead = rejoined.getTime() - Date.parse(eventTs)
+  if (lead < 150_000) {
+    expect(
+      resolvedAt - Date.parse(eventTs),
+      `${label} resolved before its event left the lookback plus the grace`,
+    ).toBeLessThan(240_000)
+  } else {
+    test.info().annotations.push({
+      type: 'note',
+      description: `${label}: rejoin.sh ran ${Math.round(lead / 1000)} s after the event, the 240 s bound is not discriminating`,
+    })
+  }
+}
+
+/** GAP-7: Chat fire deliveries of one alert key (not of the whole rule); stored as `<key>/<started_at>`. */
+async function firesForKeySince(key: string, since: Date): Promise<number> {
+  const out = await run('docker', [
+    'exec',
+    'pglens-odoo-timescaledb-1',
+    'psql',
+    '-U',
+    'pglens',
+    '-d',
+    'pglens',
+    '-Atc',
+    `SELECT count(*) FROM notifications WHERE channel = 'google_chat' AND starts_with(alert_key, '${key.replaceAll("'", "''")}/') AND phase = 'fire' AND ok AND sent_at >= '${since.toISOString()}';`,
+  ])
+  return Number(out.stdout.trim())
+}
+
+/** The instance_unreachable episodes of one instance started at or after since, oldest first. */
+async function unreachableEpisodes(
+  api: APIRequestContext,
+  instanceId: string,
+  since: Date,
+): Promise<PglensAlert[]> {
+  return (await alertsSince(api, 'instance_unreachable', since))
+    .filter((alert) => alert.instance_id === instanceId)
+    .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
 }
 
 /** Odoo through hactl: one read RPC per second for at least 20 s; the longest gap between two successes. */
@@ -1229,9 +1283,83 @@ test.describe.serial('HA-DRILL', () => {
       .toBe(true)
 
     await haScript('rejoin.sh', standby)
+    const rejoined = new Date()
+    // GAP-7 (7.5.6): the spell closes on the instance's state, not when its event has aged out of
+    // the lookback (2 min) plus the grace (2 min): the old engine could not resolve it before
+    // event + 240 s.
+    const outage = (await eventsSince(api, 'instance_unreachable', t0))
+      .filter((event) => event.payload.instance_id === ids.get(standby))
+      .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))[0]
+    if (!outage) throw new Error('D3 V-7 no outage event')
+    await expect
+      .poll(
+        async () =>
+          (await unreachableEpisodes(api, ids.get(standby) ?? '', t0))[0]?.state ?? 'none',
+        { timeout: 120_000, intervals: [5_000], message: 'D3 V-12 the first episode resolves' },
+      )
+      .toBe('resolved')
+    const [firstEpisode] = await unreachableEpisodes(api, ids.get(standby) ?? '', t0)
+    if (!firstEpisode) throw new Error('D3 V-12 no first episode')
+    const resolvedAt = Date.parse(firstEpisode.resolved_at ?? '')
+    expectPromptClose('D3 V-12 first episode', rejoined, outage.ts, resolvedAt)
     await expectHealthy(api, page, ROLE_WAIT + 60_000)
     expect(await inactiveSlots(standby), 'D3 V-6 the rejoined node holds no inactive slot').toBe(0)
     expectOdoo(await probe(), 'D3', 5_000)
+
+    // GAP-7: a second outage of the same standby is a new episode of the same key, and pages again.
+    await run('docker', ['stop', '-t', '30', `pglens-odoo-${standby}-1`])
+    await expect
+      .poll(
+        async () => {
+          const episodes = await unreachableEpisodes(api, ids.get(standby) ?? '', t0)
+          return (
+            episodes.length === 2 &&
+            episodes[1]?.alert_key === firstEpisode.alert_key &&
+            Date.parse(episodes[1].started_at) > resolvedAt &&
+            episodes[1].state === 'firing'
+          )
+        },
+        {
+          timeout: STALE_WAIT + 30_000,
+          intervals: [5_000],
+          message: 'D3 V-12 the second outage opens a second episode, firing',
+        },
+      )
+      .toBe(true)
+    await expect
+      .poll(() => firesForKeySince(firstEpisode.alert_key, t0), {
+        timeout: 60_000,
+        intervals: [5_000],
+        message: 'D3 V-12 two Chat fire deliveries for the key',
+      })
+      .toBe(2)
+    // Rejoined at once, so the close is measured well inside the lookback plus the grace.
+    const secondOutage = (await eventsSince(api, 'instance_unreachable', t0))
+      .filter((event) => event.payload.instance_id === ids.get(standby))
+      .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))[0]
+    if (!secondOutage) throw new Error('D3 V-12 no second outage event')
+    await haScript('rejoin.sh', standby)
+    const rejoinedAgain = new Date()
+    await expect
+      .poll(
+        async () =>
+          (await unreachableEpisodes(api, ids.get(standby) ?? '', t0))[1]?.state ?? 'none',
+        { timeout: 120_000, intervals: [5_000], message: 'D3 V-12 the second episode resolves' },
+      )
+      .toBe('resolved')
+    const secondEpisode = (await unreachableEpisodes(api, ids.get(standby) ?? '', t0))[1]
+    if (!secondEpisode) throw new Error('D3 V-12 no second episode')
+    expectPromptClose(
+      'D3 V-12 second episode',
+      rejoinedAgain,
+      secondOutage.ts,
+      Date.parse(secondEpisode.resolved_at ?? ''),
+    )
+    await expectHealthy(api, page, ROLE_WAIT + 60_000)
+    expect(
+      await inactiveSlots(standby),
+      'D3 V-6 the twice rejoined node holds no inactive slot',
+    ).toBe(0)
     await expect
       // O-9: after a reconnect the agent resumes the receiver check up to ~2 min later, and the
       // edge returns with its first reading.
