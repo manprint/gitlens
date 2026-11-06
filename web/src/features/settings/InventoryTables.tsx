@@ -11,8 +11,9 @@ import { EmptyState, ErrorState } from '@/components/state'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
-import { formatPostgresVersion, formatTimestamp } from '@/lib/format'
+import { formatCountOf, formatPostgresVersion, formatTimestamp } from '@/lib/format'
 import { clusterLabel, hasDisplayName, instanceAddress, instanceLabel } from '@/lib/names'
+import { ruleText } from '@/lib/ruleText'
 import { matchesSearch, type SearchField } from '@/lib/tableControls'
 
 import { InstanceViewTabs } from '@/features/instance/InstancePanel'
@@ -34,7 +35,6 @@ const TIER_MEANING: Record<PermTier, string> = {
   T1: 'Also runs EXPLAIN to show query plans.',
   T2: 'Also cancels or ends other sessions.',
 }
-const tierRank: Record<PermTier, number> = { T0: 0, T1: 1, T2: 2 }
 
 function isAgentDownAlert(alert: Alert): boolean {
   if (alert.state !== 'firing') return false
@@ -311,7 +311,9 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
     <Section captionId="settings.permission-tiers" title="Permission tiers">
       <div className="grid gap-4 md:grid-cols-3">
         {permissionTiers.map((tier) => {
-          const unlockedRules = rules.filter((rule) => tierRank[rule.min_tier] <= tierRank[tier])
+          // A rule's minimum tier is the lowest tier at which it can run (internal/advisor); a
+          // higher tier runs it too, so each card lists only the rules that first need this tier.
+          const tierRules = rules.filter((rule) => rule.min_tier === tier)
           const instanceCount = instances.filter((instance) => instance.perm_tier === tier).length
           const actions =
             tier === 'T0'
@@ -319,11 +321,11 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
               : tier === 'T1'
                 ? [
                     'Run plan-only EXPLAIN on eligible targets.',
-                    'EXPLAIN ANALYZE is accepted when the target sets allow_explain_analyze; the interface offers it at T2 only.',
+                    'EXPLAIN ANALYZE, which runs the query, only when the target allows it in its own settings; the interface offers it at T2 only.',
                   ]
                 : [
                     'Cancel or terminate client backends on eligible targets.',
-                    'Signals remain subject to allow_signal on the target.',
+                    'The target must also allow sending signals to its sessions in its own settings.',
                   ]
 
           return (
@@ -344,25 +346,44 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
               </div>
               <div className="mt-3 text-sm min-[1600px]:mt-1.5 min-[1600px]:text-xs min-[1600px]:leading-4">
                 <strong className="min-[1600px]:mr-2 min-[1600px]:whitespace-nowrap min-[1600px]:after:content-[':']">
-                  Advisor rules unlocked
+                  Advisor rules that first need {tier}
                 </strong>
-                {unlockedRules.length > 0 ? (
-                  <ul
-                    className="mt-1 list-disc pl-5 min-[1600px]:inline min-[1600px]:list-none min-[1600px]:pl-0"
-                    // `list-none` drops the list role in Safari; keep it explicit.
-                    role="list"
-                  >
-                    {unlockedRules.map((rule) => (
-                      <li
-                        className="min-[1600px]:mr-2 min-[1600px]:inline-block min-[1600px]:whitespace-nowrap"
-                        key={rule.id}
+                {tierRules.length > 0 ? (
+                  <>
+                    <span className="min-[1600px]:mr-2">
+                      {formatCountOf(tierRules.length, 'rule')}
+                    </span>
+                    <details className="mt-1 min-[1600px]:inline">
+                      <summary className="text-primary cursor-pointer min-[1600px]:inline">
+                        Show the list
+                      </summary>
+                      <ul
+                        className="mt-1 list-disc space-y-0.5 pl-5"
+                        // `list-none` drops the list role in Safari; keep it explicit.
+                        role="list"
                       >
-                        {rule.id} ({rule.min_tier})
-                      </li>
-                    ))}
-                  </ul>
+                        {tierRules.map((rule) => {
+                          const text = ruleText(rule.id)
+                          return (
+                            <li key={rule.id}>
+                              {text === undefined ? null : `${text} `}
+                              <span
+                                className={`font-mono text-xs ${text === undefined ? '' : 'text-muted-foreground'}`}
+                              >
+                                {rule.id}
+                              </span>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </details>
+                  </>
                 ) : (
-                  <p className="text-muted-foreground mt-1">No rules returned by the catalogue.</p>
+                  <span className="text-muted-foreground mt-1">
+                    {tier === 'T0'
+                      ? 'No rules returned by the catalogue.'
+                      : `None: every rule runs without ${tier}.`}
+                  </span>
                 )}
               </div>
               <div className="mt-3 text-sm min-[1600px]:mt-1.5 min-[1600px]:text-xs min-[1600px]:leading-4">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatCount, formatIntegerString } from './count'
+import { formatCount, formatCountOf, formatIntegerString } from './count'
 
 describe('formatCount', () => {
   it.each([
@@ -26,5 +26,21 @@ describe('formatIntegerString', () => {
   it('returns a value that is not an integer as it is', () => {
     expect(formatIntegerString('1.5')).toBe('1.5')
     expect(formatIntegerString('')).toBe('')
+  })
+})
+
+describe('formatCountOf', () => {
+  it.each([
+    [0, '0 indexes'],
+    [1, '1 index'],
+    [2, '2 indexes'],
+    [1_234, '1,234 indexes'],
+  ])('%s', (value, expected) => {
+    expect(formatCountOf(value, 'index', 'indexes')).toBe(expected)
+  })
+
+  it('adds an s when no plural is given', () => {
+    expect(formatCountOf(1, 'statement')).toBe('1 statement')
+    expect(formatCountOf(3, 'statement')).toBe('3 statements')
   })
 })

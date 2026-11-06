@@ -105,7 +105,7 @@ describe('queries captions (CAPTION-PAGE)', () => {
     tiles.forEach(expectClearCard)
     const ranked = screen.getByRole('article', { name: 'Statements ranked' })
     expect(within(ranked).getByText('1')).toBeVisible()
-    expect(ranked).toHaveTextContent('1statements')
+    expect(ranked).toHaveTextContent(/1\s*statement(?!s)/)
     expect(ranked).toHaveTextContent('Ranks at most 200 statements.')
     expect(within(ranked).queryByText(/of 200 max/)).not.toBeInTheDocument()
   })

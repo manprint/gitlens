@@ -206,7 +206,8 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
     const partial = within(table).getByText('partial')
     expect(partial).toHaveClass('min-[1600px]:py-0')
     const flags = within(table).getByTitle('partial, unused')
-    expect(flags).toHaveClass('min-[1600px]:flex-nowrap')
+    // Whole badges only: the row stays one badge line and hides the overflow.
+    expect(flags).toHaveClass('min-[1600px]:max-h-5', 'min-[1600px]:overflow-hidden')
     expect(flags).toContainElement(partial)
     expect(within(table).getAllByRole('button', { name: /^Show details of/ })[0]).toHaveClass(
       'min-[1600px]:size-5',

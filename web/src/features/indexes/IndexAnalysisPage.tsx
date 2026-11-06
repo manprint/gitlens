@@ -212,7 +212,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
             className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
           />
           <NativeSelect
-            className="w-56 max-w-full pr-3 pl-8 min-[1600px]:h-8 min-[1600px]:w-44"
+            className="w-56 max-w-full pr-3 pl-8 min-[1600px]:h-8 min-[1600px]:w-52"
             id="index-db"
             onChange={(event) => setParam('db', event.target.value)}
             value={database}

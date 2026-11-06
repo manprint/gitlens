@@ -34,7 +34,7 @@ export function SortButtons({ label, direction, onChange }: SortButtonsProps) {
             aria-pressed={active}
             onClick={() => onChange(active ? null : dir)}
             className={cn(
-              'inline-flex size-6 items-center justify-center rounded transition-colors outline-none',
+              'inline-flex size-6 items-center justify-center rounded transition-colors outline-none min-[1600px]:size-5',
               'focus-visible:ring-ring/50 focus-visible:ring-[3px]',
               active
                 ? 'text-foreground bg-muted'

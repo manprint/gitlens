@@ -18,12 +18,16 @@ import { cn } from '@/lib/utils'
 
 import {
   FULLHD_CELL,
+  FULLHD_COLUMN_WIDTH,
   FULLHD_FIXED,
   FULLHD_HEADER_CELL,
   FULLHD_ROW,
   FULLHD_TABLE,
   FULLHD_TRUNCATE,
   FULLHD_BOX_CAP,
+  HEADER_CONTENT,
+  HEADER_LABEL,
+  headerMinRem,
 } from './fullhdTable'
 import { Caption } from './Caption'
 import { ColumnHint, InfoHint } from './InfoHint'
@@ -296,19 +300,25 @@ export function SimpleTable<T>({
                       className={cn(
                         'text-muted-foreground border-b px-3 py-2 text-left text-xs font-semibold tracking-wide whitespace-nowrap uppercase',
                         FULLHD_HEADER_CELL,
-                        column.width !== undefined && 'min-[1600px]:w-(--col-w)',
+                        column.width !== undefined && FULLHD_COLUMN_WIDTH,
                       )}
                       style={
                         column.width === undefined
                           ? undefined
-                          : ({ '--col-w': column.width } as CSSProperties)
+                          : ({
+                              '--col-w': column.width,
+                              '--col-min': `${headerMinRem(column.srOnlyHeader ? '' : column.header, column.sortValue !== undefined, column.help !== undefined)}rem`,
+                            } as CSSProperties)
                       }
                     >
                       {column.sortValue ? (
-                        <span className="inline-flex items-center gap-1">
+                        <span className={HEADER_CONTENT}>
                           <button
                             type="button"
-                            className="hover:text-foreground inline-flex items-center font-semibold tracking-wide uppercase"
+                            className={cn(
+                              'hover:text-foreground inline-flex items-center font-semibold tracking-wide uppercase',
+                              HEADER_LABEL,
+                            )}
                             onClick={() => toggleSort(column)}
                             {...(headerToggleName
                               ? {
@@ -334,12 +344,12 @@ export function SimpleTable<T>({
                           {hint}
                         </span>
                       ) : (
-                        <>
-                          <span className={column.srOnlyHeader ? 'sr-only' : undefined}>
+                        <span className={HEADER_CONTENT}>
+                          <span className={column.srOnlyHeader ? 'sr-only' : HEADER_LABEL}>
                             {column.header}
                           </span>
                           {hint}
-                        </>
+                        </span>
                       )}
                     </th>
                   )

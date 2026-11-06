@@ -54,7 +54,9 @@ describe('LagSection', () => {
   it('UI-CLUS-019 renders an empty state instead of a flat zero line', () => {
     renderWithProviders(<LagSection edges={[]} />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('No replication lag data in this range')
+    const empty = screen.getByRole('region', { name: 'No replication lag' })
+    expect(empty).toHaveTextContent('No replication lag data in this range')
+    expect(empty).toHaveTextContent('nothing to chart')
     expect(screen.queryByTestId('mock-echarts')).not.toBeInTheDocument()
   })
 

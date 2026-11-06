@@ -112,7 +112,7 @@ export function coverageText(coverage: SuggestionCoverage): string {
   const skipped = Object.entries(coverage.skipped)
     .filter(([, count]) => count > 0)
     .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
-  const head = `Analysed ${coverage.statements_analysed} of ${coverage.statements_considered} statements.`
+  const head = `Analysed ${coverage.statements_analysed} of ${coverage.statements_considered} ${coverage.statements_considered === 1 ? 'statement' : 'statements'}.`
   if (skipped.length === 0) return head
   const reasons = skipped.map(([reason, count]) => `${count} ${SKIP_LABELS[reason] ?? reason}`)
   return `${head} Skipped (a statement can have several reasons): ${reasons.join(', ')}.`

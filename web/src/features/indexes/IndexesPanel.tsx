@@ -15,7 +15,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { useFocusMissing } from '@/hooks/useSearch'
 import type { CaptionId } from '@/lib/captions'
-import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } from '@/lib/format'
+import {
+  formatBytes,
+  formatCount,
+  formatCountOf,
+  formatPercent,
+  formatRate,
+  formatRelative,
+} from '@/lib/format'
 import {
   foreignKeyGaps,
   groupByTable,
@@ -210,7 +217,7 @@ function indexColumns(
       id: 'flags',
       header: 'Flags',
       help: 'indexes.flags-column',
-      width: '13rem',
+      width: '15rem',
       cell: (row) => <RowBadges row={row} unusedWindow={unusedWindow} />,
     },
     {
@@ -229,8 +236,8 @@ function indexColumns(
       sortValue: (row) => sortValue(row, 'scanRate'),
       firstDirection: 'desc',
       className: 'whitespace-nowrap',
-      width: '6.5rem',
-      cell: (row) => (row.scanRate === null ? 'Unknown' : formatRate(row.scanRate)),
+      width: '9rem',
+      cell: (row) => scansText(row),
     },
     {
       id: 'cache',
@@ -247,11 +254,21 @@ function indexColumns(
       sortValue: (row) => sortValue(row, 'lastScan'),
       firstDirection: 'desc',
       className: 'whitespace-nowrap',
-      width: '10.5rem',
+      width: '12rem',
       truncate: (row) => lastScanText(row, now),
       cell: (row) => lastScanText(row, now),
     },
   ]
+}
+
+/**
+ * The scan rate. Without a rate the statistics can still say the index was never
+ * scanned since the reset (the Flags column says "never scanned"), so say that
+ * here instead of "Unknown".
+ */
+function scansText(row: IndexRow): string {
+  if (row.scanRate !== null) return formatRate(row.scanRate)
+  return row.lastScanStatus === 'never_since_reset' ? 'None since reset' : 'Unknown'
 }
 
 function lastScanText(row: IndexRow, now: Date): string {
@@ -349,7 +366,9 @@ function RowBadges({ row, unusedWindow }: { row: IndexRow; unusedWindow: string 
   const flags = rowFlags(row, unusedWindow)
   return (
     <div
-      className="flex flex-wrap gap-1 min-[1600px]:flex-nowrap min-[1600px]:overflow-hidden"
+      // From 1600 px one line high: a badge that does not fit wraps out of sight whole,
+      // never cut in half; the title lists every flag.
+      className="flex flex-wrap gap-1 min-[1600px]:max-h-5 min-[1600px]:overflow-hidden"
       title={flags.length === 0 ? undefined : flags.map((flag) => flag.label).join(', ')}
     >
       {flags.map((flag) => (
@@ -787,7 +806,7 @@ export function IndexesPanel({
     },
   ]
 
-  const incompleteText = `The list is incomplete. The agent reports only its busiest and largest indexes per database (checks.index_stats.top_n, 50 by default)${reported >= limit ? `, and this page shows at most ${limit}` : ''}. The counts cover the ${formatCount(reported)} indexes reported, not every index of the server. Raise top_n in the agent configuration to see more.`
+  const incompleteText = `The list is incomplete. The agent reports only its busiest and largest indexes per database (checks.index_stats.top_n, 50 by default)${reported >= limit ? `, and this page shows at most ${limit}` : ''}. The counts cover the ${formatCountOf(reported, 'index', 'indexes')} reported, not every index of the server. Raise top_n in the agent configuration to see more.`
   const pendingHeadline = `Unused-index check pending for ${formatCount(unusedPending)} ${unusedPending === 1 ? 'index' : 'indexes'}.`
   const pendingText = `${unusedRuleText(unusedWindow)} Until the advisor has a verdict, "never scanned" is the raw statistic: no scan since the statistics were last reset.`
   const blockedHeadline = `Unused-index check inconclusive for ${formatCount(unusedBlocked)} ${unusedBlocked === 1 ? 'index' : 'indexes'}.`
@@ -806,8 +825,8 @@ export function IndexesPanel({
             <strong>The list is incomplete.</strong> The agent reports only its busiest and largest
             indexes per database (<code>checks.index_stats.top_n</code>, 50 by default)
             {reported >= limit ? `, and this page shows at most ${limit}` : ''}. The counts cover
-            the {formatCount(reported)} indexes reported, not every index of the server. Raise{' '}
-            <code>top_n</code> in the agent configuration to see more.
+            the {formatCountOf(reported, 'index', 'indexes')} reported, not every index of the
+            server. Raise <code>top_n</code> in the agent configuration to see more.
           </PanelNote>
         ) : null}
         {unusedPending > 0 ? (
@@ -826,7 +845,7 @@ export function IndexesPanel({
   const heading: Record<IndexView, { title: string; description: string }> = {
     inventory: {
       title: 'Index inventory',
-      description: `${formatCount(rows.length)} indexes. Scan figures are per-second rates.`,
+      description: `${formatCountOf(rows.length, 'index', 'indexes')}. Scan figures are per-second rates.`,
     },
     summary: {
       title: 'Index summary',

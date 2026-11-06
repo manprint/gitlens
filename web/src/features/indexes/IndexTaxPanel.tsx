@@ -5,7 +5,7 @@ import { useInstanceTables } from '@/api/queries'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState } from '@/components/state'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
-import { formatBytes, formatCount, formatPercent, formatRate } from '@/lib/format'
+import { formatBytes, formatCount, formatCountOf, formatPercent, formatRate } from '@/lib/format'
 import type { IndexRow } from '@/lib/indexAnalysis'
 import { buildIndexTax, summariseIndexTax, type IndexTax } from '@/lib/indexTax'
 
@@ -208,7 +208,7 @@ export function IndexTaxPanel({
         {
           label: 'Index size',
           value: formatBytes(summary.indexBytes),
-          detail: `${formatCount(summary.indexCount)} indexes reported`,
+          detail: `${formatCountOf(summary.indexCount, 'index', 'indexes')} reported`,
         },
         {
           label: 'Unused size',

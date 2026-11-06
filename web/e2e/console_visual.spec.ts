@@ -3553,3 +3553,103 @@ test('VIS-CAP-004 no caption or description is cut by a line clamp or an ellipsi
   }
   expect(failures, failures.join('\n')).toEqual([])
 })
+
+test('VIS-CAP-005 every column header keeps its label, sort buttons and hint inside its own cell at 1920×1080', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 30_000))
+  const values = await routeValues(api)
+  const failures: string[] = []
+  for (const route of CAPTION_ROUTES) {
+    await test.step(route.path, async () => {
+      await openCaptionRoute(page, route, values)
+      const offenders = await page.evaluate(() => {
+        const out: string[] = []
+        const TOLERANCE = 1
+        // Union of the visible text and controls; screen-reader-only text is not content.
+        const contentBox = (cell: Element): DOMRect => {
+          const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
+          let left = Infinity
+          let right = -Infinity
+          let top = Infinity
+          let bottom = -Infinity
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            if ((node.textContent ?? '').trim() === '') continue
+            if (node.parentElement?.closest('.sr-only') != null) continue
+            const range = document.createRange()
+            range.selectNodeContents(node)
+            const rect = range.getBoundingClientRect()
+            left = Math.min(left, rect.left)
+            right = Math.max(right, rect.right)
+            top = Math.min(top, rect.top)
+            bottom = Math.max(bottom, rect.bottom)
+          }
+          for (const part of cell.querySelectorAll('button, svg')) {
+            if (part.closest('.sr-only') != null) continue
+            const rect = part.getBoundingClientRect()
+            left = Math.min(left, rect.left)
+            right = Math.max(right, rect.right)
+            top = Math.min(top, rect.top)
+            bottom = Math.max(bottom, rect.bottom)
+          }
+          return left === Infinity
+            ? new DOMRect(0, 0, 0, 0)
+            : new DOMRect(left, top, right - left, bottom - top)
+        }
+        const parts = (cell: Element): Element[] =>
+          [...cell.querySelectorAll('button, a, svg, [role="button"]')].filter(
+            (part) => part.closest('.sr-only') === null,
+          )
+        for (const row of document.querySelectorAll('main thead tr')) {
+          const cells = [...row.querySelectorAll<HTMLElement>('th')].filter(
+            (cell) => cell.getBoundingClientRect().width > 0,
+          )
+          cells.forEach((cell, index) => {
+            const box = cell.getBoundingClientRect()
+            const text = (cell.textContent ?? '').replace(/\s+/g, ' ').trim()
+            if (contentBox(cell).width === 0) return
+            const inside = (rect: DOMRect): boolean =>
+              rect.width === 0 ||
+              (rect.left >= box.left - TOLERANCE &&
+                rect.right <= box.right + TOLERANCE &&
+                rect.top >= box.top - TOLERANCE &&
+                rect.bottom <= box.bottom + TOLERANCE)
+            const content = contentBox(cell)
+            const own = [content, ...parts(cell).map((part) => part.getBoundingClientRect())]
+            if (!own.every(inside)) {
+              out.push(
+                `"${text}" outside its cell by ${Math.max(0, Math.round(content.right - box.right))}px right (cell ${Math.round(box.width)}px, content ${Math.round(content.width)}px)`,
+              )
+              return
+            }
+            const neighbours = [cells[index - 1], cells[index + 1]].filter(
+              (other): other is HTMLElement => other !== undefined,
+            )
+            for (const other of neighbours) {
+              const otherContent = contentBox(other)
+              const clash = own.some(
+                (rect) =>
+                  rect.width > 0 &&
+                  otherContent.width > 0 &&
+                  rect.left < otherContent.right - TOLERANCE &&
+                  rect.right > otherContent.left + TOLERANCE &&
+                  rect.top < otherContent.bottom - TOLERANCE &&
+                  rect.bottom > otherContent.top + TOLERANCE,
+              )
+              if (clash) {
+                out.push(
+                  `"${text}" overlaps the content of "${(other.textContent ?? '').replace(/\s+/g, ' ').trim()}"`,
+                )
+                break
+              }
+            }
+          })
+        }
+        return out
+      })
+      offenders.forEach((entry) => failures.push(`${route.path}: ${entry}`))
+    })
+  }
+  expect(failures, failures.join('\n')).toEqual([])
+})

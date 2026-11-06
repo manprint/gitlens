@@ -325,7 +325,7 @@ function InstanceStatements({
             className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
           />
           <NativeSelect
-            className="w-56 max-w-full pr-3 pl-8 min-[1600px]:h-7 min-[1600px]:w-36"
+            className="w-56 max-w-full pr-3 pl-8 min-[1600px]:h-7 min-[1600px]:w-48"
             id="slow-db"
             onChange={(event) => setDatabase(event.target.value)}
             value={database ?? ''}

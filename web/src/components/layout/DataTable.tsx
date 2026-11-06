@@ -26,12 +26,16 @@ import { cn } from '@/lib/utils'
 
 import {
   FULLHD_CELL,
+  FULLHD_COLUMN_WIDTH,
   FULLHD_FIXED,
   FULLHD_HEADER_CELL,
   FULLHD_ROW,
   FULLHD_TABLE,
   FULLHD_TRUNCATE,
   FULLHD_BOX_CAP,
+  HEADER_CONTENT,
+  HEADER_LABEL,
+  headerMinRem,
 } from './fullhdTable'
 import { Caption } from './Caption'
 import { ColumnHint, InfoHint } from './InfoHint'
@@ -315,17 +319,25 @@ function DataTableView<TData extends RowData>({
                         className={cn(
                           'text-muted-foreground border-b px-3 py-2 text-left text-xs font-semibold tracking-wide whitespace-nowrap uppercase',
                           FULLHD_HEADER_CELL,
-                          width !== undefined && 'min-[1600px]:w-(--col-w)',
+                          width !== undefined && FULLHD_COLUMN_WIDTH,
                         )}
                         style={
-                          width === undefined ? undefined : ({ '--col-w': width } as CSSProperties)
+                          width === undefined
+                            ? undefined
+                            : ({
+                                '--col-w': width,
+                                '--col-min': `${headerMinRem(label, column.getCanSort(), help !== undefined)}rem`,
+                              } as CSSProperties)
                         }
                       >
                         {header.isPlaceholder ? null : column.getCanSort() ? (
-                          <span className="inline-flex items-center gap-1">
+                          <span className={HEADER_CONTENT}>
                             <button
                               type="button"
-                              className="hover:text-foreground inline-flex items-center font-semibold tracking-wide uppercase transition-colors"
+                              className={cn(
+                                'hover:text-foreground inline-flex items-center font-semibold tracking-wide uppercase transition-colors',
+                                HEADER_LABEL,
+                              )}
                               onClick={column.getToggleSortingHandler()}
                             >
                               {flexRender(column.columnDef.header, header.getContext())}
@@ -344,10 +356,12 @@ function DataTableView<TData extends RowData>({
                             {hint}
                           </span>
                         ) : (
-                          <>
-                            {flexRender(column.columnDef.header, header.getContext())}
+                          <span className={HEADER_CONTENT}>
+                            <span className={HEADER_LABEL}>
+                              {flexRender(column.columnDef.header, header.getContext())}
+                            </span>
                             {hint}
-                          </>
+                          </span>
                         )}
                       </th>
                     )

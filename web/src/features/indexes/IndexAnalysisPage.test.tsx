@@ -384,6 +384,43 @@ describe('IndexAnalysisPage', () => {
     expect(blocked).not.toContain('unused after')
   })
 
+  it('IDX-UI-013 an index without a scan rate says None since reset when it was never scanned, Unknown otherwise', async () => {
+    render([
+      index('never_idx', 'CREATE INDEX never_idx ON public.orders USING btree (a)', {
+        idx_scan_rate: null,
+        last_scan_status: 'never_since_reset',
+        last_scan_at: null,
+      }),
+      index('other_idx', 'CREATE INDEX other_idx ON public.orders USING btree (b)', {
+        idx_scan_rate: null,
+      }),
+    ])
+    await flushNetwork(30)
+
+    const table = screen.getByRole('table', { name: 'Indexes' })
+    const never = within(table).getByRole('row', { name: /never_idx/ })
+    const other = within(table).getByRole('row', { name: /other_idx/ })
+    expect(never).toHaveTextContent('never scanned')
+    expect(never).toHaveTextContent('None since reset')
+    expect(never).not.toHaveTextContent('Unknown')
+    expect(other).toHaveTextContent('Unknown')
+    expect(other).not.toHaveTextContent('None since reset')
+    expect(screen.getByText('2 indexes. Scan figures are per-second rates.')).toBeInTheDocument()
+  })
+
+  it('IDX-UI-014 one index reads 1 index, not 1 indexes', async () => {
+    render([ITEMS[0]])
+    await flushNetwork(30)
+
+    expect(screen.getByText('1 index. Scan figures are per-second rates.')).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Indexes reported' })).toHaveTextContent(
+      /1\s*index$/,
+    )
+    expect(screen.getByRole('article', { name: 'Indexes reported' })).not.toHaveTextContent(
+      'indexes',
+    )
+  })
+
   it('IDX-UI-006 says so when no index was reported', async () => {
     render([])
     await flushNetwork(30)

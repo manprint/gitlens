@@ -377,6 +377,11 @@ export function ActivitySection({
             <MetricTile
               captionId="activity.prepared-transactions"
               label="Prepared transactions"
+              unit={
+                preparedTransactions !== null && preparedTransactions !== undefined
+                  ? 'transactions'
+                  : undefined
+              }
               value={valueOrUnknown(preparedTransactions)}
             />
             <MetricTile

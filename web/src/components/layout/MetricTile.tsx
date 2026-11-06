@@ -61,7 +61,9 @@ export function MetricTile({
         <span className="text-foreground text-2xl font-semibold tracking-tight tabular-nums min-[1600px]:text-xl">
           {value ?? <Unknown />}
         </span>
-        {unit ? <span className="text-muted-foreground text-sm">{formatUnit(unit)}</span> : null}
+        {unit ? (
+          <span className="text-muted-foreground text-sm">{formatUnit(unit, value)}</span>
+        ) : null}
       </div>
       {status ? (
         <p

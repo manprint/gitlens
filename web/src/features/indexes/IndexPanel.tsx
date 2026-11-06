@@ -39,7 +39,7 @@ function StatStrip({ stats }: { stats: readonly PanelStat[] }) {
           title={[
             `${stat.label}:`,
             stat.value,
-            stat.unit === undefined ? undefined : formatUnit(stat.unit),
+            stat.unit === undefined ? undefined : formatUnit(stat.unit, stat.value),
             stat.detail,
           ]
             .filter((part) => part !== undefined && part !== '')
@@ -54,7 +54,7 @@ function StatStrip({ stats }: { stats: readonly PanelStat[] }) {
             </span>
             {stat.unit ? (
               <span className="text-muted-foreground text-sm min-[1600px]:text-xs">
-                {formatUnit(stat.unit)}
+                {formatUnit(stat.unit, stat.value)}
               </span>
             ) : null}
             {stat.detail ? (

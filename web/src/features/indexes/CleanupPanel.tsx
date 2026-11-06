@@ -314,6 +314,9 @@ export function CleanupPanel({
       </>
     ) : null
 
+  const writesUnmeasured =
+    summary.confirmed.count > 0 && summary.confirmed.writeRateUnknown >= summary.confirmed.count
+
   return (
     <IndexPanel
       actions={
@@ -348,13 +351,16 @@ export function CleanupPanel({
         },
         {
           label: 'Index writes saved',
-          value: formatRate(summary.confirmed.writeRate).replace(/\/s$/, ''),
-          unit: 'per second',
+          // No candidate has a measured write rate: a 0 would be a made-up figure.
+          value: writesUnmeasured
+            ? 'Not measured'
+            : formatRate(summary.confirmed.writeRate).replace(/\/s$/, ''),
+          ...(writesUnmeasured ? {} : { unit: 'per second' as const }),
           detail: [
-            summary.confirmed.writeRateUnknown > 0
+            summary.confirmed.writeRateUnknown > 0 && !writesUnmeasured
               ? `${formatCount(summary.confirmed.writeRateUnknown)} not measured`
               : null,
-            summary.provisional.count > 0
+            summary.provisional.count > summary.provisional.writeRateUnknown
               ? `+ ${formatRate(summary.provisional.writeRate).replace('/s', ' per second')} on raw counters`
               : null,
           ]

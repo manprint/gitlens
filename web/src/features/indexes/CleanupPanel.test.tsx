@@ -159,6 +159,21 @@ describe('CleanupPanel', () => {
     )
   })
 
+  it('CLEAN-UI-013 the writes-saved tile says Not measured, not 0 per second, when no write rate is known', async () => {
+    render({
+      items: [index('other_bad_idx', { relname: 'other', is_valid: false, definition: null })],
+    })
+    await flushNetwork(30)
+
+    const tile = screen.getByRole('article', { name: 'Index writes saved' })
+    expect(tile).toHaveTextContent('Not measured')
+    expect(tile).not.toHaveTextContent('per second')
+    expect(tile).not.toHaveTextContent(/\b0\b/)
+    expect(
+      within(screen.getByRole('table', { name: 'Cleanup candidates' })).getByText('Not measured'),
+    ).toBeInTheDocument()
+  })
+
   it('CLEAN-UI-003 expands a candidate to the drop, the rebuild and the checklist', async () => {
     render()
     await flushNetwork(30)

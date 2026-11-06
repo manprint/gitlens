@@ -152,7 +152,7 @@ function maintenanceColumn(
       return `${formatTimestamp(latest.iso, 'UTC')} (${latest.auto ? 'auto' : 'manual'})`
     },
     sortValue: (item) => latestMaintenance(item, manualKey, autoKey)?.ms ?? null,
-    width: '9.75rem',
+    width: '8.25rem',
     truncate: (item) => {
       const latest = latestMaintenance(item, manualKey, autoKey)
       return latest
@@ -292,7 +292,7 @@ const DATABASE_COLUMN: RelationColumn = {
   label: 'Database',
   render: (item) => textCell(item, 'datname'),
   sortValue: (item) => stringValue(item, 'datname'),
-  width: '8rem',
+  width: '7.5rem',
   truncate: (item) => textOf(stringValue(item, 'datname')),
 }
 
@@ -301,7 +301,7 @@ const OBSERVED_COLUMN: RelationColumn = {
   label: 'Observed',
   render: timestampCell,
   sortValue: (item) => stringValue(item, 'ts'),
-  width: '8rem',
+  width: '13rem',
   truncate: (item) => {
     const value = stringValue(item, 'ts')
     return value ? formatTimestamp(value, 'UTC') : ''
@@ -332,21 +332,21 @@ const TABLE_COLUMNS: RelationColumn[] = [
     label: 'Live tuples',
     render: (item) => countCell(item, 'n_live_tup'),
     sortValue: (item) => numberValue(item, 'n_live_tup'),
-    width: '9rem',
+    width: '7.5rem',
   },
   {
     key: 'dead_tuples',
     label: 'Dead tuples',
     render: (item) => countCell(item, 'n_dead_tup'),
     sortValue: (item) => numberValue(item, 'n_dead_tup'),
-    width: '9.25rem',
+    width: '7.5rem',
   },
   {
     key: 'dead_ratio',
     label: 'Dead ratio',
     render: (item) => percentCell(item, 'dead_ratio'),
     sortValue: (item) => numberValue(item, 'dead_ratio'),
-    width: '8.75rem',
+    width: '7.5rem',
   },
   {
     key: 'size',
@@ -360,14 +360,14 @@ const TABLE_COLUMNS: RelationColumn[] = [
     label: 'Sequential scans',
     render: (item) => rateCell(item, 'seq_scan_rate'),
     sortValue: (item) => numberValue(item, 'seq_scan_rate'),
-    width: '11.75rem',
+    width: '9.5rem',
   },
   {
     key: 'idx_scan_rate',
     label: 'Index scans',
     render: (item) => rateCell(item, 'idx_scan_rate'),
     sortValue: (item) => numberValue(item, 'idx_scan_rate'),
-    width: '9.25rem',
+    width: '7.75rem',
   },
   maintenanceColumn(
     'last_vacuum',
@@ -475,7 +475,7 @@ const BLOAT_MEASURE_COLUMNS: RelationColumn[] = [
     label: 'Real size',
     render: (item) => bytesCell(item, 'real_bytes'),
     sortValue: (item) => numberValue(item, 'real_bytes'),
-    width: '8rem',
+    width: '7.5rem',
   },
   {
     key: 'expected_bytes',

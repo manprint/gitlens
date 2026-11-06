@@ -7,11 +7,13 @@ import { seq } from '@/test/table'
 import { DataTable } from './DataTable'
 import {
   FULLHD_CELL,
+  FULLHD_COLUMN_WIDTH,
   FULLHD_FIXED,
   FULLHD_HEADER_CELL,
   FULLHD_ROW,
   FULLHD_TABLE,
   FULLHD_TRUNCATE,
+  headerMinRem,
 } from './fullhdTable'
 import { MetricTile } from './MetricTile'
 import { PageHeader } from './PageHeader'
@@ -77,10 +79,10 @@ describe('Full HD table layout (D26)', () => {
       const table = screen.getByRole('table', { name: 'Notes' })
       expect(table).toHaveClass('min-[1600px]:table-fixed')
       const name = screen.getByRole('columnheader', { name: /Name/ })
-      expect(name).toHaveClass('min-[1600px]:w-(--col-w)')
+      expect(name).toHaveClass(FULLHD_COLUMN_WIDTH)
       expect(name.style.getPropertyValue('--col-w')).toBe('12rem')
       expect(screen.getByRole('columnheader', { name: /Note/ })).not.toHaveClass(
-        'min-[1600px]:w-(--col-w)',
+        FULLHD_COLUMN_WIDTH,
       )
     })
 
@@ -129,6 +131,7 @@ describe('Full HD table layout (D26)', () => {
   it('FHD-005 every density class applies from 1600 px only (I-7)', () => {
     const added = [
       FULLHD_FIXED,
+      FULLHD_COLUMN_WIDTH,
       FULLHD_ROW,
       FULLHD_CELL,
       FULLHD_HEADER_CELL,
@@ -138,6 +141,47 @@ describe('Full HD table layout (D26)', () => {
     for (const name of added) expect(name).toMatch(/^min-\[1600px\]:/)
     // The base table classes are the ones the tables had before 15.1.
     expect(classesOf(FULLHD_TABLE)).toEqual(['w-full', 'border-collapse', 'text-sm'])
+  })
+
+  it('FHD-007 a column header never gets less than its longest word, the sort buttons and the hint', () => {
+    // Padding 1 rem, 0.5 rem per letter, 2.75 rem of sort buttons, 1.5 rem of hint.
+    expect(headerMinRem('Size', false, false)).toBe(3)
+    expect(headerMinRem('Size', true, false)).toBe(5.75)
+    expect(headerMinRem('Size', true, true)).toBe(7.25)
+    // Several words wrap: only the longest one counts.
+    expect(headerMinRem('Write amplification', true, true)).toBe(
+      headerMinRem('amplification', true, true),
+    )
+    // A slash is no break opportunity: `Writes/s` stays whole.
+    expect(headerMinRem('Index/table %', true, false)).toBe(
+      headerMinRem('Index/table', true, false),
+    )
+    expect(headerMinRem('', false, false)).toBe(1)
+    expect(FULLHD_COLUMN_WIDTH).toContain('var(--col-min)')
+  })
+
+  it('FHD-008 a header with a declared width carries its minimum, and its label may wrap', () => {
+    renderWithProviders(
+      <DataTable
+        ariaLabel="Hinted"
+        columns={[
+          { accessorKey: 'name', header: 'Name', meta: { width: '4rem' } },
+          { accessorKey: 'note', header: 'Write amplification', meta: { width: '7rem' } },
+        ]}
+        data={ROWS}
+        emptyState={<p>No rows</p>}
+      />,
+    )
+    const [name, note] = screen.getAllByRole('columnheader')
+    expect(name?.style.getPropertyValue('--col-w')).toBe('4rem')
+    expect(name?.style.getPropertyValue('--col-min')).toBe(
+      `${headerMinRem('Name', true, false)}rem`,
+    )
+    expect(note?.style.getPropertyValue('--col-min')).toBe(
+      `${headerMinRem('Write amplification', true, false)}rem`,
+    )
+    expect(classesOf(note?.className ?? '')).toContain(FULLHD_COLUMN_WIDTH)
+    expect(within(note!).getByText('Write amplification')).toHaveClass('whitespace-normal')
   })
 
   it('FHD-001 a table without width or truncation hints keeps the automatic layout', () => {

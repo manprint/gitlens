@@ -268,17 +268,42 @@ describe('SettingsPage', () => {
     }
   })
 
-  it('UI-SET-003 the tier summary lists what each tier unlocks', async () => {
+  it('UI-SET-003 each tier card lists only the rules that first need that tier', async () => {
     renderSettings({ route: '/?view=tiers' })
     await settleInitialQueries()
 
-    expect(screen.getAllByText('connections (T0)')).toHaveLength(3)
-    expect(screen.getAllByText('bloat (T1)')).toHaveLength(2)
-    expect(screen.getByText('locks (T2)')).toBeInTheDocument()
+    const [t0, t1, t2] = screen.getAllByRole('article')
+    // Each rule appears in exactly one card: the one of its minimum tier.
+    expect(screen.getAllByText('connections')).toHaveLength(1)
+    expect(screen.getAllByText('bloat')).toHaveLength(1)
+    expect(screen.getAllByText('locks')).toHaveLength(1)
+    expect(within(t0!).getByText('connections')).toBeInTheDocument()
+    expect(within(t0!).queryByText('bloat')).not.toBeInTheDocument()
+    expect(within(t1!).getByText('bloat')).toBeInTheDocument()
+    expect(within(t1!).queryByText('connections')).not.toBeInTheDocument()
+    expect(within(t2!).getByText('locks')).toBeInTheDocument()
+    expect(within(t2!).queryByText('bloat')).not.toBeInTheDocument()
+    expect(t0).toHaveTextContent(/Advisor rules that first need T0:?\s*1 rule/)
     expect(screen.getByText('Run plan-only EXPLAIN on eligible targets.')).toBeInTheDocument()
     expect(
       screen.getByText('Cancel or terminate client backends on eligible targets.'),
     ).toBeInTheDocument()
+  })
+
+  it('UI-SET-041 a tier no rule needs says so, and a rule shows its plain sentence before its id', async () => {
+    renderSettings({
+      advisorRules: [{ ...rules[0]!, id: 'index.unused' }],
+      route: '/?view=tiers',
+    })
+    await settleInitialQueries()
+
+    const [t0, t1, t2] = screen.getAllByRole('article')
+    expect(t0).toHaveTextContent('An index has had no scans in the observed history. index.unused')
+    expect(t1).toHaveTextContent('None: every rule runs without T1.')
+    expect(t2).toHaveTextContent('None: every rule runs without T2.')
+    expect(t1).not.toHaveTextContent('allow_signal')
+    expect(t2).not.toHaveTextContent('allow_signal')
+    expect(t1).not.toHaveTextContent('allow_explain_analyze')
   })
 
   it('UI-SET-036 the T1 card says the interface offers EXPLAIN ANALYZE only at T2', async () => {
@@ -287,7 +312,7 @@ describe('SettingsPage', () => {
 
     expect(
       screen.getByText(
-        'EXPLAIN ANALYZE is accepted when the target sets allow_explain_analyze; the interface offers it at T2 only.',
+        'EXPLAIN ANALYZE, which runs the query, only when the target allows it in its own settings; the interface offers it at T2 only.',
       ),
     ).toBeInTheDocument()
   })

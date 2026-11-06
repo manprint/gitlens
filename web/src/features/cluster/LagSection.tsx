@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 
 import { Degraded } from '@/components/state/Degraded'
+import { EmptyState } from '@/components/state/EmptyState'
 import { Unknown } from '@/components/state/Unknown'
 import { ChartCard } from '@/components/charts/ChartCard'
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
@@ -101,11 +102,10 @@ export function LagSection({
       <h2 id="replication-lag-heading">Replication lag</h2>
       {groups.length === 0 ? (
         <EmptyCaptioned ariaLabel="Replication lag" captionId="lag.edge">
-          <p role="status">
-            <Unknown reason="No replication edges were returned for this range." /> No replication
-            lag data in this range, so there is nothing to chart. Lag is recorded for each standby
-            that copies changes from a primary of this cluster.
-          </p>
+          <EmptyState
+            title="No replication lag"
+            description="No replication lag data in this range, so there is nothing to chart. Lag is recorded for each standby that copies changes from a primary of this cluster."
+          />
         </EmptyCaptioned>
       ) : (
         <div className="space-y-6">

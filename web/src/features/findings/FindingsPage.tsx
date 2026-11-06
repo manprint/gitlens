@@ -328,7 +328,7 @@ export function FindingsPage() {
       id="findings-search"
       label="Search findings"
       onChange={setSearch}
-      placeholder="Rule, title, object or evidence"
+      placeholder="Rule, title, object"
       value={q}
     />
   )

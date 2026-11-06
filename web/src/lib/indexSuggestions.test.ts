@@ -70,6 +70,15 @@ describe('indexSuggestions', () => {
     )
   })
 
+  it('SUGG-LIB-007 the coverage line says 1 statement, not 1 statements', () => {
+    expect(coverageText({ statements_considered: 1, statements_analysed: 1, skipped: {} })).toBe(
+      'Analysed 1 of 1 statement.',
+    )
+    expect(coverageText({ statements_considered: 0, statements_analysed: 0, skipped: {} })).toBe(
+      'Analysed 0 of 0 statements.',
+    )
+  })
+
   it('SUGG-LIB-006 words the coverage line with the skipped reasons, most frequent first', () => {
     expect(coverageText({ statements_considered: 5, statements_analysed: 5, skipped: {} })).toBe(
       'Analysed 5 of 5 statements.',

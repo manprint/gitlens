@@ -650,11 +650,17 @@ function sequenceColumns(): DataTableProps<Sequence>['columns'] {
       id: 'sequence',
       header: 'Sequence',
       accessorFn: (sequence) => `${sequence.schemaname}.${sequence.name}`,
-      meta: { truncate: true },
+      meta: { width: '20rem', truncate: true },
       cell: ({ row }) => (
-        <span className="inline-flex items-center gap-1">
-          {row.original.schemaname}.{row.original.name}
-          {row.original.cycle ? <Badge variant="outline">cycles</Badge> : null}
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="min-w-0 truncate">
+            {row.original.schemaname}.{row.original.name}
+          </span>
+          {row.original.cycle ? (
+            <Badge className="shrink-0" variant="outline">
+              cycles
+            </Badge>
+          ) : null}
         </span>
       ),
     },

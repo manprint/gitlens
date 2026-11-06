@@ -90,7 +90,7 @@ export function SearchEverythingBox({ instanceId }: Pick<SearchEverythingProps, 
       id="index-search"
       label="Search everything"
       onChange={setSearch}
-      placeholder="Indexes, tables, columns, queries"
+      placeholder="Search everything"
       value={q}
     />
   )

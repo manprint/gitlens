@@ -83,7 +83,7 @@ export const settingsCaptions = {
     unit: 'instances and rules',
     window: 'Current instances and the live advisor rule catalogue.',
     howToRead:
-      'Each card counts the instances in that tier and lists what the tier unlocks. A tier unlocks its own rules and those of the lower tiers. A tier only allows an action when the target also permits it; signals need allow_signal on the target.',
+      'Each card counts the instances in that tier and lists the advisor rules that first need it; a higher tier also runs every rule of the lower tiers. A tier only allows an action when the target also permits it in its own settings.',
   },
   'settings.inventory-agents': {
     what: 'One derived row per instance saying whether its agent is reporting; the server keeps no separate agent list.',

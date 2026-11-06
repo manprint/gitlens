@@ -105,6 +105,35 @@ describe('locks and activity captions', () => {
     expectAllTilesClear()
   })
 
+  it('CAPTION-PAGE-045 the prepared transactions tile names its noun, and an unknown figure carries none', () => {
+    const view = render(
+      <ActivitySection
+        now={NOW}
+        response={{ stale: false, metrics: { pg_prepared_xacts: [metric(0)] } }}
+      />,
+    )
+    expect(screen.getByRole('article', { name: 'Prepared transactions' })).toHaveTextContent(
+      /0\s*transactions$/,
+    )
+    view.unmount()
+
+    const one = render(
+      <ActivitySection
+        now={NOW}
+        response={{ stale: false, metrics: { pg_prepared_xacts: [metric(1)] } }}
+      />,
+    )
+    expect(screen.getByRole('article', { name: 'Prepared transactions' })).toHaveTextContent(
+      /1\s*transaction$/,
+    )
+    one.unmount()
+
+    render(<ActivitySection now={NOW} response={{ stale: false, metrics: {} }} />)
+    const unknown = screen.getByRole('article', { name: 'Prepared transactions' })
+    expect(unknown).not.toHaveTextContent(/\d/)
+    expect(unknown).toHaveTextContent(/^Prepared transactions—$/)
+  })
+
   it('CAPTION-PAGE-042 tiles stay clear without data and with a cut sample', () => {
     const empty = render(<ActivitySection now={NOW} response={{ stale: false, metrics: {} }} />)
     expect(expectCaptionedCards(empty.container)).toContain('activity.section')

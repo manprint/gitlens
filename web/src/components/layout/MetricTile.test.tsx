@@ -22,6 +22,14 @@ describe('MetricTile card contract (D31)', () => {
     expect(detail).toHaveClass('min-[1600px]:w-full')
   })
 
+  it('CARD-006 a figure of 1 shows the singular unit, any other the plural', () => {
+    const { rerender } = render(<MetricTile label="Suggestions" unit="indexes" value="1" />)
+    expect(screen.getByRole('article', { name: 'Suggestions' })).toHaveTextContent(/1\s*index$/)
+    expect(screen.getByRole('article', { name: 'Suggestions' })).not.toHaveTextContent('indexes')
+    rerender(<MetricTile label="Suggestions" unit="indexes" value="2" />)
+    expect(screen.getByRole('article', { name: 'Suggestions' })).toHaveTextContent(/2\s*indexes$/)
+  })
+
   it('CARD-002 renders the status as text with its tone', () => {
     render(
       <MetricTile label="Replication" status={{ tone: 'warn', text: 'Lagging' }} value="12 s" />,
