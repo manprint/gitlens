@@ -755,7 +755,18 @@ test('IND-LOCK a row lock held by A and awaited by B shows A as the root blocker
   await settle('Blocking tree shows A blocking B', BUDGET.activity, async () => {
     const a = await pidOf(LOCK_A)
     const b = await pidOf(LOCK_B)
-    if (a === null || b === null) return [`pg_stat_activity has no ${LOCK_A}/${LOCK_B} pair`]
+    if (a === null || b === null) {
+      // The response is still read, so a sabotaged run fails on the API and the tree too.
+      const sampled = ((await locksApi(id)).sessions ?? []).some(
+        (row) => row.application_name === LOCK_B,
+      )
+      const tree = await textOf(page.getByRole('tree', { name: 'Blocking lock tree' }))
+      return [
+        `pg_stat_activity has no ${LOCK_A}/${LOCK_B} pair`,
+        ...(sampled ? [] : [`API sample has no ${LOCK_B} session`]),
+        ...(tree.includes(LOCK_B) ? [] : [`the tree does not show ${LOCK_B}`]),
+      ]
+    }
     const problems: string[] = []
     const blockers = await query(`SELECT array_to_string(pg_blocking_pids(${b}), ',');`)
     // Exact: PostgreSQL itself says A blocks B.
@@ -904,6 +915,17 @@ test('IND-SLOW 20 x pg_sleep(2) appear in Slowest queries with 20 calls and a 2 
     await query(one, 'qa-slow')
     return ['the API does not list the statement yet']
   })
+  // The warm-up calls are counted too: the oracle is the delta from here, 20 exactly in
+  // PostgreSQL and at least 20 more in the API and the console.
+  const p0 = (await truth.statementCalls(like)).calls
+  const baselineRow = (
+    (
+      await pglens.get<Statements>(
+        `/api/v1/statements?instance_id=${encodeURIComponent(id)}&q=${marker}&limit=50`,
+      )
+    ).statements ?? []
+  ).find((entry) => entry.query_text?.includes(marker))
+  const c0 = baselineRow?.calls ?? 0
   await stimulate(() => query(one.repeat(SLOW_CALLS), 'qa-slow'), '')
 
   await settle('Slowest queries row', BUDGET.statStatements, async () => {
@@ -912,17 +934,18 @@ test('IND-SLOW 20 x pg_sleep(2) appear in Slowest queries with 20 calls and a 2 
     const truthMean = stats.calls === 0 ? 0 : stats.totalMs / stats.calls
     const within = (mean: number | null) =>
       mean !== null && Math.abs(mean - SLOW_MS) <= MEAN_TOLERANCE * SLOW_MS
-    // At least the 20 calls after the baseline; the mean may exceed 2000 ms by the statement's own overhead, 15 % at most (spec).
-    if (stats.calls < SLOW_CALLS + 1)
-      problems.push(`pg_stat_statements calls ${stats.calls}, want at least ${SLOW_CALLS + 1}`)
+    // Exactly the 20 stimulus calls since the baseline; the mean may exceed 2000 ms by the statement's own overhead, 15 % at most (spec).
+    if (stats.calls - p0 !== SLOW_CALLS)
+      problems.push(`pg_stat_statements calls ${stats.calls} - ${p0}, want +${SLOW_CALLS}`)
     if (!within(truthMean)) problems.push(`pg_stat_statements mean ${truthMean.toFixed(0)} ms`)
 
     const rows = await slowRows(page, marker)
     const row = rows[0]
     if (row === undefined) problems.push('no Slowest queries row for the statement')
     else {
-      // The window can never hold more calls than the server ran; the row must reach all 20.
-      if (row.calls < SLOW_CALLS || row.calls > stats.calls) problems.push(`UI calls ${row.calls}`)
+      // The window can never hold more calls than the server ran; the row must add all 20.
+      if (row.calls < c0 + SLOW_CALLS || row.calls > stats.calls)
+        problems.push(`UI calls ${row.calls}, want ${c0} + ${SLOW_CALLS}`)
       if (!within(row.meanMs)) problems.push(`UI mean ${row.meanMs} ms`)
     }
 
@@ -932,8 +955,8 @@ test('IND-SLOW 20 x pg_sleep(2) appear in Slowest queries with 20 calls and a 2 
     const listed = (response.statements ?? []).find((entry) => entry.query_text?.includes(marker))
     if (listed === undefined) problems.push('no API statements row')
     else {
-      if ((listed.calls ?? 0) < SLOW_CALLS || (listed.calls ?? 0) > stats.calls) {
-        problems.push(`API calls ${listed.calls}`)
+      if ((listed.calls ?? 0) < c0 + SLOW_CALLS || (listed.calls ?? 0) > stats.calls) {
+        problems.push(`API calls ${listed.calls}, want ${c0} + ${SLOW_CALLS}`)
       }
       if (!within(listed.mean_exec_time ?? null))
         problems.push(`API mean ${listed.mean_exec_time} ms`)

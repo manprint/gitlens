@@ -577,13 +577,19 @@ test('RDY-E2E-005 adding a notification channel to the server clears RDY-NOTIF-0
   const browser = consoleGuard(page, [{ url: /\/api\/v1\/session$/, status: 401 }])
   const begin = await start()
   const target = 'RDY-NOTIF-01'
+  // The channel value is never printed: only whether it is set.
+  const channelSet = async () =>
+    (await inspect(SERVER)).Config.Env.some(
+      (entry) =>
+        entry.startsWith(`${GOOGLE_CHAT_ENV}=`) && entry.trim().length > GOOGLE_CHAT_ENV.length + 1,
+    )
+  // Baseline either way: with no channel the drill adds a dummy one, with the stack's
+  // channel set (Google Chat test channel, 2026-11-06) it blanks the variable instead.
+  const configured = await channelSet()
   expect(
     has(begin.base, target),
-    `${target} present at baseline (no channel configured in the server environment)`,
-  ).toBe(true)
-  expect((await inspect(SERVER)).Config.Env.map((entry) => entry.split('=')[0])).not.toContain(
-    GOOGLE_CHAT_ENV,
-  )
+    `${target} present at baseline exactly when no channel is configured in the server environment`,
+  ).toBe(!configured)
 
   // A dummy address on a reserved host, assembled at run time; never a real secret.
   const dummy = [
@@ -603,32 +609,27 @@ test('RDY-E2E-005 adding a notification channel to the server clears RDY-NOTIF-0
       'services:',
       `  ${SERVER}:`,
       '    environment:',
-      `      ${GOOGLE_CHAT_ENV}: ${JSON.stringify(dummy)}`,
+      `      ${GOOGLE_CHAT_ENV}: ${JSON.stringify(configured ? '' : dummy)}`,
       '',
     ].join('\n'),
   )
+  const changed = configured ? withItem(begin.baseIds, target) : withoutItem(begin.baseIds, target)
   const restore = registerRestore('server environment', () => composeUp(SERVER))
   try {
-    // Control: nothing changed, the baseline item stays for the whole budget.
-    await holdPresence(target, true, BUDGET.readinessFlags, 'control')
+    // Control: nothing changed, the baseline state of the item holds for the whole budget.
+    await holdPresence(target, !configured, BUDGET.readinessFlags, 'control')
 
     await composeUp(SERVER, override)
-    expect(
-      (await inspect(SERVER)).Config.Env.map((entry) => entry.split('=')[0]),
-      'server has the channel variable',
-    ).toContain(GOOGLE_CHAT_ENV)
-    await waitIds(withoutItem(begin.baseIds, target), BUDGET.readinessFlags, 'channel added')
+    expect(await channelSet(), 'server channel variable toggled').toBe(!configured)
+    await waitIds(changed, BUDGET.readinessFlags, configured ? 'channel removed' : 'channel added')
     await assertUi(page)
 
-    // Sabotage: restore withheld, the item stays gone for the whole budget.
-    await holdPresence(target, false, BUDGET.readinessFlags, 'sabotage')
+    // Sabotage: restore withheld, the toggled state holds for the whole budget.
+    await holdPresence(target, configured, BUDGET.readinessFlags, 'sabotage')
 
     await restore()
-    expect(
-      (await inspect(SERVER)).Config.Env.map((entry) => entry.split('=')[0]),
-      'channel variable removed again',
-    ).not.toContain(GOOGLE_CHAT_ENV)
-    await waitIds(begin.baseIds, BUDGET.readinessFlags, 'channel removed')
+    expect(await channelSet(), 'server channel variable back to the baseline').toBe(configured)
+    await waitIds(begin.baseIds, BUDGET.readinessFlags, 'baseline again')
     await assertUi(page)
   } finally {
     try {

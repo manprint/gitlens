@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { expect, type Page } from '@playwright/test'
@@ -280,7 +281,8 @@ async function identity(): Promise<Identity> {
   )
   const agents = await pglensSql(`SELECT count(*) FROM agents WHERE revoked_at IS NULL;`)
   const started = await pglensSql(
-    `SELECT coalesce(max(agent_started_at)::text, '') FROM instances;`,
+    // Epoch milliseconds: timestamptz::text ends in "+00", which Date.parse rejects.
+    `SELECT coalesce((extract(epoch FROM max(agent_started_at)) * 1000)::bigint::text, '') FROM instances;`,
   )
   return {
     instances: rows === '' ? [] : rows.split('\n'),
@@ -290,7 +292,9 @@ async function identity(): Promise<Identity> {
 }
 
 async function metricsRows(): Promise<{ count: number; oldest: string }> {
-  const out = await pglensSql(`SELECT count(*) || '|' || coalesce(min(ts)::text, '') FROM metrics;`)
+  const out = await pglensSql(
+    `SELECT count(*) || '|' || coalesce((extract(epoch FROM min(ts)) * 1000)::bigint::text, '') FROM metrics;`,
+  )
   const [count = '0', oldest = ''] = out.split('|')
   return { count: Number(count), oldest }
 }
@@ -300,7 +304,12 @@ const ODOO_MODELS = ['res.partner', 'product.template', 'sale.order', 'crm.lead'
 
 async function odooSqlCounts(): Promise<number[]> {
   const out = await query(
-    ODOO_TABLES.map((table) => `SELECT count(*) FROM ${table}`).join(' UNION ALL ') + ';',
+    // One row per table in ODOO_TABLES order (UNION ALL alone does not guarantee the order).
+    'SELECT c FROM (' +
+      ODOO_TABLES.map((table, i) => `SELECT ${i} AS o, count(*) AS c FROM ${table}`).join(
+        ' UNION ALL ',
+      ) +
+      ') s ORDER BY o;',
   )
   return out.split('\n').map(Number)
 }
@@ -599,10 +608,9 @@ test('LIFE-AGENT-RESTART the coverage banner appears and completes, no new insta
     idBefore.instances,
   )
   expect(idAfter.agents, 'no duplicate agent').toBe(idBefore.agents)
-  expect(
-    Date.parse(idAfter.agentStartedAt.replace(' ', 'T')),
-    'agent_started_at moved forward',
-  ).toBeGreaterThan(Date.parse(idBefore.agentStartedAt.replace(' ', 'T')))
+  expect(Number(idAfter.agentStartedAt), 'agent_started_at moved forward').toBeGreaterThan(
+    Number(idBefore.agentStartedAt),
+  )
   expect(
     (await api.instances()).map((row) => row.instance_id).sort(),
     'same instances (API)',
@@ -649,7 +657,6 @@ test('LIFE-REBUILD the new build is served, migrations applied, history intact, 
   test.setTimeout(qaTimeout([BUDGET.rebuild], 2))
   const repo = process.env.PGLENS_REPO ?? resolve(process.cwd(), '..')
   const migrationsDir = join(repo, 'internal', 'store', 'migrations')
-  const distIndex = join(repo, 'internal', 'webui', 'dist', 'index.html')
   const migrationNumbers = existsSync(migrationsDir)
     ? readdirSync(migrationsDir)
         .map((name) => /^(\d+)_.*\.sql$/.exec(name)?.[1])
@@ -657,7 +664,6 @@ test('LIFE-REBUILD the new build is served, migrations applied, history intact, 
         .map(Number)
     : []
   expect(migrationNumbers.length, `migrations found in ${migrationsDir}`).toBeGreaterThan(0)
-  const treeIndexHash = existsSync(distIndex) ? sha256(readFileSync(distIndex, 'utf8')) : ''
 
   // Before.
   const startedAt = Date.now()
@@ -694,13 +700,29 @@ test('LIFE-REBUILD the new build is served, migrations applied, history intact, 
       description: `${imagesBefore[service].image === running.image ? 'identical to' : 'changed from'} the previous image (${running.image.slice(7, 19)})`,
     })
   }
-  const servedAfter = sha256(await servedIndex())
-  expect(
-    servedAfter === treeIndexHash || servedAfter !== servedBefore,
-    'the console index is the tree build or differs from the previous one',
-  ).toBe(true)
-  const asset = /src="(\/assets\/index-[^"]+\.js)"/.exec(await servedIndex())?.[1]
+  // The image builds the console itself (Dockerfile.server), so the tree's dist/index.html is no
+  // reference, and unchanged web sources rebuild to the same index. The oracle is the binary of
+  // the recreated container: its embedded console (go:embed keeps files verbatim) holds the
+  // script the served index references.
+  const served = await servedIndex()
+  test.info().annotations.push({
+    type: 'LIFE-REBUILD console index',
+    description: sha256(served) === servedBefore ? 'identical to the previous build' : 'changed',
+  })
+  const asset = /src="(\/assets\/index-[^"]+\.js)"/.exec(served)?.[1]
   expect(asset, 'the index references its script').toBeDefined()
+  const { stdout: serverCid } = await run('docker', [...composeArgs(), 'ps', '-q', SERVER])
+  const copyDir = mkdtempSync(join(tmpdir(), 'qa-rebuild-'))
+  try {
+    const binary = join(copyDir, 'pglens-server')
+    await run('docker', ['cp', `${serverCid.trim()}:/usr/local/bin/pglens-server`, binary])
+    expect(
+      readFileSync(binary).includes(Buffer.from(asset ?? '\0')),
+      'the recreated server binary embeds the served script',
+    ).toBe(true)
+  } finally {
+    rmSync(copyDir, { recursive: true, force: true })
+  }
   expect(await probe(`${baseUrl()}${asset ?? ''}`), 'the referenced script is served').toBe(200)
 
   // Migrations applied: the newest version in the database is the newest file of the tree.
@@ -714,10 +736,9 @@ test('LIFE-REBUILD the new build is served, migrations applied, history intact, 
   expect(historyAfter.count, 'metrics rows before <= after').toBeGreaterThanOrEqual(
     historyBefore.count,
   )
-  expect(
-    Date.parse(historyAfter.oldest.replace(' ', 'T')),
-    'oldest sample kept',
-  ).toBeLessThanOrEqual(Date.parse(historyBefore.oldest.replace(' ', 'T')))
+  expect(Number(historyAfter.oldest), 'oldest sample kept').toBeLessThanOrEqual(
+    Number(historyBefore.oldest),
+  )
   const seriesAfter = observed(await commitSeries(windowEnd - 60 * 60_000, windowEnd))
   expect(seriesAfter.length, 'API history before <= after').toBeGreaterThanOrEqual(
     seriesBefore.length,
@@ -987,10 +1008,14 @@ test('LIFE-ODOO-RESTART application sessions drop and return in the Application 
   await page.goto(`/instances/${enc(await instanceId())}/locks?view=application`)
   await expect(page.locator('[data-origin-table="application"]')).toBeVisible({ timeout: 30_000 })
   const before = await truthPids()
+  const ashBefore = (await truthSessions())
+    .filter((row) => row.application_name === 'pglens/ash')
+    .map((row) => row.pid)
   expect(before.application.length, 'Odoo holds application sessions (PostgreSQL)').toBeGreaterThan(
     0,
   )
   expect(before.pglens.length, 'pglens holds monitoring sessions').toBeGreaterThan(0)
+  expect(ashBefore, 'the dedicated pglens/ash session is open').toHaveLength(1)
   await until('console and API list the Odoo sessions', 20_000, async () => {
     const sample = await locksSample()
     const shown = await uiPids(page, 'application')
@@ -1045,8 +1070,19 @@ test('LIFE-ODOO-RESTART application sessions drop and return in the Application 
     const truth = await truthPids()
     const sample = await locksSample()
     const shown = await uiPids(page, 'pglens')
-    const same = (list: number[]) => list.join(',') === before.pglens.join(',')
-    return same(truth.pglens) && same(sample.pglens) && same(shown)
+    // The agent's pools open and close pglens sessions on their own (per-database pools churn),
+    // so "unchanged" means: the dedicated ASH session survived the Odoo restart, and the table
+    // matches PostgreSQL. The locks sample leaves out its own backend (internal/check/locks.go,
+    // pid <> pg_backend_pid()), so the API and the console miss at most that one session.
+    const sampled = (list: number[]) =>
+      list.every((pid) => truth.pglens.includes(pid)) && truth.pglens.length - list.length <= 1
+    // The one session the sample may miss is its own backend, never the ASH session, and the
+    // shared pool still holds sessions.
+    const ashKept = ashBefore.every(
+      (pid) => truth.pglens.includes(pid) && sample.pglens.includes(pid) && shown.includes(pid),
+    )
+    const shared = (await truthSessions()).some((row) => row.application_name === 'pglens/shared')
+    return ashKept && shared && sampled(sample.pglens) && sampled(shown)
       ? []
       : [
           `before ${ids(before.pglens)} PostgreSQL ${ids(truth.pglens)} API ${ids(sample.pglens)} console ${ids(shown)}`,

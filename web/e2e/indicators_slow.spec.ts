@@ -213,7 +213,7 @@ async function ensureQaSchema(): Promise<void> {
 test('IND-DEAD dead rows follow the table (appear after the updates, vanish after VACUUM) @indicators', async ({
   signedInPage: page,
 }) => {
-  test.setTimeout(qaTimeout([BUDGET.tables, BUDGET.tables]))
+  test.setTimeout(qaTimeout([BUDGET.activity, BUDGET.tables, BUDGET.activity, BUDGET.tables]))
   assertStimulusAllowed()
   const guard = consoleGuard(page)
   await page.setViewportSize({ width: 1920, height: 1080 })
@@ -229,6 +229,10 @@ test('IND-DEAD dead rows follow the table (appear after the updates, vanish afte
   const others = async () => (await tablesApi()).filter((item) => item.schemaname !== QA_SCHEMA)
   const before = new Map((await others()).map((item) => [key(item), item.n_dead_tup]))
   expect(before.size, 'control: the API lists the other tables').toBeGreaterThan(0)
+  expect(
+    tableOf(await tablesApi(), QA_SCHEMA, 't'),
+    'control: qa_tmp.t absent before the stimulus',
+  ).toBeUndefined()
   const growth = async () =>
     Math.max(0, ...(await others()).map((item) => item.n_dead_tup - (before.get(key(item)) ?? 0)))
 
@@ -310,7 +314,7 @@ test('IND-DEAD dead rows follow the table (appear after the updates, vanish afte
 test('IND-IDXUSE index scans of res_partner_pkey show in the history API and the drawer chart @indicators', async ({
   signedInPage: page,
 }) => {
-  test.setTimeout(qaTimeout([BUDGET.tables]))
+  test.setTimeout(qaTimeout([BUDGET.activity, BUDGET.tables, BUDGET.tables]))
   assertStimulusAllowed()
   const guard = consoleGuard(page)
   await page.setViewportSize({ width: 1920, height: 1080 })
@@ -524,8 +528,15 @@ test('IND-DB database size and table bytes follow a 200 MB table after an agent 
 test('IND-SUGG a hot unindexed column is suggested, and the suggestion goes once the index exists @indicators', async ({
   signedInPage: page,
 }) => {
-  const SEQ = [BUDGET.checkHourly, 300_000, BUDGET.statStatements, BUDGET.tables] as const
-  test.setTimeout(qaTimeout([...SEQ], 1))
+  // Two table_columns waits and two agent restarts (§4: n = restarts performed).
+  const SEQ = [
+    BUDGET.checkHourly,
+    300_000,
+    BUDGET.statStatements,
+    BUDGET.checkHourly,
+    BUDGET.tables,
+  ] as const
+  test.setTimeout(qaTimeout([...SEQ], 2))
   const startedAt = Date.now()
   assertStimulusAllowed()
   await assertLifecycleAllowed()
@@ -564,7 +575,8 @@ test('IND-SUGG a hot unindexed column is suggested, and the suggestion goes once
       (item) => item.schema === QA_SCHEMA && (item.table === tbl || item.table.endsWith(`.${tbl}`)),
     )
 
-  let restartedAt = Date.now()
+  // The restart is setup, not stimulus: it runs in both modes; sabotage withholds the table
+  // and the workload only, so a sabotaged run fails on the suggestion itself.
   if (!SABOTAGE) {
     await ensureQaSchema()
     // 50k rows (> SmallTableRows = 1000), no primary key, distinct values in `a`.
@@ -573,8 +585,8 @@ test('IND-SUGG a hot unindexed column is suggested, and the suggestion goes once
        INSERT INTO ${QA_SCHEMA}.${tbl} SELECT g, g % 100, md5(g::text) FROM generate_series(1, 50000) g;
        ANALYZE ${QA_SCHEMA}.${tbl};`,
     )
-    restartedAt = await restartAgent()
   }
+  let restartedAt = await restartAgent()
   await until(
     'table_columns ingested after the restart',
     () => tableColumnsSince(restartedAt),
@@ -631,7 +643,6 @@ test('IND-SUGG a hot unindexed column is suggested, and the suggestion goes once
     restartedAt = await restartAgent()
   }
   // The suggestion list only changes when table_columns reruns (hourly), hence the second restart.
-  // The contract counts one restart: the wait is capped by the time left in the test.
   await until(
     'table_columns ingested after the index',
     () => tableColumnsSince(restartedAt),
@@ -861,10 +872,11 @@ test('IND-NOTIF delivery: the agent_down notification reaches a configured chann
   const channels = await api.get<{ kind: string; configured: boolean }[]>(
     '/api/v1/notification-channels',
   )
-  test.skip(
-    !channels.some((channel) => channel.configured),
-    'not run: no notification channel configured (user deferral)',
-  )
+  // Required since the user configured the test channel (STATE §8, 2026-11-06): no skip.
+  expect(
+    channels.some((channel) => channel.configured),
+    'a notification channel is configured on the server',
+  ).toBe(true)
   await assertLifecycleAllowed()
   // No notifications API exists: delivered = a row with ok = true in the pglens database.
   // The `error` column is never read.
@@ -943,8 +955,9 @@ test('IND-IDXUSE-SLOW an unused 10+ MiB index gets its verdict only after window
   registerCleanup(async () => {
     // A killed or timed-out run before the verdict keeps the index so that a later run
     // resumes from slow-idx-created.json; remove it by hand (DROP SCHEMA qa_slow CASCADE)
-    // when the run is abandoned.
-    if (!done && !SABOTAGE) return
+    // when the run is abandoned. A sabotaged run created nothing and must not touch a real
+    // observation that may be running beside it.
+    if (SABOTAGE || !done) return
     await query(`DROP SCHEMA IF EXISTS ${SLOW_SCHEMA} CASCADE;`)
     await rm(slowFile(), { force: true })
   })
@@ -1020,6 +1033,7 @@ test('IND-IDXUSE-SLOW an unused 10+ MiB index gets its verdict only after window
   test.setTimeout(elapsed + Math.max(0, deadline - Date.now()) + 60_000)
 
   let early: Finding | undefined
+  let gateBroken: string | undefined
   const scanControl = () =>
     query(
       `SET enable_seqscan = off;
@@ -1035,8 +1049,17 @@ test('IND-IDXUSE-SLOW an unused 10+ MiB index gets its verdict only after window
       if (!SABOTAGE) await scanControl()
       const finding = await unusedFinding(index)
       if (Date.now() < verdictAfter) {
-        // A verdict before the window is annotated, not failed (D22b: PG >= 16 without
-        // stats_reset judges a never-scanned index at once).
+        // A verdict before the window is legitimate only on PostgreSQL's own statistics
+        // (D22b: PG >= 16 proves the window by last_idx_scan); one drawn from pglens's
+        // history means the window gate is broken.
+        if (finding && finding.state !== 'degraded') {
+          const source = finding.evidence?.observed_source
+          if (source !== 'postgres_stats') {
+            // until() retries thrown errors, so the poll ends here and the test fails below.
+            gateBroken = `verdict ${Math.round((Date.now() - createdAtMs) / 1000)} s after creation, before window.unused_index, from observed_source=${String(source)}`
+            return []
+          }
+        }
         if (finding && !early) {
           early = finding
           test.info().annotations.push({
@@ -1067,6 +1090,10 @@ test('IND-IDXUSE-SLOW an unused 10+ MiB index gets its verdict only after window
     deadline - Date.now(),
     [30_000],
   )
+  expect(
+    gateBroken,
+    'no verdict before window.unused_index except on PostgreSQL statistics',
+  ).toBeUndefined()
 
   // CONTROL: the scanned index never gets a verdict.
   expect(
