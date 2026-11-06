@@ -96,6 +96,11 @@ closed list in `src/lib/units.ts` (`TILE_UNITS`); anything else goes in
 `expectClearCard` (`src/test/clearCard.ts`) checks this in unit tests and the
 live specs `VIS-CAP-001..003` (`e2e/console_visual.spec.ts`) check every route.
 
+Three more contracts, all checked live at 1920×1080 by `VIS-CAP-004/005`:
+a caption fits two lines (put detail in `howToRead`, never in `what`); a
+column hint set through `help` stays inside its own `th`; every new advisor or
+alert rule id needs a sentence in `src/lib/ruleText.ts`, or its test fails.
+
 ## How to write a test here
 
 Choose the smallest applicable kind: **pure** for deterministic functions in
