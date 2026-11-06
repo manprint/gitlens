@@ -258,3 +258,29 @@ func TestEventSource_QueryErrorIsWrapped(t *testing.T) {
 	require.ErrorContains(t, err, "query event y")
 	require.ErrorIs(t, err, boom)
 }
+
+// TestHAV61RedundancyRuleIsAClusterAggregation (HA-V-6-1, GAP-5): the reduced
+// redundancy rule is served per cluster from members and fresh streams.
+func TestHAV61RedundancyRuleIsAClusterAggregation(t *testing.T) {
+	now := time.Unix(100000, 0).UTC()
+	q := &fakeQueryer{results: []*fakeRows{{rows: [][]any{
+		{int64(1), 1.0, now, true},
+		{int64(2), 0.0, now, false},
+	}}}}
+	got, err := (&metricSource{db: q, interval: 30 * time.Second}).Samples(t.Context(),
+		Rule{ID: "replica.redundancy_reduced", Scope: ScopeCluster, Metric: "pg_missing_standby_count", Comparator: GT, Threshold: 0}, now)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Nil(t, got[0].InstanceID)
+	require.Equal(t, 1.0, got[0].Value)
+	require.False(t, got[0].Inapplicable)
+	require.Equal(t, now.Add(-redundancyFreshWindow), got[0].TS, "a missing stream has been missing for the whole fresh window")
+	require.True(t, got[1].Inapplicable, "a single-member cluster has no redundancy to lose")
+	require.Equal(t, now, got[1].TS)
+	require.Equal(t, []any{now.Add(-redundancyMemberWindow), now.Add(-redundancyFreshWindow), now}, q.calls[0].args)
+	require.Equal(t, time.Hour, redundancyMemberWindow)
+	require.Equal(t, 60*time.Second, redundancyFreshWindow)
+
+	_, err = (&metricSource{interval: time.Minute}).Samples(t.Context(), Rule{ID: "replica.other", Scope: ScopeCluster, Metric: "x"}, now)
+	require.EqualError(t, err, "unsupported cluster alert rule aggregation: replica.other")
+}

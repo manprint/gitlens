@@ -29,6 +29,7 @@ const FORMATTERS: Readonly<Record<string, Formatter>> = {
   'replica.lag_high': seconds,
   'replica.all_standbys_lagging': seconds,
   'replica.no_sync_standby': (threshold) => `below ${number(threshold)} standbys`,
+  'replica.redundancy_reduced': (threshold) => `more than ${number(threshold)} missing standbys`,
   'conn.near_max': (threshold) => `above ${percent(threshold)} of max_connections`,
   'conn.idle_in_transaction': seconds,
   'txn.long_running': seconds,

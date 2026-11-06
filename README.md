@@ -944,7 +944,7 @@ every push — so they also carry the zero sample that resolves the alert:
 | `pglens_agent_clock_skew_seconds` | `clock_skew` | server, unsigned difference between the push's `sent_at` and the receive time |
 | `pglens_samples_dropped_rate` | `agent_buffer_full` | agent, samples per second lost to a full disk buffer since the previous push |
 
-The two cluster-scoped Tier 1 replication rules are aggregated across the
+The two cluster-scoped Tier 1 replication rules (seeded with the store) are aggregated across the
 cluster's standbys, not per standby: `replica.all_standbys_lagging` compares
 the *smallest* replay lag among them (so it fires only when every standby is
 above the threshold), and `replica.no_sync_standby` counts the standbys whose
@@ -952,6 +952,25 @@ above the threshold), and `replica.no_sync_standby` counts the standbys whose
 `replica.no_sync_standby` applies only to a cluster whose primary sets
 `synchronous_standby_names`; an asynchronous cluster is not evaluated, and a
 synchronous primary that has lost every standby fires with a count of zero.
+
+`replica.redundancy_reduced` (warning, cluster scope) fires when a cluster
+streams to fewer standbys than it has members: its derived metric
+`pg_missing_standby_count` is the number of instances of the cluster seen in
+the last hour (revoked agents excluded), less the primary, less the standbys
+with a stream reported in the last 60 seconds (a sender row of an upstream, or
+the standby's own receiver row while streaming). A down, disconnected or not
+yet rejoined standby, or an old primary left down after a failover, raises it
+about one to two minutes after the loss; it resolves when every member streams
+again. A member silent for more than one hour is no longer counted, so the
+alert resolves then even if that node is still down (`agent_down` keeps
+firing for it). A single-node cluster is not evaluated. Limits: the walsender
+state is not stored, so a standby still in `catchup`, a logical walsender
+and a WAL client such as `pg_receivewal` count as streaming and can hide a lost
+standby (`pg_basebackup` walsenders do not count); an instance re-registered
+under a new id counts twice for one hour. The 60-second freshness bound
+assumes the default 10-second replication check interval and a push delay or
+agent clock skew well below 50 seconds; beyond that the alert reads a live
+stream as missing.
 
 The per-instance replication rules (`replica.lag_high`) are evaluated per
 standby: each standby a primary reports is a separate alert, labelled with its

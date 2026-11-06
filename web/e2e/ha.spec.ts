@@ -721,6 +721,29 @@ async function haScript(script: string, ...args: string[]): Promise<RunResult> {
   return result
 }
 
+const REDUNDANCY = 'replica.redundancy_reduced'
+/** No episode of the rule open, pending included: a pending one would fire dated before t0. */
+async function expectNoOpen(api: APIRequestContext, rule: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const response = await api.get(`/api/v1/alerts?state=all&rule_id=${rule}`)
+        return response.ok()
+          ? ((await response.json()) as PglensAlert[]).filter((a) => a.state !== 'resolved').length
+          : -1
+      },
+      { timeout: 240_000, intervals: [10_000], message: `no ${rule} alert open` },
+    )
+    .toBe(0)
+}
+
+/** GAP-5: the alert of a lost stream is dated 60 s back, so its episode may start just before t0. */
+async function redundancyFiringSince(api: APIRequestContext, t0: Date): Promise<boolean> {
+  return (await alertsSince(api, REDUNDANCY, new Date(t0.getTime() - 30_000))).some(
+    (alert) => alert.state === 'firing' && alert.instance_id === null,
+  )
+}
+
 /** A cluster-scoped alert episode spans its lookback: start each drill outside the previous one. */
 async function expectNoFiring(api: APIRequestContext, rule: string): Promise<void> {
   await expect
@@ -922,6 +945,7 @@ test.describe.serial('HA-DRILL', () => {
     test.setTimeout(900_000)
     await expectHealthy(api, page, 60_000)
     await expectNoFiring(api, 'failover_detected')
+    await expectNoOpen(api, REDUNDANCY)
     const ids = await idsByAddr(api)
     const oldLeader = (await hactlStatus(page))?.leader ?? ''
     expect(oldLeader).not.toBe('')
@@ -977,15 +1001,15 @@ test.describe.serial('HA-DRILL', () => {
         'D2 the killed primary reads as down',
       )
       .toBe(false)
-    const health = await api
-      .get('/api/v1/clusters')
-      .then(async (r) => (await r.json()) as { health: string }[])
-    expect
-      .soft(
-        health[0]?.health,
-        'D2 instance down: cluster health not ok (no redundancy finding exists, GAP-5)',
-      )
-      .not.toBe('ok')
+    // GAP-5 (7.5.4): the killed old leader no longer streams; it stays down, so HA-DRILL-004
+    // checks the resolution.
+    await expect
+      .poll(async () => await redundancyFiringSince(api, t0), {
+        timeout: 180_000,
+        intervals: [5_000],
+        message: 'D2 V-6 replica.redundancy_reduced firing for the cluster',
+      })
+      .toBe(true)
     // The killed node stays down: HA-DRILL-004 brings it back.
     const status = await hactlStatus(page)
     expect(status?.leader).toBe(newLeader)
@@ -1054,6 +1078,7 @@ test.describe.serial('HA-DRILL', () => {
         { timeout: ROLE_WAIT, intervals: [5_000], message: 'D4 V-6 cluster health ok again' },
       )
       .toBe('ok')
+    await expectNoOpen(api, REDUNDANCY)
     expectOdoo(await probe(), 'D4', 5_000)
     test.info().annotations.push({ type: 'D4 load', description: JSON.stringify(await load) })
   })
@@ -1075,6 +1100,7 @@ test.describe.serial('HA-DRILL', () => {
     const slot = { 'odoo-db': 'ha_1', 'pg-ha-2': 'ha_2', 'pg-ha-3': 'ha_3' }[standby] ?? ''
     await expectNoFiring(api, 'instance_unreachable')
     await expectNoFiring(api, 'agent_down')
+    await expectNoOpen(api, REDUNDANCY)
     const t0 = new Date()
     const probe = odooProbe()
     await run('docker', ['stop', '-t', '30', `pglens-odoo-${standby}-1`])
@@ -1149,11 +1175,13 @@ test.describe.serial('HA-DRILL', () => {
         },
       )
       .toBe(true)
-    const health = ((await (await api.get('/api/v1/clusters')).json()) as { health: string }[])[0]
-      ?.health
-    expect
-      .soft(health, 'D3 instance down: cluster health not ok (no redundancy finding exists, GAP-5)')
-      .not.toBe('ok')
+    await expect
+      .poll(async () => await redundancyFiringSince(api, t0), {
+        timeout: 180_000,
+        intervals: [5_000],
+        message: 'D3 V-6 replica.redundancy_reduced firing for the cluster',
+      })
+      .toBe(true)
 
     await haScript('rejoin.sh', standby)
     await expectHealthy(api, page, ROLE_WAIT + 60_000)
@@ -1167,6 +1195,7 @@ test.describe.serial('HA-DRILL', () => {
         message: 'D3 V-3 the returned standby edge is high again',
       })
       .toBe('high')
+    await expectNoOpen(api, REDUNDANCY)
 
     // Lag under load: a 3 s apply delay on the returned standby plus a commit with an xid every
     // 0.2 s keeps replay behind (the delay applies to commit records; sparse commits let later

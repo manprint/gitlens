@@ -106,6 +106,8 @@ const ALERT_RULE_TEXT = {
   'replica.lag_high': 'A standby is more than 30 seconds behind its primary.',
   'replica.all_standbys_lagging': 'Every standby of the cluster is more than 30 seconds behind.',
   'replica.no_sync_standby': 'The cluster has no synchronous standby.',
+  'replica.redundancy_reduced':
+    'Fewer standbys stream than the cluster has members: a standby is down, disconnected or not yet rejoined; a member silent for over an hour is no longer counted.',
   'conn.near_max': 'More than 80% of the connections allowed by max_connections are in use.',
   'conn.idle_in_transaction': 'A session has been idle in a transaction for over 5 minutes.',
   'db.deadlock_rate': 'Deadlocks are occurring.',

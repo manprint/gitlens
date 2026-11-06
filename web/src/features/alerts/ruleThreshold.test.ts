@@ -20,6 +20,7 @@ describe('thresholdText', () => {
     ['db.deadlock_rate', 0, 'any deadlock'],
     ['db.deadlock_rate', 0.1, 'above 0.1 deadlocks per second'],
     ['replica.no_sync_standby', 1, 'below 1 standbys'],
+    ['replica.redundancy_reduced', 0, 'more than 0 missing standbys'],
     ['failover_detected', 0, 'on the event'],
     ['some.custom_rule', 7, '7'],
   ])('%s at %s reads %s', (id, threshold, text) => {

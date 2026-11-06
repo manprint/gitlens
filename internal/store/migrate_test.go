@@ -178,6 +178,7 @@ func TestMigrations_SeededRuleMetricsAreProduced(t *testing.T) {
 		// Derived by the alert engine itself, not emitted by any check.
 		"pg_replication_lag_seconds": {"internal/alert/source_sql.go"},
 		"pg_sync_standby_count":      {"internal/alert/source_sql.go"},
+		"pg_missing_standby_count":   {"internal/alert/source_sql.go"},
 		// Emitted by the agent's own host collector, not by a PostgreSQL check.
 		"host_disk_free_ratio": {"cmd/pglens-agent/run.go"},
 	}
@@ -185,6 +186,10 @@ func TestMigrations_SeededRuleMetricsAreProduced(t *testing.T) {
 
 	data, err := migrationFS.ReadFile("migrations/0006_alerts.sql")
 	require.NoError(t, err)
+	// 0029 seeds replica.redundancy_reduced (plan 005, 7.5.4).
+	more, err := migrationFS.ReadFile("migrations/0029_redundancy_rule.sql")
+	require.NoError(t, err)
+	data = append(data, more...)
 	seed := regexp.MustCompile(`\('([a-z0-9_.]+)',\s*'(?:critical|warning|info)',\s*'(?:instance|cluster|database)',\s*'([a-z0-9_]+)'`)
 	rows := seed.FindAllStringSubmatch(string(data), -1)
 	require.NotEmpty(t, rows, "no seeded rules found: the parser no longer matches the migration")
@@ -268,4 +273,18 @@ func metricEmittedByAnyCheck(t *testing.T, dir, metric string) bool {
 		}
 	}
 	return false
+}
+
+// TestHAV64MigrationSeedsRedundancyRule (HA-V-6-4, GAP-5): 0029 seeds the
+// reduced redundancy rule without overwriting an operator's edit, and its
+// derived metric is computed by the alert engine.
+func TestHAV64MigrationSeedsRedundancyRule(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0029_redundancy_rule.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "('replica.redundancy_reduced', 'warning', 'cluster', 'pg_missing_standby_count', 'gt', 0, 60,")
+	require.Contains(t, sql, "ON CONFLICT DO NOTHING;")
+	body, err := os.ReadFile(filepath.Join("..", "..", "internal", "alert", "source_sql.go"))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "replica.redundancy_reduced")
 }

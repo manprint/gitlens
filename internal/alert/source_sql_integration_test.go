@@ -401,3 +401,89 @@ func TestDLINT001_DeadlockSampleOutlivesLaterZeroScrapes(t *testing.T) {
 		require.Empty(t, got, "zero scrapes are not samples once the deadlock has left the window")
 	})
 }
+
+// TestHAV62RedundancyCountsMembersAgainstFreshStreams (HA-V-6-2, GAP-5).
+func TestHAV62RedundancyCountsMembersAgainstFreshStreams(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		pool := pg.Pool(t, "app", pgtest.RoleSuperuser)
+		ctx := context.Background()
+		createAlertTables(t, pool)
+		now := time.Now().UTC()
+		agent, revoked := uuid.New(), uuid.New()
+		_, err := pool.Exec(ctx, `INSERT INTO agents VALUES ($1, NULL), ($2, now())`, agent, revoked)
+		require.NoError(t, err)
+		// Cluster c: primary p, standbys a, b, plus a node gone for more than an hour.
+		type node struct {
+			id       uuid.UUID
+			cluster  int64
+			role     string
+			lastSeen time.Time
+		}
+		ids := map[string]uuid.UUID{}
+		var nodes []node
+		add := func(name string, cluster int64, role string, lastSeen time.Time) {
+			ids[name] = uuid.New()
+			nodes = append(nodes, node{ids[name], cluster, role, lastSeen})
+		}
+		// 1: all streaming. 2: one sender stale. 3: no sender, receiver fallback (unmonitored upstream).
+		// 4: receiver not streaming (NULL lag). 5: single member. 6: third standby gone > 1 h, fourth revoked.
+		// 7: b lost, a seen by its primary and by its own receiver with an unresolved upstream.
+		// 8: b gone, a pg_basebackup walsender in its place.
+		for _, c := range []int64{1, 2, 3, 4, 7, 8} {
+			add(redundancyNode(c, "p"), c, "primary", now)
+			add(redundancyNode(c, "a"), c, "standby", now)
+			add(redundancyNode(c, "b"), c, "standby", now)
+		}
+		add(redundancyNode(5, "p"), 5, "primary", now)
+		add(redundancyNode(6, "p"), 6, "primary", now)
+		add(redundancyNode(6, "a"), 6, "standby", now)
+		add(redundancyNode(6, "old"), 6, "standby", now.Add(-2*time.Hour))
+		add(redundancyNode(6, "revoked"), 6, "standby", now)
+		for _, n := range nodes {
+			owner := agent
+			if n.id == ids[redundancyNode(6, "revoked")] {
+				owner = revoked
+			}
+			_, err := pool.Exec(ctx, `INSERT INTO instances VALUES ($1, $2, $3, $4, $5)`, n.id, n.cluster, owner, n.role, n.lastSeen)
+			require.NoError(t, err)
+		}
+		sender := func(c int64, standby string, ts time.Time) {
+			_, err := pool.Exec(ctx, `INSERT INTO metrics_replication (ts, cluster_id, instance_id, slot_name, source, sync_state) VALUES ($1, $2, $3, $4, 'sender', 'async')`, ts, c, ids[redundancyNode(c, "p")], standby)
+			require.NoError(t, err)
+		}
+		receiver := func(c int64, standby string, upstream any, lag any) {
+			_, err := pool.Exec(ctx, `INSERT INTO metrics_replication (ts, cluster_id, instance_id, upstream_id, slot_name, source, replay_lag_sec) VALUES ($1, $2, $3, $4, 'slot_x', 'receiver', $5)`, now, c, ids[redundancyNode(c, standby)], upstream, lag)
+			require.NoError(t, err)
+		}
+		sender(1, "a", now.Add(-10*time.Second))
+		sender(1, "b", now.Add(-20*time.Second))
+		sender(2, "a", now.Add(-10*time.Second))
+		sender(2, "b", now.Add(-90*time.Second))
+		receiver(3, "a", uuid.New(), 0.1)
+		receiver(4, "a", uuid.New(), nil)
+		receiver(4, "b", uuid.New(), 0.2)
+		sender(6, "a", now.Add(-5*time.Second))
+		sender(7, "a", now.Add(-5*time.Second))
+		receiver(7, "a", nil, 0.1)
+		sender(8, "a", now.Add(-5*time.Second))
+		sender(8, "pg_basebackup_123", now.Add(-5*time.Second))
+
+		got, err := (&metricSource{db: pool, interval: 30 * time.Second}).Samples(ctx,
+			Rule{ID: "replica.redundancy_reduced", Scope: ScopeCluster, Metric: "pg_missing_standby_count", Comparator: GT, Threshold: 0}, now)
+		require.NoError(t, err)
+		byCluster := map[int64]Sample{}
+		for _, s := range got {
+			require.Nil(t, s.InstanceID)
+			byCluster[*s.ClusterID] = s
+		}
+		require.Len(t, byCluster, 8)
+		for c, want := range map[int64]float64{1: 0, 2: 1, 3: 1, 4: 1, 6: 0, 7: 1, 8: 1} {
+			require.False(t, byCluster[c].Inapplicable, "cluster %d", c)
+			require.Equal(t, want, byCluster[c].Value, "cluster %d", c)
+		}
+		require.True(t, byCluster[5].Inapplicable, "a single-member cluster has no redundancy to lose")
+	})
+}
+
+func redundancyNode(cluster int64, node string) string { return node + "@" + string(rune('0'+cluster)) }

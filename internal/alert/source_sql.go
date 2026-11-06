@@ -37,6 +37,15 @@ func NewEventSource(pool *pgxpool.Pool, interval time.Duration) Source {
 func (s *metricSource) Kind() string { return "metric" }
 func (s *eventSource) Kind() string  { return "event" }
 
+// redundancyMemberWindow is how long a silent member still counts for
+// replica.redundancy_reduced: the edge purge horizon of the server.
+// redundancyFreshWindow is how recent a stream must be to count: the server's
+// up threshold.
+const (
+	redundancyMemberWindow = time.Hour
+	redundancyFreshWindow  = 60 * time.Second
+)
+
 func lookback(interval time.Duration) time.Duration {
 	if interval <= 0 {
 		interval = defaultEngineInterval
@@ -83,7 +92,7 @@ func (s *metricSource) Samples(ctx context.Context, r Rule, now time.Time) ([]Sa
 	}
 	if r.Scope == ScopeCluster {
 		switch r.ID {
-		case "replica.all_standbys_lagging", "replica.no_sync_standby":
+		case "replica.all_standbys_lagging", "replica.no_sync_standby", "replica.redundancy_reduced":
 		default:
 			return nil, fmt.Errorf("unsupported cluster alert rule aggregation: %s", r.ID)
 		}
@@ -306,12 +315,45 @@ required AS (
 SELECT c.cluster_id, COALESCE(n.value, 0), COALESCE(n.ts, $2), c.cluster_id IN (SELECT cluster_id FROM required)
   FROM (SELECT cluster_id FROM required UNION SELECT cluster_id FROM counted) c
   LEFT JOIN counted n ON n.cluster_id = c.cluster_id`
+	case "replica.redundancy_reduced":
+		// pg_missing_standby_count, derived here (GAP-5): the members of the
+		// cluster seen within the hour, less the primary, less the standbys
+		// with a fresh stream. A sender row proves a stream whatever its lag
+		// (PostgreSQL reports NULL time lag for a caught-up idle standby); a
+		// receiver row only while streaming, since the receiver check nulls
+		// its lag otherwise. greatest() and not a sum: a receiver whose
+		// upstream did not resolve would count again beside its primary's
+		// sender row and hide a loss. walsender state is not stored, so a
+		// standby in catchup counts as streaming; pg_basebackup does not.
+		query = `WITH members AS (
+  SELECT i.cluster_id, count(*) AS n
+    FROM instances i
+    JOIN agents a ON a.agent_id = i.agent_id
+   WHERE i.last_seen >= $1 AND a.revoked_at IS NULL
+   GROUP BY i.cluster_id
+), fresh AS (
+  SELECT cluster_id, instance_id, slot_name, ` + store.ReplicationSourceSQL + ` AS src, replay_lag_sec
+    FROM metrics_replication
+   WHERE ts >= $2
+), streaming AS (
+  SELECT cluster_id,
+         greatest(count(DISTINCT (instance_id, slot_name)) FILTER (WHERE src = 'sender' AND slot_name NOT LIKE 'pg_basebackup%'),
+                  count(DISTINCT instance_id) FILTER (WHERE src = 'receiver' AND replay_lag_sec IS NOT NULL)) AS n
+    FROM fresh
+   GROUP BY cluster_id
+)
+SELECT m.cluster_id, greatest(m.n - 1 - COALESCE(s.n, 0), 0)::float8, $3::timestamptz, m.n >= 2
+  FROM members m
+  LEFT JOIN streaming s ON s.cluster_id = m.cluster_id`
 	default:
 		return nil, fmt.Errorf("unsupported cluster alert rule aggregation: %s", r.ID)
 	}
 	args := []any{now.Add(-lookback(s.interval))}
-	if r.ID == "replica.no_sync_standby" {
+	switch r.ID {
+	case "replica.no_sync_standby":
 		args = append(args, now)
+	case "replica.redundancy_reduced":
+		args = []any{now.Add(-redundancyMemberWindow), now.Add(-redundancyFreshWindow), now}
 	}
 	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
@@ -326,6 +368,11 @@ SELECT c.cluster_id, COALESCE(n.value, 0), COALESCE(n.ts, $2), c.cluster_id IN (
 		var applicable bool
 		if err := rows.Scan(&cluster, &value, &ts, &applicable); err != nil {
 			return nil, err
+		}
+		// A missing stream has been missing for at least the fresh window, so
+		// the episode is dated from its start, as the up rule's stale sample.
+		if r.ID == "replica.redundancy_reduced" && applicable && value > 0 {
+			ts = now.Add(-redundancyFreshWindow)
 		}
 		out = append(out, Sample{ClusterID: &cluster, Value: value, TS: ts, Inapplicable: !applicable})
 	}

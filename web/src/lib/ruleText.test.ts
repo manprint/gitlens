@@ -18,7 +18,8 @@ const FIXTURE_RULE_IDS = [
 describe('ruleText', () => {
   it('knows every advisor rule and every alert rule', () => {
     expect(ADVISOR_RULE_IDS).toHaveLength(72)
-    expect(ALERT_RULE_IDS).toHaveLength(18)
+    expect(ALERT_RULE_IDS).toHaveLength(19)
+    expect(ALERT_RULE_IDS).toContain('replica.redundancy_reduced')
   })
 
   it.each([...ADVISOR_RULE_IDS, ...ALERT_RULE_IDS, ...FIXTURE_RULE_IDS])(
