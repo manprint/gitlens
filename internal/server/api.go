@@ -622,28 +622,30 @@ func (a *API) assembleClusters(ctx context.Context, clusters []clusterListRow) (
 			})
 		}
 
+		lastSeenOf := make(map[uuid.UUID]time.Time, len(instanceRows[c.idDB]))
+		for _, row := range instanceRows[c.idDB] {
+			lastSeenOf[row.id] = row.lastSeen
+		}
 		topology := []topologyEdgeResp{}
 		for _, e := range edgeRows[c.idDB] {
 			edge := topologyEdgeResp{
-				From:       e.from.String(),
-				To:         e.to.String(),
-				Type:       e.edgeType,
-				Confidence: e.confidence,
+				From: e.from.String(),
+				To:   e.to.String(),
+				Type: e.edgeType,
 			}
+			var fromLastSeen *time.Time
+			if seen, ok := lastSeenOf[e.from]; ok {
+				fromLastSeen = &seen
+			}
+			edge.Confidence, edge.Note = liveEdge(e.confidence, fromLastSeen, now)
+			live := fromLastSeen != nil && isUp(*fromLastSeen, now)
 			if e.syncState.Valid {
 				syncState := e.syncState.String
 				edge.SyncState = &syncState
-				if syncState == "sync" {
+				// Only a live edge counts as a synchronous standby now.
+				if syncState == "sync" && live {
 					edgeSyncCount++
 				}
-			}
-			if e.confidence == "low" {
-				// A low-confidence edge is the standby's last-known upstream while
-				// its WAL receiver is not streaming (see wire.Edge.Confidence). The
-				// upstream is still a known instance: the pipeline drops an edge it
-				// cannot resolve.
-				note := "The standby is not streaming from this upstream right now; check connectivity"
-				edge.Note = &note
 			}
 			topology = append(topology, edge)
 		}

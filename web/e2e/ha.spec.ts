@@ -111,6 +111,7 @@ interface Edge {
   from: string
   to: string
   confidence: string
+  note?: string | null
 }
 
 interface ReplicationEdge {
@@ -1121,14 +1122,33 @@ test.describe.serial('HA-DRILL', () => {
         },
       )
       .toBe(true)
-    const topology = await api.get(`/api/v1/clusters/${cluster.cluster_id}/topology`)
-    const edges = ((await topology.json()) as { topology: Edge[] }).topology
-    expect
-      .soft(
-        edges.some((edge) => edge.from === ids.get(standby) && edge.confidence === 'high'),
-        'D3 V-3 the lost standby has no high-confidence edge',
+    // GAP-4 (7.5.3): a silent standby's edge is its last known upstream, served low.
+    const lostEdges = async () => {
+      const topology = await api.get(`/api/v1/clusters/${cluster.cluster_id}/topology`)
+      const edges = ((await topology.json()) as { topology: Edge[] }).topology
+      return edges.filter((edge) => edge.from === ids.get(standby))
+    }
+    await expect
+      .poll(
+        async () => {
+          // The edge stays (last known upstream): an empty list is not a pass.
+          const edges = await lostEdges()
+          return (
+            edges.length > 0 &&
+            edges.every(
+              (edge) =>
+                edge.confidence === 'low' &&
+                (edge.note ?? '').includes('has not reported for more than 60 s'),
+            )
+          )
+        },
+        {
+          timeout: STALE_WAIT,
+          intervals: [5_000],
+          message: 'D3 V-3 the lost standby has no high-confidence edge',
+        },
       )
-      .toBe(false)
+      .toBe(true)
     const health = ((await (await api.get('/api/v1/clusters')).json()) as { health: string }[])[0]
       ?.health
     expect
@@ -1138,6 +1158,15 @@ test.describe.serial('HA-DRILL', () => {
     await haScript('rejoin.sh', standby)
     await expectHealthy(api, page, ROLE_WAIT + 60_000)
     expectOdoo(await probe(), 'D3', 5_000)
+    await expect
+      // O-9: after a reconnect the agent resumes the receiver check up to ~2 min later, and the
+      // edge returns with its first reading.
+      .poll(async () => (await lostEdges()).map((edge) => edge.confidence).join(','), {
+        timeout: 180_000,
+        intervals: [5_000],
+        message: 'D3 V-3 the returned standby edge is high again',
+      })
+      .toBe('high')
 
     // Lag under load: a 3 s apply delay on the returned standby plus a commit with an xid every
     // 0.2 s keeps replay behind (the delay applies to commit records; sparse commits let later

@@ -78,7 +78,11 @@ func (t *TopologyAPI) handleTopology(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	erows, err := t.pool.Query(ctx,
-		`SELECT from_instance, to_instance, edge_type, sync_state, confidence FROM topology_edges WHERE tenant_id='default' AND cluster_id=$1 ORDER BY from_instance, to_instance`,
+		`SELECT e.from_instance, e.to_instance, e.edge_type, e.sync_state, e.confidence, i.last_seen
+		   FROM topology_edges e
+		   LEFT JOIN instances i ON i.tenant_id = e.tenant_id AND i.instance_id = e.from_instance
+		  WHERE e.tenant_id='default' AND e.cluster_id=$1
+		  ORDER BY e.from_instance, e.to_instance`,
 		cidDB)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query edges failed", err.Error())
@@ -87,30 +91,24 @@ func (t *TopologyAPI) handleTopology(w http.ResponseWriter, r *http.Request) {
 	defer erows.Close()
 
 	edges := []topologyEdgeResp{}
+	now := time.Now().UTC()
 	for erows.Next() {
 		var from, to uuid.UUID
 		var edgeType, confidence string
 		var syncState sql.NullString
-		if scanErr := erows.Scan(&from, &to, &edgeType, &syncState, &confidence); scanErr != nil {
+		var fromLastSeen *time.Time
+		if scanErr := erows.Scan(&from, &to, &edgeType, &syncState, &confidence, &fromLastSeen); scanErr != nil {
 			writeError(w, http.StatusInternalServerError, "scan edge failed", scanErr.Error())
 			return
 		}
 		edge := topologyEdgeResp{
-			From:       from.String(),
-			To:         to.String(),
-			Type:       edgeType,
-			Confidence: confidence,
+			From: from.String(),
+			To:   to.String(),
+			Type: edgeType,
 		}
+		edge.Confidence, edge.Note = liveEdge(confidence, fromLastSeen, now)
 		if syncState.Valid {
 			edge.SyncState = &syncState.String
-		}
-		if confidence == "low" {
-			// A low-confidence edge is the standby's last-known upstream while
-			// its WAL receiver is not streaming (see wire.Edge.Confidence). The
-			// upstream is still a known instance: the pipeline drops an edge it
-			// cannot resolve.
-			note := "The standby is not streaming from this upstream right now; check connectivity"
-			edge.Note = &note
 		}
 		edges = append(edges, edge)
 	}

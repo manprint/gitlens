@@ -137,11 +137,15 @@ components:
           type: string
           enum: [high, low]
           description: >-
-            high while the standby's WAL receiver is streaming or catching up;
-            low when it is not, and the edge points at its last-known upstream.
+            high while the standby's WAL receiver is streaming or catching up
+            and the standby has reported within the last 60 s; low when it is
+            not streaming or has not reported for more than 60 s, and the edge
+            points at its last-known upstream.
         note:
           type: [string, 'null']
-          description: Present on low-confidence edges.
+          description: >-
+            Present on low-confidence edges: why the edge is not live (not
+            streaming, or the standby has not reported for more than 60 s).
     Event:
       type: object
       required: [event_id, ts, type, cluster_id, instance_id, payload]

@@ -105,8 +105,8 @@ func TestTopologyAPI_HandleTopology_MockPool_EdgesAndEvents(t *testing.T) {
 	pool := &mockPool{
 		queryResults: []*mockRows{
 			{rows: [][]any{
-				{from1.String(), to1.String(), "streaming", "async", "high"},
-				{from2.String(), to2.String(), "streaming", nil, "low"},
+				{from1.String(), to1.String(), "streaming", "async", "high", time.Now()},
+				{from2.String(), to2.String(), "streaming", nil, "low", time.Now()},
 			}},
 			{}, {}, {}, // standby resolver: instances, edges, standby names
 			{}, // current sync states
@@ -317,4 +317,37 @@ func TestTopologyAPI_HandleReplication_QueryError(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// HA-V-3-5: a standby that stopped reporting serves its edge as low with the
+// silent note; a fresh reporter keeps high (handleTopology).
+func TestHAV35TopologyStaleReporter(t *testing.T) {
+	fresh, stale, never, to := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{
+				{fresh.String(), to.String(), "streaming", "async", "high", time.Now()},
+				{stale.String(), to.String(), "streaming", "async", "high", time.Now().Add(-2 * upThreshold)},
+				{never.String(), to.String(), "streaming", nil, "high", nil},
+			}},
+		},
+	}
+	topo := &TopologyAPI{pool: pool}
+	r := chi.NewRouter()
+	topo.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters/123/topology", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp topologyResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Topology, 3)
+	require.Equal(t, "high", resp.Topology[0].Confidence)
+	require.Nil(t, resp.Topology[0].Note)
+	for _, e := range resp.Topology[1:] {
+		require.Equal(t, "low", e.Confidence, e.From)
+		require.NotNil(t, e.Note, e.From)
+		require.Contains(t, *e.Note, "has not reported for more than 60 s")
+	}
 }

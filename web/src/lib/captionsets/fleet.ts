@@ -115,7 +115,7 @@ export const fleetCaptions = {
     unit: 'instances and replication edges',
     window: 'Latest edges; refreshed every 15 s.',
     howToRead:
-      'A dashed edge has low confidence: the standby is not streaming from that upstream right now. A banner appears when no primary or more than one primary is reported.',
+      'A dashed edge has low confidence: the standby is not streaming from that upstream right now, or has not reported for more than 60 s. A banner appears when no primary or more than one primary is reported.',
   },
   'topology.edges': {
     what: 'The same replication links as the graph, one row per link, with its type, sync state and confidence.',
@@ -124,7 +124,7 @@ export const fleetCaptions = {
     unit: 'replication edges',
     window: 'Latest edges; refreshed every 15 s.',
     howToRead:
-      'From is the standby and To the server it copies changes from. Low confidence means the standby is not streaming from that server right now.',
+      'From is the standby and To the server it copies changes from. Low confidence means the standby is not streaming from that server right now, or has not reported for more than 60 s.',
   },
   'cluster.events': {
     what: 'Failovers detected in this cluster, newest first and grouped by day; each row shows the old and the new primary.',

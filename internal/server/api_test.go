@@ -1197,3 +1197,51 @@ func TestAPI_MockPool_Statements_DefaultWindowIsTheLastHour(t *testing.T) {
 	to := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	require.Equal(t, to.Add(-time.Hour), windowStart("&to="+to.Format(time.RFC3339)))
 }
+
+// HA-V-3-5: in GET /clusters a stale reporter's edge is low with the silent
+// note, a fresh one stays high, and the sync count excludes the stale edge.
+func TestHAV35ClustersStaleReporter(t *testing.T) {
+	t.Parallel()
+	cid := pgtype.ClusterID(9035)
+	cidDB := store.ToDB(cid)
+	primary, live, silent := uuid.New(), uuid.New(), uuid.New()
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, nil, "manual"}}},
+			{rows: [][]any{
+				{cidDB, primary.String(), "10.0.0.1", 5432, "primary", 180000, "T1", time.Now(), nil},
+				{cidDB, live.String(), "10.0.0.2", 5432, "standby", 180000, "T1", time.Now(), nil},
+				{cidDB, silent.String(), "10.0.0.3", 5432, "standby", 180000, "T1", time.Now().Add(-2 * upThreshold), nil},
+			}},
+			{rows: [][]any{
+				{cidDB, live.String(), primary.String(), "streaming", "sync", "high"},
+				{cidDB, silent.String(), primary.String(), "streaming", "sync", "high"},
+			}},
+		},
+	}
+	api := &API{pool: pool}
+	r := chi.NewRouter()
+	api.RegisterRoutes(r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", http.NoBody)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp []clusterResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 1)
+	require.Len(t, resp[0].Topology, 2)
+	for _, e := range resp[0].Topology {
+		switch e.From {
+		case live.String():
+			require.Equal(t, "high", e.Confidence)
+			require.Nil(t, e.Note)
+		case silent.String():
+			require.Equal(t, "low", e.Confidence)
+			require.NotNil(t, e.Note)
+			require.Contains(t, *e.Note, "has not reported for more than 60 s")
+		default:
+			t.Fatalf("unexpected edge from %s", e.From)
+		}
+	}
+	require.Equal(t, 1, resp[0].SyncStandbyCount, "the silent standby's sync edge is not counted")
+}

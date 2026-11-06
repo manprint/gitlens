@@ -1337,11 +1337,11 @@ export interface components {
             /** @description sync or async; null when not yet known. */
             sync_state?: string | null;
             /**
-             * @description high while the standby's WAL receiver is streaming or catching up; low when it is not, and the edge points at its last-known upstream.
+             * @description high while the standby's WAL receiver is streaming or catching up and the standby has reported within the last 60 s; low when it is not streaming or has not reported for more than 60 s, and the edge points at its last-known upstream.
              * @enum {string}
              */
             confidence: "high" | "low";
-            /** @description Present on low-confidence edges. */
+            /** @description Present on low-confidence edges: why the edge is not live (not streaming, or the standby has not reported for more than 60 s). */
             note?: string | null;
         };
         Event: {

@@ -280,7 +280,9 @@ Cluster Detail brings together topology, replication lag, slot health,
 configuration drift, and the event timeline. A failover keeps the same
 `cluster_id`, so the cluster remains one continuous story. Lag charts name each
 end of an edge by its monitored instance's address, and a standby that is not
-monitored by the `application_name` its primary reports. Under each standby's
+monitored by the `application_name` its primary reports. A dashed topology
+edge is not live: the standby is not streaming, or has not reported for more
+than 60 seconds, and the edge shows its last known upstream. Under each standby's
 lag chart, "Replay lag (bytes)" shows how much WAL the standby has still to
 replay, as the primary reports it; it reads `Unknown` when the newest sample is
 missing or older than 60 seconds. The slot table lists
@@ -1686,7 +1688,7 @@ curl -s -b cookies.txt localhost:8080/api/v1/clusters | jq '.[0]'
 - `sync_standby_count` — number of synchronous replicas per `sync_state` (omitted if zero)
 - `max_replay_lag_seconds` — largest replay lag from all active standby replicas; omitted if no lag data or all are caught up
 - `topology` — replication graph edges (omitted if empty); see below
-- Low-confidence edges (the standby is not streaming from that upstream right now) carry `"note": "The standby is not streaming from this upstream right now; check connectivity"`
+- Low-confidence edges carry a `note`: `"The standby is not streaming from this upstream right now; check connectivity"` when its WAL receiver is not streaming, or `"The standby has not reported for more than 60 s; this is its last known upstream"` when the standby itself has gone silent
 
 ### `GET /api/v1/clusters/{id}/topology`
 
@@ -1726,7 +1728,7 @@ curl -s -b cookies.txt localhost:8080/api/v1/clusters/7381927364512345678/topolo
 - `from`, `to` — instance IDs (UUIDs as strings); `from` is the standby that reported the edge, `to` its upstream (the primary, or the standby it cascades from). Only standbys report edges, from their WAL receiver; an upstream address that matches no instance of the cluster is dropped, except that a standby whose agent also monitors exactly one primary is linked to that primary
 - `type` — replication type; currently always `streaming` for streaming replication
 - `sync_state` — `sync` (synchronous replica) or `async` (asynchronous); null if not yet known
-- `confidence` — `high` while the standby's WAL receiver is streaming or catching up, `low` when it is not and the edge points at the last upstream it reported; low-confidence edges carry a `note` field
+- `confidence` — `high` while the standby's WAL receiver is streaming or catching up and the standby has reported within the last 60 seconds (the `up` rule), `low` when it is not streaming or has gone silent, and the edge points at the last upstream it reported; low-confidence edges carry a `note` field saying which. A silent standby's edge is kept for up to 1 hour (then purged), so the topology still shows its last known upstream (drawn dashed); when the primary reports no sync state, a silent standby's edge no longer counts as a synchronous standby
 
 **Events:**
 - Listed here are `failover_detected` events only (see Events section for the complete event taxonomy)
