@@ -3657,3 +3657,79 @@ test('VIS-CAP-005 every column header keeps its label, sort buttons and hint ins
   }
   expect(failures, failures.join('\n')).toEqual([])
 })
+
+// 8.1: the lab runs at Tier 2 (pg_signal_backend granted on the primary, replicated to every
+// node) with allow_signal on its three targets since 7.5.7, so the signal gate is open end to end.
+test('T2-001 every instance is at T2, readiness drops RDY-T2-01, signal actions are offered', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop-fullhd', 'stimulus runs on desktop-fullhd only')
+  test.setTimeout(liveTimeout(0, 5 * 30_000))
+  const browserErrors = collectConsoleErrors(page)
+  interface Row {
+    instance_id: string
+    addr: string
+    perm_tier: string
+  }
+  let rows: Row[] = []
+  await expect
+    .poll(
+      async () => {
+        rows = (await (await api.get('/api/v1/instances')).json()) as Row[]
+        return rows.map((row) => row.perm_tier)
+      },
+      { timeout: 60_000, intervals: [3_000], message: 'every instance reports T2' },
+    )
+    .toEqual(['T2', 'T2', 'T2'])
+  for (const row of rows) {
+    const report = (await (
+      await api.get(`/api/v1/instances/${row.instance_id}/readiness`)
+    ).json()) as { items: { id: string }[] }
+    const ids = report.items.map((item) => item.id)
+    expect(ids, `${row.addr} readiness`).not.toContain('RDY-T2-01')
+    // RDY-SIG-01 is also absent without the agent_flags fact; HA-DRILL-005 proves the gate is open.
+    expect(ids, `${row.addr} readiness (allow_signal is on)`).not.toContain('RDY-SIG-01')
+    await page.goto(`/instances/${row.instance_id}`)
+    const tier = page
+      .locator('dt', { hasText: 'Permission tier' })
+      .locator('xpath=..')
+      .locator('dd')
+    await expect(tier, `${row.addr} header tier`).toHaveText('T2')
+  }
+
+  // A blocked pair on the primary: its holder offers both signals, enabled, with the gate note.
+  const instanceId = await pickInstance(api)
+  const pairName = 'qa-t2-signal'
+  let pair: Awaited<ReturnType<typeof lockPair>> | undefined
+  try {
+    pair = await lockPair('t2_signal', 1, pairName)
+    const holderPid = await query(
+      `SELECT pid FROM pg_stat_activity WHERE application_name = '${pairName}'
+         ORDER BY cardinality(pg_blocking_pids(pid)) LIMIT 1;`,
+    )
+    await page.goto(`/instances/${instanceId}/locks`)
+    const holder = page
+      .getByRole('treeitem')
+      .filter({ hasText: new RegExp(`PID ${holderPid}(?!\\d)`) })
+      .first()
+    await expect(holder).toBeVisible({ timeout: BUDGET.activity })
+    const signals = page.getByLabel(`Signal actions for PID ${holderPid}`).first()
+    await expect(signals.getByRole('button', { name: 'Cancel query' })).toBeEnabled({
+      timeout: 60_000,
+    })
+    await expect(signals.getByRole('button', { name: 'Terminate backend' })).toBeEnabled()
+    await expect(page.getByText('needs permission tier T2')).toHaveCount(0)
+    await expect(
+      page.getByText('Signals remain subject to allow_signal on the target.').first(),
+    ).toBeVisible()
+    await page.screenshot({ path: `${ARTIFACT_DIR}/t2-001-signal-actions.png` })
+  } finally {
+    await pair?.release()
+    await runCleanups()
+  }
+
+  await page.goto('/findings')
+  await expect(page.getByRole('heading', { name: /findings/i }).first()).toBeVisible()
+  browserErrors.assertClean()
+})

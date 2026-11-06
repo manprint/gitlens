@@ -1508,9 +1508,20 @@ test.describe.serial('HA-DRILL', () => {
     // session (odoo is one), so the sleeper runs as a plain login role.
     const SLEEPER = 'ha_drill_sleeper'
     const killSleepers = `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '${SLEEPER}';`
+    // A lab already at T2 (8.1) keeps its grant: the drill restores whatever it found.
+    const hadGrant =
+      (await psqlOn(
+        leader,
+        "SELECT pg_has_role('pglens_monitor', 'pg_signal_backend', 'USAGE');",
+      )) === 't'
+    const restoreGrant = hadGrant
+      ? 'GRANT pg_signal_backend TO pglens_monitor;'
+      : 'REVOKE pg_signal_backend FROM pglens_monitor;'
     registerCleanup(async () => {
       await psqlOn(standby, killSleepers).catch(() => null)
-      await psqlOn(leader, 'REVOKE pg_signal_backend FROM pglens_monitor;').catch(() => null)
+      await psqlOn(leader, restoreGrant).catch((error: unknown) => {
+        console.error(`HA-DRILL-005 cleanup could not run "${restoreGrant}":`, error)
+      })
       await psqlOn(leader, `DROP ROLE IF EXISTS ${SLEEPER};`).catch(() => null)
     })
     await psqlOn(leader, `CREATE ROLE ${SLEEPER} LOGIN; GRANT pg_signal_backend TO pglens_monitor;`)
@@ -1633,6 +1644,10 @@ test.describe.serial('HA-DRILL', () => {
     expect.soft(await isAlive(lateSleeper.pid), `${rejectedLabel} session alive`).toBe(true)
     await psqlOn(standby, killSleepers).catch(() => null)
     await lateSleeper.done
+    if (hadGrant) {
+      await psqlOn(leader, restoreGrant)
+      await standbyTier('t', `${standby} replays the restored grant`)
+    }
 
     const audit = await api.get(`/api/v1/instances/${instanceId}/command-audit`)
     expect.soft(audit.ok(), 'D5 command audit answers').toBe(true)
