@@ -1026,9 +1026,12 @@ test('IND-IDXUSE-SLOW an unused 10+ MiB index gets its verdict only after window
   const createdAtMs = Date.parse(record.created_at)
   const verdictAfter = SABOTAGE ? Date.now() : createdAtMs + windowMs
   // The deadline derives from the creation time, so a late start only waits what is left.
+  // pglens's observation starts at its first index sample (up to one tables interval after
+  // creation), and the sample one window later can land milliseconds short of it
+  // (observed_for_seconds = window - 1), so a full window needs one more sample.
   const deadline = SABOTAGE
     ? Date.now() + BUDGET.tables + BUDGET.findings
-    : createdAtMs + windowMs + BUDGET.tables + BUDGET.findings
+    : createdAtMs + windowMs + 2 * BUDGET.tables + BUDGET.findings
   const elapsed = Date.now() - testStart
   test.setTimeout(elapsed + Math.max(0, deadline - Date.now()) + 60_000)
 

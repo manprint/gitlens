@@ -294,6 +294,16 @@ visible. It labels measured, stale, unavailable, and truncated data; shows
 counter-reset gaps, host-metric availability, pending settings restarts,
 redacted `archive_command` values, and relation-budget notices.
 
+The Settings section lists the settings of the latest agent scrape, from
+`GET /api/v1/instances/{id}/settings` (`web/src/features/instance/SettingsSection.tsx`,
+`internal/server/api_settings.go`): name, value, unit, source, context, changed
+time and pending-restart state. The `autovacuum_*` settings are in the agent's
+allowlist (`internal/check/settings.go`) and show with the same columns. The
+table lists settings changed since the selected range start, while the
+durability summary always uses the full scrape. The Dead rows "Vacuum due"
+estimate is approximate when the settings are not reported
+(`web/src/features/indexes/DeadRowsPanel.tsx`).
+
 After an agent start, the four instance dashboards — Instance Detail,
 Wait-event analysis, Query Inspector, and Locks and Activity — show a data
 collection banner while some checks of the instance have no current result
@@ -329,6 +339,14 @@ every five minutes (tables and indexes). Every chart states its range and
 query step; empty buckets stay gaps, and a chart with too many of them for
 dashed markers names how many gaps or counter resets it holds.
 
+The **Host** section (`web/src/features/instance/HostCharts.tsx`) charts the
+agent's host readings over the selected range, sharing pointer and zoom:
+**CPU used (%)**, **Load average** (1, 5 and 15 minutes, with the CPU count
+marked), **Memory** and **Swap** (bytes), and **Filesystem** (used bytes and
+free %, of the PostgreSQL data directory). Filesystem needs the data directory
+mounted read-only at the same path in the agent container; without it a note
+replaces the chart. A host with no swap shows a note instead of the Swap chart.
+
 The relation tables show, per database, live and dead tuples, size, sequential
 and index scans per second, and the latest vacuum and analyze (whichever of
 the manual or automatic one is newer, labelled as such). Their budgets are the
@@ -343,7 +361,12 @@ the command when it is missing.
 
 #### Wait-event analysis
 
-The Wait-event analysis page charts sampled activity and supports drill-down
+The Wait-event analysis page charts sampled activity with one chart per wait
+group, in this order: **CPU**, **I/O**, **Locks and contention** (Lock,
+LWLock, BufferPin, Buffer), **Client and inter-process** (Client, IPC) and
+**Other waits** (Timeout, Activity, Extension, and unknown types). Each chart
+has its own y axis and legend, with one sentence per wait event type; empty
+groups are left out (`web/src/lib/ashGroups.ts`). It supports drill-down
 from wait-event type to wait event and query. Each drill-down level is
 filtered by the server, and the top-query list under a wait event ranks the
 queries seen in that wait event only. It reports under-sampling, a disabled
@@ -382,6 +405,18 @@ with clear empty, stale, and unavailable states. At T2, and only when
 `allow_signal` permits it, an operator can confirm cancellation or termination
 of a target client backend; the result is recorded in command audit.
 
+Sessions are split by origin into two tables, **Application sessions** and
+**pglens monitoring sessions** (`web/src/features/locks/SessionsTable.tsx`).
+The server classifies each session; the rule is in
+[docs/LIMITS.md](docs/LIMITS.md#17-session-origin-is-classified-by-name-and-role-not-by-intent).
+An older server that sends no origin keeps the single list. The connection
+summary (`web/src/features/locks/ConnectionSummary.tsx`) has tabs for counts
+and shares by origin, application, user, client, database and state. When the
+session sample is cut, its counts cover every client connection of the
+instance. Raw statement text is shown only when the agent opt-in
+`checks.locks.session_query_text` is `true` (default `false`); otherwise the
+normalised text is shown when `pg_stat_statements` has captured the statement.
+
 #### Advisor
 
 Advisor ranks findings and explains whether each rule is open, degraded, muted,
@@ -396,6 +431,12 @@ characters and keeps the term in the URL as `q`. Matches are highlighted.
 While a term is entered an All states button shows the muted and resolved
 matches too, and when the state filter hides every match the empty result
 offers Search all states.
+
+#### Monitoring readiness
+
+The console shows [monitoring readiness](docs/MONITORING_READINESS.md) as a
+banner on the instance pages, a badge on the fleet cards and a "Monitoring
+readiness" section (`web/src/features/readiness/`).
 
 #### Index analysis
 
@@ -2070,6 +2111,18 @@ PATCH  /api/v1/instances/{id}
 GET    /api/v1/instances/{id}/activity|databases|host|settings|tables|indexes|bloat|command-audit|coverage
 GET    /api/v1/instances/{id}/workload/series
 GET    /api/v1/instances/{id}/index-suggestions
+GET    /api/v1/instances/{id}/indexes/history
+GET    /api/v1/instances/{id}/tables/history
+GET    /api/v1/instances/{id}/triggers
+GET    /api/v1/instances/{id}/unindexed-foreign-keys
+GET    /api/v1/instances/{id}/extensions
+GET    /api/v1/instances/{id}/spatial-columns
+GET    /api/v1/instances/{id}/sequences
+GET    /api/v1/instances/{id}/partitioned-tables
+GET    /api/v1/instances/{id}/functions
+GET    /api/v1/instances/{id}/security-definer-functions
+GET    /api/v1/instances/{id}/logical-replication
+GET    /api/v1/instances/{id}/internals
 GET    /api/v1/instances/{id}/search
 GET    /api/v1/instances/{id}/readiness
 GET    /api/v1/readiness/summary
@@ -2086,6 +2139,8 @@ GET    /api/v1/settings/advisor-windows
 PUT    /api/v1/settings/advisor-windows
 GET    /api/v1/notification-channels
 POST   /api/v1/notification-channels/{kind}/test
+PUT    /api/v1/notification-channels/{kind}
+DELETE /api/v1/notification-channels/{kind}
 POST   /api/v1/instances/{id}/commands
 GET    /api/v1/commands/{id}
 GET    /api/v1/agents/{agent_id}/commands
