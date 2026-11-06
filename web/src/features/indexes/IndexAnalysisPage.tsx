@@ -6,6 +6,7 @@ import { useClusters, useInstanceIndexes } from '@/api/queries'
 import { useFindings } from '@/api/queries'
 import type { Cluster } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { StandbyStatsNote } from '@/components/StandbyStatsNote'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Button } from '@/components/ui/button'
@@ -71,6 +72,12 @@ function siblingServers(clusters: readonly Cluster[], instanceId: string): Sibli
     .map((instance) => ({ id: instance.instance_id, label: instanceLabel(instance) }))
 }
 
+function instanceRole(clusters: readonly Cluster[], instanceId: string): string | undefined {
+  return clusters
+    .flatMap((cluster) => cluster.instances)
+    .find((instance) => instance.instance_id === instanceId)?.role
+}
+
 /**
  * The page title. With a server picked, its actions hold the tab list, the
  * server and database selects and the freshness, on the title line from
@@ -96,9 +103,11 @@ interface AnalysisProps {
   instanceId: string
   /** The other servers of the same cluster. */
   siblings: readonly SiblingServer[]
+  /** The chosen server's role: a standby says its statistics are its own (V-10). */
+  role: string | null | undefined
 }
 
-function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps) {
+function InstanceIndexes({ serverControl, instanceId, siblings, role }: AnalysisProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const database = searchParams.get('db') ?? ''
   const tab = readTab(searchParams.get('tab'))
@@ -239,6 +248,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings }: AnalysisProps)
     <Tabs className="gap-6 min-[1600px]:gap-3" onValueChange={setTab} value={tab}>
       <IndexPageHeader actions={controls} />
       <SearchEverythingResults database={database} instanceId={instanceId} />
+      <StandbyStatsNote role={role} />
       {missing !== null ? (
         <div
           className="border-warning/40 bg-warning/10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-4 py-2 text-sm"
@@ -362,6 +372,7 @@ export function IndexAnalysisPage() {
           </div>
         }
         siblings={siblingServers(clustersQuery.data, instanceId)}
+        role={instanceRole(clustersQuery.data, instanceId)}
       />
     )
   }

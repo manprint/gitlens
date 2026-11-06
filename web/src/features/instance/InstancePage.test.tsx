@@ -169,6 +169,22 @@ describe('InstancePage', () => {
     await expectNoA11yViolations(document.body)
   })
 
+  it('HA-V-10-2 the relations section of a standby carries the standby statistics note', async () => {
+    renderPage(
+      makeInstance({ role: 'standby' }),
+      undefined,
+      [],
+      undefined,
+      `/instances/${INSTANCE_ID}?section=relations`,
+    )
+    await flushNetwork()
+    expect(
+      screen
+        .getAllByRole('note')
+        .filter((note) => /statistics are this standby's own/i.test(note.textContent ?? '')),
+    ).toHaveLength(1)
+  })
+
   it('UI-INST-003 renders no read-only banner for a primary', async () => {
     renderPage(makeInstance({ pg_version: 160002, role: 'primary' }))
     await settle()

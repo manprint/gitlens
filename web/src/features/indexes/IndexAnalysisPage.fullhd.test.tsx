@@ -5,6 +5,7 @@ import IndexAnalysisPage from './IndexAnalysisPage'
 import { DEFAULT_INDEX_VIEW, INDEX_VIEWS, readIndexView } from './indexViews'
 
 import { expectNoA11yViolations } from '@/test/a11y'
+import { STANDBY_STATS_NOTE } from '@/lib/standby'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { base as advisorWindows } from '@/test/fixtures/getAdvisorWindows'
 import { base as clusters } from '@/test/fixtures/getClusters'
@@ -114,6 +115,23 @@ const viewTab = (name: string | RegExp) =>
   within(screen.getByRole('tablist', { name: 'Index views' })).getByRole('tab', { name })
 
 describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
+  it('HA-V-10-4 a standby note takes one compact line with its full text in the title', async () => {
+    render()
+    server.use(
+      ok('getClusters', [
+        { ...clusters[0], instances: [{ ...clusters[0]!.instances[0], role: 'standby' }] },
+      ]),
+    )
+    const { unmount } = renderWithProviders(<IndexAnalysisPage />, { route: '/indexes' })
+    await flushNetwork(30)
+    const note = screen.getAllByTestId('standby-stats-note').at(-1)!
+    expect(note).toHaveAttribute('role', 'note')
+    expect(note).toHaveAttribute('title', STANDBY_STATS_NOTE)
+    for (const name of ['truncate', 'min-[1600px]:py-1', 'min-[1600px]:text-xs'])
+      expect(note.className.split(' ')).toContain(name)
+    unmount()
+  })
+
   it('FHD-APPLY-030 the Indexes tab shows one table, the inventory, on its default view', async () => {
     const { router } = render()
     await flushNetwork(30)

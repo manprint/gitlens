@@ -460,15 +460,28 @@ test.describe('HA-STATIC', () => {
     await expect(
       page.getByRole('main').getByRole('heading', { name: 'Tables and indexes' }).first(),
     ).toBeVisible({ timeout: 30_000 })
-    await expect.soft(standbyNote(page), 'GAP-1 standby note on Tables and indexes').toBeVisible({
+    await expect(standbyNote(page), 'GAP-1 standby note on Tables and indexes').toBeVisible({
       timeout: 10_000,
     })
-    for (const tab of ['indexes', 'suggestions', 'dead-rows', 'tax']) {
+    for (const tab of ['indexes', 'cleanup', 'suggestions', 'dead-rows', 'tax']) {
       await page.goto(`/indexes?instance=${standby.instance_id}&tab=${tab}`)
-      await expect.soft(standbyNote(page), `GAP-2 standby note on /indexes ${tab}`).toBeVisible({
+      await expect(standbyNote(page), `GAP-2 standby note on /indexes ${tab}`).toHaveCount(1, {
         timeout: 30_000,
       })
+      await expect(standbyNote(page)).toBeVisible()
     }
+    // A primary's statistics are the reference: no standby note there.
+    const primary = cluster.instances.find((row) => row.role === 'primary')
+    expect(primary).toBeDefined()
+    if (!primary) return
+    await page.goto(`/instances/${primary.instance_id}?section=relations`)
+    await expect(
+      page.getByRole('main').getByRole('heading', { name: 'Tables and indexes' }).first(),
+    ).toBeVisible({ timeout: 30_000 })
+    await expect(standbyNote(page)).toHaveCount(0)
+    await page.goto(`/indexes?instance=${primary.instance_id}`)
+    await expect(page.getByRole('tab', { name: 'Indexes' })).toBeVisible({ timeout: 30_000 })
+    await expect(standbyNote(page)).toHaveCount(0)
   })
 })
 

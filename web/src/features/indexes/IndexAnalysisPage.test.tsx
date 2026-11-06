@@ -101,6 +101,43 @@ function renderPage(items: unknown[], truncated: boolean) {
 }
 
 describe('IndexAnalysisPage', () => {
+  it('HA-V-10-3 a standby carries one statistics note on every tab, a primary none', async () => {
+    const standbyNotes = () =>
+      screen
+        .queryAllByRole('note')
+        .filter((note) => /statistics are this standby's own/i.test(note.textContent ?? ''))
+    server.use(
+      ok('getClusters', [
+        {
+          ...clusters[0],
+          instances: [{ ...clusters[0]!.instances[0], role: 'standby' }],
+        },
+      ]),
+    )
+    const { router } = renderWithProviders(<IndexAnalysisPage />, { route: '/indexes' })
+    await flushNetwork(30)
+    for (const tab of ['indexes', 'cleanup', 'dead-rows', 'suggestions', 'tax']) {
+      await router.navigate(`/indexes?instance=${INSTANCE_ID}&tab=${tab}`)
+      await flushNetwork(30)
+      expect(standbyNotes(), tab).toHaveLength(1)
+      for (const panel of screen.queryAllByRole('tabpanel'))
+        expect(
+          within(panel)
+            .queryAllByRole('note')
+            .filter((note) => standbyNotes().includes(note)),
+        ).toHaveLength(0)
+    }
+    expect(screen.queryByText(/This server is part of a cluster/)).not.toBe(standbyNotes()[0])
+  })
+
+  it('HA-V-10-3 a primary shows no standby statistics note', async () => {
+    render()
+    await flushNetwork(30)
+    expect(
+      screen.queryAllByRole('note').filter((note) => /standby's own/i.test(note.textContent ?? '')),
+    ).toHaveLength(0)
+  })
+
   it('IDX-UI-001 lists every index with its columns, method and size', async () => {
     render()
     await flushNetwork(30)

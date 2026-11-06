@@ -194,7 +194,13 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
     },
     host: () => <HostSection instanceId={instanceId} />,
     settings: () => <SettingsSection instanceId={instanceId} />,
-    relations: () => <RelationsSection currentTier={instance.perm_tier} instanceId={instanceId} />,
+    relations: () => (
+      <RelationsSection
+        currentTier={instance.perm_tier}
+        instanceId={instanceId}
+        role={instance.role}
+      />
+    ),
     catalog: () => <CatalogSection instanceId={instanceId} />,
     logical: () => <LogicalReplicationSection instanceId={instanceId} />,
     internals: () => <InternalsSection instanceId={instanceId} />,

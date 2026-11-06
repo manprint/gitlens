@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import type { CaptionId, ColumnHelpId } from '@/lib/captions'
+import { StandbyStatsNote } from '@/components/StandbyStatsNote'
 
 import { DENSE_TABLE } from './denseTable'
 import { CaptionedBlock, InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
@@ -749,9 +750,12 @@ const RELATION_VIEWS: readonly InstanceView<RelationViewId>[] = [
 export function RelationsSection({
   instanceId,
   currentTier,
+  role,
 }: {
   instanceId: string
   currentTier: PermTier
+  /** The instance role: a standby says its statistics are its own (V-10). */
+  role?: string | null | undefined
 }) {
   const tablesQuery = useInstanceTables(instanceId, { limit: RELATION_LIMIT })
   const indexesQuery = useInstanceIndexes(instanceId, { limit: RELATION_LIMIT })
@@ -822,6 +826,7 @@ export function RelationsSection({
         id="instance-relations"
         actions={<InstanceViewTabs label="Relation lists" views={RELATION_VIEWS} />}
       >
+        <StandbyStatsNote role={role} />
         <TabsContent value="tables">
           <RelationPanel {...panels.tables} />
         </TabsContent>

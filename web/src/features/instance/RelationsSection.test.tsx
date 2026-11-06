@@ -94,20 +94,36 @@ function renderRelations({
   indexes = response(),
   bloat = bloatResponse(),
   currentTier = 'T1',
+  role,
 }: {
   tables?: RelationResponse
   indexes?: RelationResponse
   bloat?: BloatResponse
   currentTier?: PermTier
+  role?: string
 } = {}) {
   server.use(ok('getInstanceTables', tables), ok('getInstanceIndexes', indexes), bloatByKind(bloat))
   return renderWithProviders(
-    <RelationsSection instanceId={INSTANCE_ID} currentTier={currentTier} />,
+    <RelationsSection instanceId={INSTANCE_ID} currentTier={currentTier} role={role} />,
     { route: `/instances/${INSTANCE_ID}` },
   )
 }
 
 describe('RelationsSection', () => {
+  it('HA-V-10-2 a standby says its statistics are its own, a primary does not', async () => {
+    const standbyNotes = () =>
+      screen
+        .queryAllByRole('note')
+        .filter((note) => /statistics are this standby's own/i.test(note.textContent ?? ''))
+    const { unmount } = renderRelations({ role: 'standby' })
+    await settle()
+    expect(standbyNotes()).toHaveLength(1)
+    unmount()
+    renderRelations({ role: 'primary' })
+    await settle()
+    expect(standbyNotes()).toHaveLength(0)
+  })
+
   it('UI-INST-050 renders the shared truncation budget and configuration key', async () => {
     renderRelations({
       tables: response([item({ n_live_tup: 100, n_dead_tup: 10 })], { truncated: true }),

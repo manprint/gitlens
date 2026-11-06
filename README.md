@@ -293,6 +293,10 @@ Instance Detail scopes metrics by database and makes unmonitored databases
 visible. It labels measured, stale, unavailable, and truncated data; shows
 counter-reset gaps, host-metric availability, pending settings restarts,
 redacted `archive_command` values, and relation-budget notices.
+On a standby, the Tables and indexes section and every Index analysis tab
+carry one note: activity statistics (scans, row changes, dead rows,
+vacuums) are counted on each server, so they are the standby's own, while
+sizes, definitions and row estimates match the primary.
 
 The Settings section lists the settings of the latest agent scrape, from
 `GET /api/v1/instances/{id}/settings` (`web/src/features/instance/SettingsSection.tsx`,
