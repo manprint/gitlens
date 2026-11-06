@@ -575,7 +575,8 @@ evaluation: `window.unused_index` is the history `index.unused` needs, and
 stop being degraded. On PostgreSQL 16 and later an index never scanned since
 a statistics reset older than `window.unused_index`, or whose `last_idx_scan`
 is older than the window with no scan pglens recorded inside it, is judged at
-once, without that history (see [Advisor findings](#advisor-findings)).
+once, without that history, unless pglens saw the index being created (see
+[Advisor findings](#advisor-findings)).
 pglens's own index history is bounded by the retention of `metrics_indexes`
 (30 days by default): with a longer window, an index judged on that history
 alone stays degraded, and the reason names the window and the kept history;
@@ -1071,7 +1072,11 @@ How the rules read the collected data:
   candidate, and an index never scanned since a statistics reset older than
   the window (or at an unknown time), or last scanned before the window with
   no scan pglens recorded inside it, is a candidate at once, without waiting
-  for pglens's history. The finding's evidence carries `observed_source`
+  for pglens's history. An index created while pglens was already watching
+  (first sampled at least an hour after monitoring began and inside the kept
+  history) is the exception: PostgreSQL's statistics then cover only its own
+  short life, so it waits for pglens's history of it to span the window.
+  The finding's evidence carries `observed_source`
   (`pglens` or `postgres_stats`), `observed_for_seconds` (the longer of
   pglens's history and PostgreSQL's statistics, counted from the last scan
   when PostgreSQL recorded one) and `window_seconds`; a candidate never

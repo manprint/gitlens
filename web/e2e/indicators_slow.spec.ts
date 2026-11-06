@@ -1026,9 +1026,9 @@ test('IND-IDXUSE-SLOW an unused 10+ MiB index gets its verdict only after window
   const createdAtMs = Date.parse(record.created_at)
   const verdictAfter = SABOTAGE ? Date.now() : createdAtMs + windowMs
   // The deadline derives from the creation time, so a late start only waits what is left.
-  // pglens's observation starts at its first index sample (up to one tables interval after
-  // creation), and the sample one window later can land milliseconds short of it
-  // (observed_for_seconds = window - 1), so a full window needs one more sample.
+  // An index born under observation is judged on pglens's history of it, which starts at
+  // its first index sample (up to one tables interval after creation); the verdict then
+  // needs that history to span the window, read at the next index sample.
   const deadline = SABOTAGE
     ? Date.now() + BUDGET.tables + BUDGET.findings
     : createdAtMs + windowMs + 2 * BUDGET.tables + BUDGET.findings
@@ -1054,8 +1054,9 @@ test('IND-IDXUSE-SLOW an unused 10+ MiB index gets its verdict only after window
       if (Date.now() < verdictAfter) {
         // A verdict before the window is legitimate only on PostgreSQL's own statistics
         // (D22b: PG >= 16 proves the window by last_idx_scan); one drawn from pglens's
-        // history means the window gate is broken.
-        if (finding && finding.state !== 'degraded') {
+        // history means the window gate is broken. A verdict carries window_seconds even
+        // when degraded for unknown standby scans; the short-history placeholder does not.
+        if (finding?.evidence?.window_seconds !== undefined) {
           const source = finding.evidence?.observed_source
           if (source !== 'postgres_stats') {
             // until() retries thrown errors, so the poll ends here and the test fails below.

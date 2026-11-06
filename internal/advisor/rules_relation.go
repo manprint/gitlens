@@ -171,17 +171,39 @@ func lastScannedBefore(now time.Time, i IndexStat, window time.Duration) bool {
 // cannot be told apart (the counters are stored as rates and last_idx_scan
 // does not exist), so the instance's own history alone counts. When
 // PostgreSQL recorded a scan since the reset, its statistics prove non-use
-// only since that last scan, so the observation runs from it.
-func indexObservation(now time.Time, i IndexStat) Observation {
+// only since that last scan, so the observation runs from it. An index born
+// under observation (bornObserved) has pglens's history of it only.
+func indexObservation(now time.Time, i IndexStat, born bool) Observation {
 	firstSeen := now.Add(-time.Duration(i.HistoryDays * float64(24*time.Hour)))
 	var since *time.Time
-	if i.ScanTracked {
+	if i.ScanTracked && !born {
 		since = i.StatsReset
 		if i.LastScan != nil {
 			since = i.LastScan
 		}
 	}
 	return EffectiveObservation(firstSeen, since, now)
+}
+
+// newIndexSlack is how long after monitoring began, or after the edge of the
+// kept index history, pglens may first sample an index that already existed.
+const newIndexSlack = time.Hour
+
+// bornObserved reports whether the index was created while pglens observed the
+// instance: pglens first sampled it well after monitoring began and not at the
+// edge of the kept index history. PostgreSQL's statistics since their reset
+// then cover only the index's own short life, so they prove nothing about the
+// window, and pglens's history of the index is the whole observation. Without
+// a known monitoring start it reports false.
+func bornObserved(s *Snapshot, i IndexStat) bool {
+	if s.FirstSeen.IsZero() {
+		return false
+	}
+	first := s.Now.Add(-time.Duration(i.HistoryDays * float64(24*time.Hour)))
+	if first.Sub(s.FirstSeen) < newIndexSlack {
+		return false
+	}
+	return s.IndexHistoryKept <= 0 || first.Sub(s.Now.Add(-s.IndexHistoryKept)) >= newIndexSlack
 }
 
 // standbyScans reports whether a sibling scanned the index, and whether any
@@ -218,7 +240,8 @@ func init() {
 			if i.SizeBytes <= unusedIndexBytes || i.IsPrimary || i.IsUnique {
 				continue
 			}
-			sinceReset := neverScannedSinceReset(s.Now, i, window)
+			born := bornObserved(s, i)
+			sinceReset := !born && neverScannedSinceReset(s.Now, i, window)
 			lastScanBefore := lastScannedBefore(s.Now, i, window)
 			if !sinceReset {
 				// IdxScan is the peak scan rate within the window; the
@@ -240,7 +263,7 @@ func init() {
 				}
 			}
 			detail := "no scan of this index was recorded in the last " + windowText(window)
-			observed := indexObservation(s.Now, i)
+			observed := indexObservation(s.Now, i, born)
 			evidence := map[string]any{
 				"peak_scan_rate": i.IdxScan, "history_days": i.HistoryDays, "size_bytes": i.SizeBytes,
 				"observed_source": observed.Source, "observed_for_seconds": int64(observed.Duration / time.Second),

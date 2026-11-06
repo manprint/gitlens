@@ -651,6 +651,7 @@ test('TBL-E2E-002 the sort buttons sort the whole loaded set and survive a reloa
   expect([...sorted].sort((a, b) => b - a)).toEqual(sorted)
 
   await page.reload()
+  await expect(page).toHaveURL(/slow\.sort=calls&slow\.dir=desc/)
   await expect(table).toBeVisible({ timeout: 30_000 })
   await expect(table.getByRole('button', { name: 'Sort Calls descending' })).toHaveAttribute(
     'aria-pressed',
@@ -660,7 +661,11 @@ test('TBL-E2E-002 the sort buttons sort the whole loaded set and survive a reloa
     'aria-sort',
     'descending',
   )
-  expect(await calls()).toEqual(sorted)
+  // The live workload keeps adding calls between the two reads, so the reloaded set is
+  // compared by size and order, not by value.
+  const reloaded = await calls()
+  expect(reloaded.length).toBe(sorted.length)
+  expect([...reloaded].sort((a, b) => b - a)).toEqual(reloaded)
   browserErrors.assertClean()
 })
 

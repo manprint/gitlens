@@ -159,7 +159,7 @@ func TestWINDOW011_PG15HasNoStatsShortcut(t *testing.T) {
 	require.Len(t, f, 1)
 	require.Equal(t, StateDegraded, f[0].State)
 	require.Equal(t, "index usage history is shorter than 7 days", f[0].DegradedReason)
-	require.Equal(t, Observation{Duration: 2 * time.Hour, Source: ObservedByPglens}, indexObservation(unusedTestNow, IndexStat{HistoryDays: 2.0 / 24, StatsReset: windowAgo(30 * 24 * time.Hour)}))
+	require.Equal(t, Observation{Duration: 2 * time.Hour, Source: ObservedByPglens}, indexObservation(unusedTestNow, IndexStat{HistoryDays: 2.0 / 24, StatsReset: windowAgo(30 * 24 * time.Hour)}, false))
 }
 
 // WINDOW-012: a one-hour backup window does not make a three-day-old base
@@ -188,7 +188,7 @@ func TestWINDOW006_WindowText(t *testing.T) {
 // longer than pglens's 10 days of history.
 func TestWINDOW013_LastScanAnchorsTheStatistics(t *testing.T) {
 	i := IndexStat{HistoryDays: 10, ScanTracked: true, LastScan: windowAgo(20 * 24 * time.Hour), StatsReset: windowAgo(30 * 24 * time.Hour)}
-	require.Equal(t, Observation{Duration: 20 * 24 * time.Hour, Source: ObservedByPostgresStats}, indexObservation(unusedTestNow, i))
+	require.Equal(t, Observation{Duration: 20 * 24 * time.Hour, Source: ObservedByPostgresStats}, indexObservation(unusedTestNow, i, false))
 
 	f := evaluateUnused(t, unusedSnapshot(i, reportingSibling(false)))
 	require.Len(t, f, 1)
@@ -197,7 +197,7 @@ func TestWINDOW013_LastScanAnchorsTheStatistics(t *testing.T) {
 
 	// A scan made after pglens's history began leaves pglens the longer one.
 	i.LastScan = windowAgo(5 * 24 * time.Hour)
-	require.Equal(t, Observation{Duration: 10 * 24 * time.Hour, Source: ObservedByPglens}, indexObservation(unusedTestNow, i))
+	require.Equal(t, Observation{Duration: 10 * 24 * time.Hour, Source: ObservedByPglens}, indexObservation(unusedTestNow, i, false))
 }
 
 // WINDOW-014 (R-P13 #5, D22b): PostgreSQL 16 last scanned the index ten days
@@ -295,4 +295,49 @@ func TestWINDOW017_ReasonNamesTheKeptIndexHistory(t *testing.T) {
 	s.IndexHistoryKept = 30 * 24 * time.Hour
 	f = evaluateUnused(t, s)
 	require.Equal(t, "index usage history is shorter than 7 days", f[0].DegradedReason)
+}
+
+// WINDOW-018: an index created long after monitoring began, never scanned
+// since an unknown or old statistics reset, is not a candidate at once: the
+// statistics cover only its own life, so it waits for pglens's history of it.
+func TestWINDOW018_IndexBornUnderObservationWaitsForTheWindow(t *testing.T) {
+	for _, reset := range []*time.Time{nil, windowAgo(30 * 24 * time.Hour)} {
+		s := unusedSnapshot(IndexStat{HistoryDays: 4.0 / (24 * 60), ScanTracked: true, StatsReset: reset}, reportingSibling(false))
+		s.FirstSeen = unusedTestNow.Add(-60 * 24 * time.Hour)
+		f := evaluateUnused(t, s)
+		require.Len(t, f, 1)
+		require.Equal(t, StateDegraded, f[0].State)
+		require.Equal(t, "index usage history is shorter than 7 days", f[0].DegradedReason)
+		require.Nil(t, f[0].Evidence["window_seconds"])
+	}
+}
+
+// WINDOW-019: once pglens's history of an index born under observation covers
+// the window, the verdict opens on that history, never on the statistics age.
+func TestWINDOW019_IndexBornUnderObservationJudgedOnItsHistory(t *testing.T) {
+	s := unusedSnapshot(IndexStat{HistoryDays: 8, ScanTracked: true, StatsReset: windowAgo(30 * 24 * time.Hour)}, reportingSibling(false))
+	s.FirstSeen = unusedTestNow.Add(-60 * 24 * time.Hour)
+	f := evaluateUnused(t, s)
+	require.Len(t, f, 1)
+	require.Equal(t, StateOpen, f[0].State)
+	require.Equal(t, ObservedByPglens, f[0].Evidence["observed_source"])
+	require.Equal(t, int64(8*24*3600), f[0].Evidence["observed_for_seconds"])
+	require.Nil(t, f[0].Evidence["window"])
+}
+
+// WINDOW-020: an index first sampled near the start of monitoring, or at the
+// edge of the kept index history, already existed: the statistics still judge
+// it at once.
+func TestWINDOW020_PreexistingIndexKeepsTheStatisticsPath(t *testing.T) {
+	near := unusedSnapshot(IndexStat{HistoryDays: 2, ScanTracked: true, StatsReset: windowAgo(30 * 24 * time.Hour)}, reportingSibling(false))
+	near.FirstSeen = unusedTestNow.Add(-2*24*time.Hour - 10*time.Minute)
+	edge := unusedSnapshot(IndexStat{HistoryDays: 2, ScanTracked: true, StatsReset: windowAgo(30 * 24 * time.Hour)}, reportingSibling(false))
+	edge.FirstSeen = unusedTestNow.Add(-60 * 24 * time.Hour)
+	edge.IndexHistoryKept = 2 * 24 * time.Hour
+	for _, s := range []*Snapshot{near, edge} {
+		f := evaluateUnused(t, s)
+		require.Len(t, f, 1)
+		require.Equal(t, StateOpen, f[0].State)
+		require.Equal(t, ObservedByPostgresStats, f[0].Evidence["observed_source"])
+	}
 }

@@ -120,7 +120,11 @@ window has passed without a scan. On PostgreSQL 16 and later PostgreSQL's own
 statistics can stand in for pglens's history: an index with no
 `last_idx_scan` since a statistics reset older than the window (or at an
 unknown time), or whose `last_idx_scan` is older than the window with no scan
-pglens recorded inside it, is a candidate at once. One PostgreSQL saw scanned
+pglens recorded inside it, is a candidate at once. An index pglens saw being
+created (first sampled at least an hour after monitoring began, inside the kept
+history) is judged on pglens's history of it only, because the statistics cover
+only its own life; one created in the first hour of monitoring cannot be told
+from a pre-existing index and is judged as one. One PostgreSQL saw scanned
 inside the window is not a candidate. PostgreSQL 15 and earlier have no
 `last_idx_scan`, and pglens stores index scans as per-scrape rates, so a scan
 made before pglens started cannot be told apart: there the window is covered
