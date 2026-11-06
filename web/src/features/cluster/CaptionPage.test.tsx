@@ -120,8 +120,9 @@ describe('cluster, topology and lag captions', () => {
       />,
     )
 
-    expect(expectCaptionedCards(container)).toEqual(['cluster.events'])
+    expect(expectCaptionedCards(container)).toEqual(['cluster.events', 'cluster.events-table'])
     expect(visibleCaptions('cluster.events')).toHaveLength(1)
+    expect(visibleCaptions('cluster.events-table')).toHaveLength(1)
   })
 
   it('CAPTION-PAGE-014 each lag chart is captioned', () => {

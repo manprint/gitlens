@@ -127,7 +127,7 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
     const note = screen.getAllByTestId('standby-stats-note').at(-1)!
     expect(note).toHaveAttribute('role', 'note')
     expect(note).toHaveAttribute('title', STANDBY_STATS_NOTE)
-    for (const name of ['truncate', 'min-[1600px]:py-1', 'min-[1600px]:text-xs'])
+    for (const name of ['truncate', 'min-[1600px]:py-0.5', 'min-[1600px]:text-xs'])
       expect(note.className.split(' ')).toContain(name)
     unmount()
   })

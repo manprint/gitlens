@@ -285,7 +285,8 @@ test('SYS-UI-001: failover preserves identity and raises an alert', async ({
     /failover_detected/i.test(await page.locator('body').innerText()),
   )
   const failoverArticle = page
-    .locator('article[data-event-type="failover_detected"]')
+    .getByRole('row')
+    .filter({ has: page.locator('[data-event-type="failover_detected"]') })
     .filter({ has: page.locator(`a[href="/instances/${beforePrimaryID}"]`) })
     .filter({ has: page.locator(`a[href="/instances/${standbyID}"]`) })
     .first()
@@ -551,7 +552,7 @@ test('SYS-UI-006: plan-only execution is audited without query text', async ({
     return auditEntry !== undefined
   })
   expect(auditEntry).toBeDefined()
-  await page.goto('/settings?tab=audit')
+  await page.goto(`/settings?tab=audit&auditInstance=${selectedInstanceID}`)
   const auditTable = page.getByRole('table', { name: /Command audit for/i })
   await expect(auditTable).toBeVisible()
   await expect

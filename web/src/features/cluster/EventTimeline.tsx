@@ -13,13 +13,8 @@ import {
 import { UNKNOWN } from '@/lib/format/shared'
 import { formatTimestamp } from '@/lib/format/timestamp'
 import { Section } from '@/components/layout/Section'
+import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { NativeSelect } from '@/components/ui/native-select'
-
-const SEVERITY_BORDER: Record<EventSeverity, string> = {
-  critical: 'border-l-destructive',
-  warning: 'border-l-warning',
-  info: 'border-l-info',
-}
 
 const SEVERITY_PILL: Record<EventSeverity, string> = {
   critical: 'bg-destructive/10 text-destructive',
@@ -31,32 +26,12 @@ export interface EventTimelineProps {
   events: readonly ClusterEvent[]
 }
 
-interface EventDay {
-  day: string
-  events: ClusterEvent[]
-}
-
-function eventDay(ts: string): string {
-  const date = new Date(ts)
-  return Number.isNaN(date.getTime()) ? 'Unknown day' : date.toISOString().slice(0, 10)
-}
-
-// A malformed timestamp has no day or time, so the element says that once
-// instead of showing the day's placeholder next to an empty time.
+// A malformed timestamp has no day or time, so the cell says that once
+// instead of showing a placeholder day next to an empty time.
 function eventWhen(ts: string): string {
   const formatted = formatTimestamp(ts, 'UTC', 'en-GB')
-  return formatted === UNKNOWN ? 'Unknown time' : `${eventDay(ts)} ${formatted.slice(11, 19)}`
-}
-
-function groupEvents(events: readonly ClusterEvent[]): EventDay[] {
-  const groups = new Map<string, ClusterEvent[]>()
-  for (const event of sortEventsNewestFirst(events)) {
-    const day = eventDay(event.ts)
-    const group = groups.get(day)
-    if (group) group.push(event)
-    else groups.set(day, [event])
-  }
-  return [...groups.entries()].map(([day, groupedEvents]) => ({ day, events: groupedEvents }))
+  if (formatted === UNKNOWN) return 'Unknown time'
+  return `${new Date(ts).toISOString().slice(0, 10)} ${formatted.slice(11, 19)}`
 }
 
 function instanceLink(id: string | null) {
@@ -72,59 +47,106 @@ function instanceLink(id: string | null) {
   )
 }
 
-function FailoverDetails({ event }: { event: ClusterEvent }) {
+const INVARIANT_TEXT = 'Critical invariant violation I-1: cluster identity must never change.'
+
+function resetText(event: ClusterEvent): string | null {
+  const count = event.type === 'counter_reset_detected' ? counterResetCount(event) : null
+  if (count === null) return null
+  return `${count} ${count === 1 ? 'counter' : 'counters'} reset${counterResetScope(event)}.`
+}
+
+/** The full text of the details cell, for its `title` when the cell is cut to one line. */
+function detailsText(event: ClusterEvent): string {
+  const { whatToCheck } = describeEvent(event.type)
+  if (event.type === 'cluster_id_changed') return INVARIANT_TEXT
+  if (event.type === 'failover_detected') {
+    return `Old primary: ${payloadInstance(event, 'old_primary') ?? 'Unknown'}; New primary: ${payloadInstance(event, 'new_primary') ?? 'Unknown'}. ${whatToCheck}`
+  }
+  const resets = resetText(event)
+  return resets ? `${resets} ${whatToCheck}` : whatToCheck
+}
+
+function detailsCell(event: ClusterEvent) {
+  const { whatToCheck } = describeEvent(event.type)
+  if (event.type === 'cluster_id_changed') {
+    return (
+      <span className="text-destructive font-semibold" role="alert">
+        {INVARIANT_TEXT}
+      </span>
+    )
+  }
+  if (event.type === 'failover_detected') {
+    return (
+      <>
+        Old primary: {instanceLink(payloadInstance(event, 'old_primary'))}; New primary:{' '}
+        {instanceLink(payloadInstance(event, 'new_primary'))}.{' '}
+        <span className="text-muted-foreground">{whatToCheck}</span>
+      </>
+    )
+  }
+  const resets = resetText(event)
   return (
-    <p>
-      Old primary: {instanceLink(payloadInstance(event, 'old_primary'))}; New primary:{' '}
-      {instanceLink(payloadInstance(event, 'new_primary'))}
-    </p>
+    <>
+      {resets ? <span>{resets}</span> : null}
+      {resets ? ' ' : null}
+      <span className="text-muted-foreground">{whatToCheck}</span>
+    </>
   )
 }
 
-function EventCard({ event }: { event: ClusterEvent }) {
-  const description = describeEvent(event.type)
-  const unknown = description.title === 'Unknown event type'
-  const invariantViolation = event.type === 'cluster_id_changed'
-  const resetCount = event.type === 'counter_reset_detected' ? counterResetCount(event) : null
-
-  return (
-    <article
-      className={`bg-card relative space-y-1.5 rounded-lg border border-l-4 py-3 pr-4 pl-4 text-sm ${SEVERITY_BORDER[description.severity]}`}
-      data-event-type={event.type}
-      data-severity={description.severity}
-    >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <strong className="font-semibold">{description.title}</strong>
+// One line per event (D1, 7.5.8): the list pages instead of growing the page.
+const COLUMNS: readonly SimpleColumn<ClusterEvent>[] = [
+  {
+    id: 'time',
+    header: 'Time',
+    width: '11rem',
+    className: 'whitespace-nowrap',
+    sortValue: (event) => Date.parse(event.ts) || null,
+    firstDirection: 'desc',
+    cell: (event) => (
+      <time className="tabular-nums" dateTime={event.ts}>
+        {eventWhen(event.ts)}
+      </time>
+    ),
+  },
+  {
+    id: 'event',
+    header: 'Event',
+    rowHeader: true,
+    width: '16rem',
+    truncate: (event) => describeEvent(event.type).title,
+    cell: (event) => (
+      <strong className="font-semibold" data-event-type={event.type}>
+        {describeEvent(event.type).title}
+      </strong>
+    ),
+  },
+  {
+    id: 'severity',
+    header: 'Severity',
+    width: '6.5rem',
+    cell: (event) => {
+      const { severity } = describeEvent(event.type)
+      return (
         <span
-          className={`rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold tracking-wide uppercase ${SEVERITY_PILL[description.severity]}`}
+          className={`rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold tracking-wide uppercase ${SEVERITY_PILL[severity]}`}
+          data-severity={severity}
         >
-          {description.severity}
+          {severity}
         </span>
-        <time className="text-muted-foreground ml-auto text-xs tabular-nums" dateTime={event.ts}>
-          {eventWhen(event.ts)}
-        </time>
-      </header>
-      {unknown ? (
-        <p>
-          Raw event type: <code>{event.type}</code>
-        </p>
-      ) : null}
-      <p className="text-muted-foreground">{description.whatToCheck}</p>
-      {resetCount !== null ? (
-        <p>
-          {resetCount} {resetCount === 1 ? 'counter' : 'counters'} reset
-          {counterResetScope(event)}.
-        </p>
-      ) : null}
-      {event.type === 'failover_detected' ? <FailoverDetails event={event} /> : null}
-      {invariantViolation ? (
-        <p role="alert" className="text-destructive font-semibold">
-          Critical invariant violation I-1: cluster identity must never change.
-        </p>
-      ) : null}
-    </article>
-  )
-}
+      )
+    },
+  },
+  {
+    id: 'type',
+    header: 'Type',
+    width: '14rem',
+    sortValue: (event) => event.type,
+    truncate: (event) => event.type,
+    cell: (event) => <code className="text-xs">{event.type}</code>,
+  },
+  { id: 'details', header: 'Details', truncate: detailsText, cell: detailsCell },
+]
 
 export function EventTimeline({ events }: EventTimelineProps) {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -136,7 +158,6 @@ export function EventTimeline({ events }: EventTimelineProps) {
       ),
     [events, selectedType],
   )
-  const groups = useMemo(() => groupEvents(visibleEvents), [visibleEvents])
 
   function updateType(type: string) {
     const next = new URLSearchParams(searchParams)
@@ -169,28 +190,21 @@ export function EventTimeline({ events }: EventTimelineProps) {
       captionId="cluster.events"
       title="Event timeline"
     >
-      {groups.length === 0 ? (
+      {visibleEvents.length === 0 ? (
         <p className="text-muted-foreground text-sm" role="status">
           No events match this filter.
         </p>
       ) : (
-        <div className="space-y-6">
-          {groups.map((group) => (
-            <section key={group.day} aria-labelledby={`event-day-${group.day}`}>
-              <h3
-                id={`event-day-${group.day}`}
-                className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase"
-              >
-                {group.day}
-              </h3>
-              <div className="space-y-2">
-                {group.events.map((event) => (
-                  <EventCard key={event.event_id} event={event} />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+        <SimpleTable
+          ariaLabel="Cluster events"
+          captionId="cluster.events-table"
+          columns={COLUMNS}
+          emptyState={null}
+          rowKey={(event) => String(event.event_id)}
+          rows={visibleEvents}
+          scope="events"
+          tableId="cluster-events"
+        />
       )}
     </Section>
   )

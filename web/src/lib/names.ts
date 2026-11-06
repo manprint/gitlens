@@ -31,7 +31,7 @@ interface NamedCluster {
   name?: string | null
 }
 
-interface NamedInstance {
+export interface NamedInstance {
   addr: string
   port: number
   display_name?: string | null

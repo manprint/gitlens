@@ -30,6 +30,34 @@ function auditTable() {
 }
 
 describe('CommandAudit', () => {
+  it('UI-SET-060 shows one instance at a time, picked in the URL (GAP-9)', async () => {
+    server.use(ok('getInstanceCommandAudit', []))
+    const others = ['b', 'c'].map((suffix, index) => ({
+      ...INSTANCE_SUMMARY,
+      addr: `${suffix}.example.test`,
+      instance_id: `00000000-0000-0000-0000-00000000000${index + 2}`,
+    }))
+    const { router } = renderWithProviders(
+      <CommandAudit instances={[INSTANCE_SUMMARY, ...others]} />,
+    )
+    const picker = screen.getByRole('combobox', { name: 'Command audit instance' })
+    expect(within(picker).getAllByRole('option')).toHaveLength(3)
+    await settleAuditQuery()
+    expect(await screen.findAllByText('No command activity')).toHaveLength(1)
+    expect(router.state.location.search).toBe('')
+
+    fireEvent.change(picker, { target: { value: others[1]?.instance_id } })
+    expect(router.state.location.search).toBe(`?auditInstance=${others[1]?.instance_id}`)
+    expect(picker).toHaveValue(others[1]?.instance_id)
+    fireEvent.change(picker, { target: { value: INSTANCE_ID } })
+    expect(router.state.location.search).toBe('')
+  })
+
+  it('UI-SET-061 has no instance picker with one instance', () => {
+    renderAudit([])
+    expect(screen.queryByRole('combobox', { name: 'Command audit instance' })).toBeNull()
+  })
+
   it('UI-SET-037 shows a queryid above 2^53 with every digit', async () => {
     // The server writes queryid as a string, since a JSON number above 2^53
     // loses its last digits when the browser parses it.

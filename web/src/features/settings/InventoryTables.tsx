@@ -18,6 +18,8 @@ import { matchesSearch, type SearchField } from '@/lib/tableControls'
 
 import { InstanceViewTabs } from '@/features/instance/InstancePanel'
 import { useInstanceView } from '@/features/instance/instanceViews'
+import { InstancePicker } from './InstancePicker'
+import { usePickedInstance } from './usePickedInstance'
 import { INVENTORY_VIEWS } from './settingsTabs'
 
 type Alert = Schemas['Alert']
@@ -502,6 +504,8 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
     [query, rows],
   )
   const [view = 'instances', showView] = useInstanceView(INVENTORY_VIEWS)
+  // One instance's databases at a time (GAP-9), among those the search leaves.
+  const [pickedDatabases, pickDatabases] = usePickedInstance('dbInstance', matching)
 
   function clearInstanceSearch() {
     setSearchParams(
@@ -547,7 +551,18 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
       </TabsContent>
 
       <TabsContent value="databases">
-        <Section captionId="settings.inventory-databases" title="Databases by instance">
+        <Section
+          actions={
+            <InstancePicker
+              instances={matching}
+              label="Databases instance"
+              onPick={pickDatabases}
+              picked={pickedDatabases}
+            />
+          }
+          captionId="settings.inventory-databases"
+          title="Databases by instance"
+        >
           {query !== '' ? (
             // The search box is in the Instances view; say so here, where it still filters.
             <Callout className="mb-4" role="status">
@@ -564,13 +579,9 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
               description="Try a different address, cluster, role, tier, or instance ID."
               title="No instances match this filter"
             />
-          ) : (
-            <div className="space-y-6 min-[1600px]:space-y-4">
-              {matching.map((instance) => (
-                <DatabaseInventory instance={instance} key={instance.instance_id} />
-              ))}
-            </div>
-          )}
+          ) : pickedDatabases ? (
+            <DatabaseInventory instance={pickedDatabases} key={pickedDatabases.instance_id} />
+          ) : null}
         </Section>
       </TabsContent>
     </Tabs>

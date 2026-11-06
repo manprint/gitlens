@@ -168,6 +168,10 @@ describe('SettingsPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Could not load databases for postgres',
     )
+    // One instance at a time (GAP-9): the failed one does not hide the other.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Databases instance' }), {
+      target: { value: SECOND_INSTANCE_ID },
+    })
     const secondTable = await waitFor(() =>
       screen.getByRole('table', { name: 'Databases for standby.example.test:5432' }),
     )
@@ -486,6 +490,16 @@ describe('SettingsPage tables: pages, search, filters, sort', () => {
     searchTable(instances, 'host-2')
     expect(dataRows(instances)).toHaveLength(6)
     expect(view.router.state.location.search).toBe('?monitored-instances.q=host-2')
+    // GAP-9: one instance's databases at a time, among the instances the search leaves.
+    openInventoryView('Databases by instance')
+    const picker = screen.getByRole('combobox', { name: 'Databases instance' })
+    expect(within(picker).getAllByRole('option')).toHaveLength(6)
+    expect(screen.getAllByRole('heading', { name: /^Databases — / })).toHaveLength(1)
+    const third = within(picker).getAllByRole('option')[2]?.getAttribute('value') ?? ''
+    fireEvent.change(picker, { target: { value: third } })
+    expect(view.router.state.location.search).toContain(`dbInstance=${third}`)
+    expect(picker).toHaveValue(third)
+    openInventoryView('Instances')
     // A search with no match keeps the toolbar; the database sections say so.
     searchTable(instances, 'nothing-like-this')
     expect(screen.getByText('No rows match')).toBeInTheDocument()

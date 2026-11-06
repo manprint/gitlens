@@ -10,6 +10,9 @@ import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { formatTimestamp } from '@/lib/format'
 import { instanceLabel } from '@/lib/names'
 
+import { InstancePicker } from './InstancePicker'
+import { usePickedInstance } from './usePickedInstance'
+
 type InstanceSummary = Schemas['InstanceSummary']
 
 interface CommandAuditEntry {
@@ -79,11 +82,22 @@ function sortNewestFirst(entries: CommandAuditEntry[]): CommandAuditEntry[] {
 function Timestamp({ label, value }: { label: string; value: string | undefined }) {
   if (!value) return null
   return (
-    <div>
+    <span className="mr-3">
       <span className="text-muted-foreground">{label}: </span>
       <time dateTime={value}>{formatTimestamp(value, 'UTC')}</time>
-    </div>
+    </span>
   )
+}
+
+// One line per entry (GAP-9): the full text is the cell's title.
+function timingText(entry: CommandAuditEntry): string {
+  const parts: string[] = timingFields(entry)
+    .filter(([, value]) => value)
+    .map(([label, value]) => `${label}: ${formatTimestamp(value ?? '', 'UTC')}`)
+  if (entryState(entry).toLowerCase() === 'expired' && !entry.expires_at) parts.push('Expired')
+  const detail = entry.detail ?? entry.error
+  if (detail) parts.push(detail)
+  return parts.join('; ')
 }
 
 // The time of the entry itself is in the Time column: an audit entry is one
@@ -122,7 +136,12 @@ const AUDIT_COLUMNS: readonly SimpleColumn<CommandAuditEntry>[] = [
     sortValue: (entry) => entry.kind ?? 'unknown',
     cell: (entry) => entry.kind ?? 'unknown',
   },
-  { id: 'args', header: 'Arguments', cell: (entry) => <code>{displayValue(entry.args)}</code> },
+  {
+    id: 'args',
+    header: 'Arguments',
+    truncate: (entry) => displayValue(entry.args),
+    cell: (entry) => <code>{displayValue(entry.args)}</code>,
+  },
   {
     id: 'requested-by',
     header: 'Requested by',
@@ -139,6 +158,7 @@ const AUDIT_COLUMNS: readonly SimpleColumn<CommandAuditEntry>[] = [
   {
     id: 'timing',
     header: 'Timing and detail',
+    truncate: timingText,
     cell: (entry) => {
       const state = entryState(entry)
       const detail = entry.detail ?? entry.error
@@ -147,8 +167,10 @@ const AUDIT_COLUMNS: readonly SimpleColumn<CommandAuditEntry>[] = [
           {timingFields(entry).map(([timingLabel, timingValue]) => (
             <Timestamp key={timingLabel} label={timingLabel} value={timingValue} />
           ))}
-          {state.toLowerCase() === 'expired' && !entry.expires_at ? <div>Expired</div> : null}
-          {detail ? <div>{detail}</div> : null}
+          {state.toLowerCase() === 'expired' && !entry.expires_at ? (
+            <span className="mr-3">Expired</span>
+          ) : null}
+          {detail ? <span>{detail}</span> : null}
         </>
       )
     },
@@ -212,19 +234,27 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
 }
 
 export function CommandAudit({ instances }: CommandAuditProps) {
+  const [picked, pick] = usePickedInstance('auditInstance', instances)
   return (
-    <Section captionId="settings.command-audit" title="Command audit">
-      {instances.length === 0 ? (
+    <Section
+      actions={
+        <InstancePicker
+          instances={instances}
+          label="Command audit instance"
+          onPick={pick}
+          picked={picked}
+        />
+      }
+      captionId="settings.command-audit"
+      title="Command audit"
+    >
+      {picked ? (
+        <InstanceCommandAudit instance={picked} key={picked.instance_id} />
+      ) : (
         <EmptyState
           description="Add a monitored PostgreSQL instance to see command activity."
           title="No command audit"
         />
-      ) : (
-        <div className="space-y-6 min-[1600px]:space-y-4">
-          {instances.map((instance) => (
-            <InstanceCommandAudit instance={instance} key={instance.instance_id} />
-          ))}
-        </div>
       )}
     </Section>
   )

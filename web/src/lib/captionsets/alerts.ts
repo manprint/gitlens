@@ -70,14 +70,14 @@ export const alertsCaptions = {
     window: 'Silences active now.',
   },
   'events.timeline': {
-    what: 'Fleet events in the selected time range: failovers, restarts, identity changes and other changes the server recorded.',
+    what: 'Fleet events in the selected time range, such as failovers, restarts and identity changes.',
     source:
       'Server events endpoint over the events table, written by the ingest and the alert engine; filtered by cluster, type and time range on the server.',
     unit: 'events',
     window:
       'The selected time range, newest first, cut to the event limit (100 by default, at most 1,000); events older than 90 days are purged.',
     howToRead:
-      'Severity is assigned by the console from the event type. Details says what to check for that type. An event type the console does not know shows its raw name.',
+      'Severity is assigned by the console from the event type. Details says what to check for that type. An event type the console does not know shows its raw name. Cluster, event type, range and result limit are kept in the page address, so a view can be shared; the table footer counts the events.',
   },
   'events.alert-status': {
     what: 'Every alert with its severity, state and whether a silence suppresses it, apart from the event history.',

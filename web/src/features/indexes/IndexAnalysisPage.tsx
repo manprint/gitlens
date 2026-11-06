@@ -245,7 +245,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
   )
 
   return (
-    <Tabs className="gap-6 min-[1600px]:gap-3" onValueChange={setTab} value={tab}>
+    <Tabs className="gap-6 min-[1600px]:gap-2" onValueChange={setTab} value={tab}>
       <IndexPageHeader actions={controls} />
       <SearchEverythingResults database={database} instanceId={instanceId} />
       <StandbyStatsNote role={role} />

@@ -10,7 +10,35 @@ const ids = {
   oldPrimary: '11111111-1111-1111-1111-111111111111',
 }
 
+function rowOf(type: string): HTMLElement {
+  const row = screen
+    .getAllByRole('row')
+    .find((candidate) => within(candidate).queryByText(type, { selector: 'code' }) !== null)
+  if (!row) throw new Error(`no row for ${type}`)
+  return row
+}
+
 describe('EventTimeline', () => {
+  it('UI-CLUS-060 pages a long timeline, one row per event, newest first (GAP-9)', () => {
+    renderWithProviders(
+      <EventTimeline
+        events={Array.from({ length: 30 }, (_, index) => ({
+          cluster_id: '1',
+          event_id: index + 1,
+          instance_id: null,
+          payload: {},
+          ts: new Date(Date.UTC(2026, 7, 31, 10, index)).toISOString(),
+          type: 'agent_up',
+        }))}
+      />,
+    )
+
+    const rows = within(screen.getByRole('table', { name: 'Cluster events' })).getAllByRole('row')
+    expect(rows).toHaveLength(21)
+    expect(rows[1]).toHaveTextContent('2026-08-31 10:29:00')
+    expect(screen.queryByRole('article')).not.toBeInTheDocument()
+  })
+
   it('UI-CLUS-031 failover_detected renders old and new primary as instance links', () => {
     renderWithProviders(
       <EventTimeline
@@ -54,7 +82,7 @@ describe('EventTimeline', () => {
     )
 
     expect(screen.getByRole('alert')).toHaveTextContent('invariant violation I-1')
-    expect(screen.getByRole('article')).toHaveAttribute('data-severity', 'critical')
+    expect(screen.getByText('critical')).toHaveAttribute('data-severity', 'critical')
   })
 
   it('UI-CLUS-033 an unrecognised type renders its raw string rather than being dropped', () => {
@@ -73,9 +101,9 @@ describe('EventTimeline', () => {
       />,
     )
 
-    const article = screen.getByRole('article')
-    expect(within(article).getByText('future_event')).toBeInTheDocument()
-    expect(article).toHaveAttribute('data-severity', 'info')
+    const row = rowOf('future_event')
+    expect(within(row).getByText('Unknown event type')).toBeInTheDocument()
+    expect(within(row).getByText('info')).toHaveAttribute('data-severity', 'info')
   })
 
   it('UI-CLUS-034 the type filter round-trips through the URL', () => {
@@ -186,10 +214,10 @@ describe('EventTimeline', () => {
     expect(screen.getByText('Instance unreachable')).toBeInTheDocument()
     expect(screen.getByText('Instance reachable')).toBeInTheDocument()
     expect(screen.getByText('Series truncated by cardinality budget')).toBeInTheDocument()
-    const identityConflict = screen
-      .getAllByRole('article')
-      .find((article) => within(article).queryByText('Cluster identity conflict') !== null)
-    expect(identityConflict).toHaveAttribute('data-severity', 'warning')
+    expect(within(rowOf('cluster_identity_conflict')).getByText('warning')).toHaveAttribute(
+      'data-severity',
+      'warning',
+    )
   })
 
   it('UI-CLUS-037 an event with a malformed timestamp shows Unknown time, not a blank time', () => {

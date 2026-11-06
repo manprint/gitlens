@@ -127,13 +127,22 @@ export const fleetCaptions = {
       'From is the standby and To the server it copies changes from. Low confidence means the standby is not streaming from that server right now, or has not reported for more than 60 s.',
   },
   'cluster.events': {
-    what: 'Failovers detected in this cluster, newest first and grouped by day; each row shows the old and the new primary.',
+    what: 'Failovers detected in this cluster, newest first; each row shows the old and the new primary.',
     source:
       'handleTopology in internal/server/api_topology.go: events of type failover_detected, the newest 100 of the cluster.',
     unit: 'events',
     window: 'The newest 100 failover events on record.',
     howToRead:
       'Severity and the suggested check come from the console description of each event type. An empty list means no failover was detected.',
+  },
+  'cluster.events-table': {
+    what: 'One row per cluster event: its time, title, severity, type and details.',
+    source:
+      'handleTopology in internal/server/api_topology.go: the newest 100 events of the cluster.',
+    unit: 'events',
+    window: 'The newest 100 events on record, newest first, one page at a time; times are UTC.',
+    howToRead:
+      'Type is the raw event name, always shown so an event the console does not know stays visible. Details says what to check; a cut line shows in full on hover.',
   },
   'lag.edge': {
     what: 'Write, flush and replay lag in seconds between one standby and its upstream over the selected range, one line each.',

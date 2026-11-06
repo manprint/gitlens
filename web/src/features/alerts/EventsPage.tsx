@@ -354,9 +354,6 @@ export function EventsPage() {
               </>
             }
           >
-            <p aria-live="polite" className="text-muted-foreground mb-3 text-sm">
-              {`${sortedEvents.length} events in the selected range (${range.label}); cluster, event type, range and result limit are kept in the URL.`}
-            </p>
             <SimpleTable
               ariaLabel="Fleet events"
               captionId="events.table"
