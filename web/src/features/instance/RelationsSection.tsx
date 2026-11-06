@@ -152,7 +152,7 @@ function maintenanceColumn(
       return `${formatTimestamp(latest.iso, 'UTC')} (${latest.auto ? 'auto' : 'manual'})`
     },
     sortValue: (item) => latestMaintenance(item, manualKey, autoKey)?.ms ?? null,
-    width: '8.25rem',
+    width: '7rem',
     truncate: (item) => {
       const latest = latestMaintenance(item, manualKey, autoKey)
       return latest
@@ -292,7 +292,7 @@ const DATABASE_COLUMN: RelationColumn = {
   label: 'Database',
   render: (item) => textCell(item, 'datname'),
   sortValue: (item) => stringValue(item, 'datname'),
-  width: '7.5rem',
+  width: '6.5rem',
   truncate: (item) => textOf(stringValue(item, 'datname')),
 }
 
@@ -301,7 +301,7 @@ const OBSERVED_COLUMN: RelationColumn = {
   label: 'Observed',
   render: timestampCell,
   sortValue: (item) => stringValue(item, 'ts'),
-  width: '13rem',
+  width: '11.5rem',
   truncate: (item) => {
     const value = stringValue(item, 'ts')
     return value ? formatTimestamp(value, 'UTC') : ''
@@ -332,21 +332,21 @@ const TABLE_COLUMNS: RelationColumn[] = [
     label: 'Live tuples',
     render: (item) => countCell(item, 'n_live_tup'),
     sortValue: (item) => numberValue(item, 'n_live_tup'),
-    width: '7.5rem',
+    width: '7rem',
   },
   {
     key: 'dead_tuples',
     label: 'Dead tuples',
     render: (item) => countCell(item, 'n_dead_tup'),
     sortValue: (item) => numberValue(item, 'n_dead_tup'),
-    width: '7.5rem',
+    width: '7rem',
   },
   {
     key: 'dead_ratio',
     label: 'Dead ratio',
     render: (item) => percentCell(item, 'dead_ratio'),
     sortValue: (item) => numberValue(item, 'dead_ratio'),
-    width: '7.5rem',
+    width: '7rem',
   },
   {
     key: 'size',
