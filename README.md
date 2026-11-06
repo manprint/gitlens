@@ -777,7 +777,10 @@ with a sign of a credential is not sent. The error a command returns is sent
 as a fixed text when it has such a sign, since a database error can quote the
 statement it ran.
 `cancel` and `terminate` require T2 and `allow_signal: true`, and only target
-client backends. `pgstattuple` requires T1 and the `pgstattuple` extension
+client backends. On a standby they act on the standby's own sessions; grant
+`pg_signal_backend` on the primary (roles replicate) and the agent re-reads the
+tier before each command, and PostgreSQL still refuses to signal a superuser's
+session (the command then fails with its error). `pgstattuple` requires T1 and the `pgstattuple` extension
 already installed in the relation's database; it runs inside a `READ ONLY`
 transaction bounded to 50 seconds, and the server files the result as that
 table's bloat measurement (method `pgstattuple`). pglens never installs

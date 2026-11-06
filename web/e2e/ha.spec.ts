@@ -1466,7 +1466,11 @@ test.describe.serial('HA-DRILL', () => {
     const instanceId = ids.get(standby) ?? ''
     const finish = async (commandId: string) => {
       let state = ''
-      let body: { state: string; result?: { plan?: unknown }; error?: string } = { state: '' }
+      let body: {
+        state: string
+        result?: { plan?: unknown; signalled?: boolean; usename?: string; pid?: number }
+        error?: string
+      } = { state: '' }
       await expect
         .poll(
           async () => {
@@ -1499,10 +1503,32 @@ test.describe.serial('HA-DRILL', () => {
       )
       .toBe(true)
 
-    // Cancel and terminate a session on the standby: the API outcome must match PostgreSQL.
-    for (const kind of ['cancel', 'terminate'] as const) {
-      const app = `ha-drill-${kind}`
-      const sleeper = run(
+    // Tier T2 on the standby: a grant made on the leader replicates (global catalog) and the
+    // agent re-reads its tier before every command. pg_signal_backend cannot signal a superuser
+    // session (odoo is one), so the sleeper runs as a plain login role.
+    const SLEEPER = 'ha_drill_sleeper'
+    const killSleepers = `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '${SLEEPER}';`
+    registerCleanup(async () => {
+      await psqlOn(standby, killSleepers).catch(() => null)
+      await psqlOn(leader, 'REVOKE pg_signal_backend FROM pglens_monitor;').catch(() => null)
+      await psqlOn(leader, `DROP ROLE IF EXISTS ${SLEEPER};`).catch(() => null)
+    })
+    await psqlOn(leader, `CREATE ROLE ${SLEEPER} LOGIN; GRANT pg_signal_backend TO pglens_monitor;`)
+    const standbyTier = (want: 't' | 'f', what: string) =>
+      expect
+        .poll(
+          () =>
+            psqlOn(
+              standby,
+              `SELECT pg_has_role('pglens_monitor', 'pg_signal_backend', 'USAGE') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${SLEEPER}');`,
+            ),
+          { timeout: 60_000, intervals: [1_000], message: what },
+        )
+        .toBe(want)
+    await standbyTier('t', `${standby} replays the grant`)
+
+    const sleep = async (app: string, user: string) => {
+      const done = run(
         'docker',
         [
           'exec',
@@ -1511,7 +1537,7 @@ test.describe.serial('HA-DRILL', () => {
           `pglens-odoo-${standby}-1`,
           'psql',
           '-U',
-          'odoo',
+          user,
           '-d',
           'odoo',
           '-Atc',
@@ -1529,36 +1555,85 @@ test.describe.serial('HA-DRILL', () => {
             )
             return pid
           },
-          { timeout: 15_000 },
+          { timeout: 15_000, message: `${app} sleeper starts` },
         )
         .toMatch(/^\d+$/)
+      return { pid, done }
+    }
+    const isAlive = async (pid: string) =>
+      (await psqlOn(
+        standby,
+        `SELECT count(*) FROM pg_stat_activity WHERE pid = ${pid} AND state = 'active';`,
+      )) === '1'
+    const signal = async (kind: 'cancel' | 'terminate', pid: string) => {
       const enqueue = await api.post(`/api/v1/instances/${instanceId}/commands`, {
         data: { kind, args: { pid: Number(pid) } },
       })
-      const accepted = enqueue.status() === 202
-      const outcome = accepted
-        ? await finish(((await enqueue.json()) as { command_id: string }).command_id)
-        : { state: `http ${enqueue.status()}`, error: await enqueue.text() }
-      const isAlive = async () =>
-        (await psqlOn(
-          standby,
-          `SELECT count(*) FROM pg_stat_activity WHERE pid = ${pid} AND state = 'active';`,
-        )) === '1'
-      let alive = await isAlive()
-      for (let i = 0; i < 5 && outcome.state === 'done' && alive; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1_000))
-        alive = await isAlive()
-      }
-      const consistent = outcome.state === 'done' ? !alive : alive && Boolean(outcome.error)
-      expect
-        .soft(
-          consistent,
-          `D5 V-11 ${kind}: ${outcome.state} ${outcome.error ?? ''}, session alive=${alive}`,
-        )
-        .toBe(true)
-      await psqlOn(standby, `SELECT pg_terminate_backend(${pid});`).catch(() => null)
-      await sleeper
+      expect(enqueue.status(), `D5 ${kind} accepted`).toBe(202)
+      const commandId = ((await enqueue.json()) as { command_id: string }).command_id
+      return { commandId, outcome: await finish(commandId) }
     }
+    const auditOutcome = async (commandId: string) => {
+      let outcome = ''
+      await expect
+        .poll(
+          async () => {
+            const rows = (await (
+              await api.get(`/api/v1/instances/${instanceId}/command-audit`)
+            ).json()) as { command_id: string; outcome: string }[]
+            outcome = rows.find((row) => row.command_id === commandId)?.outcome ?? ''
+            return outcome
+          },
+          { timeout: 30_000, intervals: [2_000], message: `command ${commandId} audited` },
+        )
+        .not.toBe('')
+      return outcome
+    }
+
+    // Cancel and terminate a session on the standby: done, signalled, and the session is gone.
+    for (const kind of ['cancel', 'terminate'] as const) {
+      const sleeper = await sleep(`ha-drill-${kind}`, SLEEPER)
+      const { commandId, outcome } = await signal(kind, sleeper.pid)
+      let alive = await isAlive(sleeper.pid)
+      for (let i = 0; i < 5 && alive; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000))
+        alive = await isAlive(sleeper.pid)
+      }
+      const label = `D5 V-11 ${kind}: ${outcome.state} ${outcome.error ?? ''}, session alive=${alive}`
+      expect.soft(outcome.state, label).toBe('done')
+      expect.soft(outcome.result?.signalled, label).toBe(true)
+      expect.soft(alive, label).toBe(false)
+      expect.soft(await auditOutcome(commandId), `${label} audit`).toBe('ok')
+      await psqlOn(standby, `SELECT pg_terminate_backend(${sleeper.pid});`).catch(() => null)
+      await sleeper.done
+    }
+
+    // A superuser session is refused by PostgreSQL: failed, audited as error, still running.
+    const superuser = await sleep('ha-drill-superuser', 'odoo')
+    const refused = await signal('cancel', superuser.pid)
+    const refusedLabel = `D5 V-11 superuser cancel: ${refused.outcome.state} ${refused.outcome.error ?? ''}`
+    expect.soft(refused.outcome.state, refusedLabel).toBe('failed')
+    expect
+      .soft(refused.outcome.error ?? '', refusedLabel)
+      .toContain('permission denied to cancel query')
+    expect.soft(await auditOutcome(refused.commandId), `${refusedLabel} audit`).toBe('error')
+    expect.soft(await isAlive(superuser.pid), `${refusedLabel} session alive`).toBe(true)
+    await psqlOn(standby, `SELECT pg_terminate_backend(${superuser.pid});`).catch(() => null)
+    await superuser.done
+
+    // The tier follows the grant both ways: after REVOKE the agent rejects the signal itself.
+    await psqlOn(leader, 'REVOKE pg_signal_backend FROM pglens_monitor;')
+    await standbyTier('f', `${standby} replays the revoke`)
+    const lateSleeper = await sleep('ha-drill-revoked', SLEEPER)
+    const rejected = await signal('cancel', lateSleeper.pid)
+    const rejectedLabel = `D5 V-11 cancel after revoke: ${rejected.outcome.state} ${rejected.outcome.error ?? ''}`
+    expect.soft(rejected.outcome.state, rejectedLabel).toBe('failed')
+    expect.soft(rejected.outcome.error, rejectedLabel).toBe('permission tier T2 is required')
+    expect.soft(await auditOutcome(rejected.commandId), `${rejectedLabel} audit`).toBe('rejected')
+    expect.soft(await isAlive(lateSleeper.pid), `${rejectedLabel} session alive`).toBe(true)
+    await psqlOn(standby, killSleepers).catch(() => null)
+    await lateSleeper.done
+
     const audit = await api.get(`/api/v1/instances/${instanceId}/command-audit`)
     expect.soft(audit.ok(), 'D5 command audit answers').toBe(true)
     expect.soft(await audit.text(), 'D5 explain audited').toContain(explainId)
