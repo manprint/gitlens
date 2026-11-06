@@ -1,11 +1,11 @@
 # ConsoleInsights — Implementation state
 Format: pev-state 2
 
-Read first at every session. Updated 2026-11-05 by agent-2:claude-sonnet-5-5 (execution session).
+Read first at every session. Updated 2026-11-06 by agent-2:claude-sonnet-5-5 (handoff).
 Plan ID: 005_plan-ConsoleInsights. Revision: 1. Repo root: /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze.
 Plan baseline: `5929be2d5ffe96867a63791b8a0b18687e41f8b5` (branch `feat/index-analysis`); pre-existing uncommitted changes: see §5 (preserved; committed once as the baseline commit at 0.2 S1b, D32).
 Roster (user instruction 2026-11-04, `agent:sonnet` + "autorizzo sonnet per tutto il piano, con opus come advisor"; supersedes the 2026-10-29 "Sonnet is not used" instruction): agent-1:claude-opus-5-5 (supervisor/reviewer: the `advisor` tool, re-enabled by the user 2026-11-04, set to Opus 5.5; for a full-diff review the advisor tool is used, and a fresh read-only review agent with `model: opus` is an allowed supplement); agent-2:claude-sonnet-5-5 (implementer, the executing session); agent-3:claude-haiku-5-5 (exploration and mechanical work only, Agent tool `model: haiku`). Phase-file lines naming `agent-2:claude-opus-5-5` now read agent-2:claude-sonnet-5-5. Active execution style: handoff (the executing session implements; every point where a phase file says `advisor` is served by the advisor tool).
-State writer: the executing session (agent-2:claude-sonnet-5-5, took over 2026-11-04 after the 2026-10-31 user-stop handoff released the previous session); ownership: RELEASED 2026-11-05 15:50 CET (handoff, trigger deadline); the next session takes over under the recorded takeover rule (nothing stale: released).
+State writer: the executing session (agent-2:claude-sonnet-5-5, took over 2026-11-04 after the 2026-10-31 user-stop handoff released the previous session); ownership: RELEASED 2026-11-06 11:2x CET (handoff, trigger deadline); the next session takes over under the recorded takeover rule (nothing stale: released).
 
 
 ## 0. Resume and completion protocol
@@ -14,22 +14,22 @@ See `PROTOCOL.md` (static cold-start rules).
 
 ## 1. Current unit and scope
 
-- Invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-05 evening re-invocation, explicit; clears the handoff latch); style handoff; acting as agent-2:claude-sonnet-5-5; supervisor advisor Opus 5.5.
+- Invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (re-invoked, explicit); then `/pev-v3 handoff --deadline=06-11-2026_11_40` (2026-11-06 11:16 CET). Style handoff; acting as agent-2:claude-sonnet-5-5; supervisor advisor Opus 5.5.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
-- Scope result: RUNNING (previous invocation result: HANDOFF at deadline 2026-11-05 15:50 CET; latch cleared by the explicit re-invocation)
+- Scope result: RUNNING (invocation result: HANDOFF, trigger deadline, 2026-11-06 11:2x CET)
 - Type: sub-phase
 - ID / attempt: 6.4 / 1
-- Status: OPEN (not started)
+- Status: OPEN (S3 batch 2 of the @indicators matrix; S4 sabotage, S5 lifecycle, S7 triage, advisor review not started)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
 - File / unit heading: phase_07.md → 6.4
-- Current step: 6.4 S1 (read contract; backup 03-pre-ha is < 24 h until 2026-11-07 06:47 UTC).
-- Next action: 6.4, then strict §11 order: 6.1…6.4 → P6 → 7.0…7.5 → P7 → 8.1 → 8.2 → P8 → PLAN.
-- Stop latch: none (no deadline in this run).
-- Deadline (this run only): none.
-- Last closure: unit:6.3:1
-- Unit base: HEAD fc5a213 (6.1 closure); branch `feat/index-analysis` (never switch or create branches)
-- Repo state: HEAD fc5a213 + 6.2 commit; uncommitted only `internal/webui/dist/index.html` (never staged), `.claude/` and `web/src/node_modules/` (not owned).
+- Current step: 6.4 S3: IND-SUGG rerun pending (spec fix applied, not re-verified).
+- Next action: rerun `-g 'IND-SUGG' --grep-invert '@slow'` (live env, both QA flags, ~20 min), then S4 sabotage, S5 lifecycle drills, S7, advisor review, 6.4 evidence + commit; then strict §11 order: P6 → 7.0…7.5 → P7 → 8.1 → 8.2 → P8 → PLAN.
+- Stop latch: HANDOFF deadline 2026-11-06 11:2x CET (cleared only by a new explicit invocation).
+- Deadline (this run only): 06-11-2026_11_40 CET (requested 11:16 CET); handoff started at the cutoff-fit check.
+- Last closure: unit:6.3:1 (commit 8320781)
+- Unit base: HEAD 8320781 (6.3 closure); branch `feat/index-analysis` (never switch or create branches)
+- Repo state: HEAD 8320781 + the 6.4 handoff commit (new specs `web/e2e/indicators.spec.ts`, `indicators_slow.spec.ts`, `lifecycle.spec.ts`, `qa/traceability.ts`, `qa/traceability.spec.ts`, STATE); uncommitted only `internal/webui/dist/index.html` (never staged), `.claude/` and `web/src/node_modules/` (not owned).
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
 - Stack: up and healthy on 127.0.0.1:9090 (built from the final P17 code); fresh VERIFIED backup `/home/agent/odoo-backups/03-pre-ha-20261106T064753Z` (valid until 2026-11-07 06:47 UTC; take another if older than 24 h before a destructive test); `02-loaded-20261104T170945Z` expired.
 
@@ -114,9 +114,9 @@ Unit-owned paths are listed in each phase file's sub-phase `Files` field and rec
 
 ## 6. In-flight checkpoint
 
-P17 closing (no handoff pending). Never run two Playwright jobs while a G-UI-LEGACY run is in progress (shared `test/e2e/_artifacts/ui/results`). Commit identity: `git -c user.name=fabio -c user.email=fabio@git.it`. G-UI-LEGACY harness note: `go test -tags=e2e` builds the stack from the checkout (binaries/images built by the test, not a pre-pulled image set); 3 PostGIS integration tests skip with "image not local". Stack `pglens-odoo` stays up. Docker cleanup at plan end. Backup `02-loaded-20261104T170945Z` EXPIRED: fresh verified backup before any destructive 6.x/7.x test.
+6.4 OPEN (handoff at deadline 2026-11-06). Done: @indicators batch 1 green (TPS, CONN, CONN-APP, LOCK, SLOW, ASH, HOST); batch 2: DEAD, IDXUSE, DB, FIND, NOTIF(state) green, IND-IDXUSE-SLOW (@slow) green. NOTIF delivery skipped (webhook unset). IND-SUGG: spec fixed twice (searchbox name "Search Index tax by table"; table accessible name "Index tax by table", was exact "Index tax") but NOT re-run; the last failure was only the UI Index tax row lookup (API side passed). IND-NOTIF: strip clears only after the next alert evaluation (instance_unreachable resolved 3 m 24 s after the restart; evaluation every 2 min), so the wait uses NOTIF_WAIT (300 s). Not run: S4 sabotage runs, S5 lifecycle drills (@lifecycle 14), S7 triage and QA-TRACE, advisor review. Never run two Playwright jobs on `test/e2e/_artifacts/ui/results`. Commit identity: `git -c user.name=fabio -c user.email=fabio@git.it`. Live spec env: `PGLENS_UI_BASE_URL=http://127.0.0.1:9090`, password/token from `/home/agent/pglens-odoo-stack/.env`, `PGLENS_QA_ALLOW_STIMULUS=1`, `PGLENS_QA_ALLOW_LIFECYCLE=1`, run from `web/` with `--project=desktop-fullhd --workers=1`. Probe schema `qa_tmp` dropped (specs recreate it). Pre-existing notes: 3 PostGIS integration tests skip with "image not local"; stack `pglens-odoo` stays up; Docker cleanup at plan end.
 
-Running resources: stack `pglens-odoo` up and healthy (final P17 code). `agent.yaml` = `agent.yaml.bak-16.4`. Research checkpoint: R3 pending (7.0). Before a later VIS-040 run (6.2, 8.2): `suggest_ground_truth.py` (330 s) then wait 3 min.
+Running resources: stack `pglens-odoo` up and healthy (final P17 code); no Playwright or probe process running. `agent.yaml` = `agent.yaml.bak-16.4`. Research checkpoint: R3 pending (7.0). Before a later VIS-040 run (6.2, 8.2): `suggest_ground_truth.py` (330 s) then wait 3 min. §8 deviations still to record at 6.4 closure: extra file `indicators_slow.spec.ts`; no `/api/v1/info` and no `/notifications`; IND-TPS burst 60/s; IND-HOST multi-core burners; ASH/HOST 16 min quiet-wait; IND-SLOW warm-up and unique relation; first-sample baseline limit; NOTIF wait 300 s.
 
 ## 7. Verification and reviews
 
