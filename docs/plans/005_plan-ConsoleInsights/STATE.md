@@ -18,20 +18,20 @@ See `PROTOCOL.md` (static cold-start rules).
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: RUNNING (previous invocation result: HANDOFF at deadline 2026-11-05 15:50 CET; latch cleared by the explicit re-invocation)
 - Type: sub-phase
-- ID / attempt: 6.3 / 1
+- ID / attempt: 6.4 / 1
 - Status: OPEN (not started)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: agent-2:claude-sonnet-5-5; supervisor: advisor (Opus 5.5)
-- File / unit heading: phase_07.md → 6.3
-- Current step: 6.3 S1 (stop rpc_load, fresh backup, verify_backup.sh).
-- Next action: 6.3, 6.4, then strict §11 order: 6.1…6.4 → P6 → 7.0…7.5 → P7 → 8.1 → 8.2 → P8 → PLAN.
+- File / unit heading: phase_07.md → 6.4
+- Current step: 6.4 S1 (read contract; backup 03-pre-ha is < 24 h until 2026-11-07 06:47 UTC).
+- Next action: 6.4, then strict §11 order: 6.1…6.4 → P6 → 7.0…7.5 → P7 → 8.1 → 8.2 → P8 → PLAN.
 - Stop latch: none (no deadline in this run).
 - Deadline (this run only): none.
-- Last closure: unit:6.2:1
+- Last closure: unit:6.3:1
 - Unit base: HEAD fc5a213 (6.1 closure); branch `feat/index-analysis` (never switch or create branches)
 - Repo state: HEAD fc5a213 + 6.2 commit; uncommitted only `internal/webui/dist/index.html` (never staged), `.claude/` and `web/src/node_modules/` (not owned).
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
-- Stack: up and healthy on 127.0.0.1:9090 (built from the final P17 code); backup `02-loaded-20261104T170945Z` EXPIRED 2026-11-05 17:09Z: take a fresh verified backup before any lifecycle/G-QA destructive test.
+- Stack: up and healthy on 127.0.0.1:9090 (built from the final P17 code); fresh VERIFIED backup `/home/agent/odoo-backups/03-pre-ha-20261106T064753Z` (valid until 2026-11-07 06:47 UTC; take another if older than 24 h before a destructive test); `02-loaded-20261104T170945Z` expired.
 
 ## 2. Feature context and readiness
 
@@ -122,6 +122,7 @@ Running resources: stack `pglens-odoo` up and healthy (final P17 code). `agent.y
 
 Latest result per gate; earlier detail in `history.md`.
 
+- 6.3 run (2026-11-06 06:47 UTC; Odoo idle, no `rpc_load.py` running): `backup.sh 03-pre-ha` → `/home/agent/odoo-backups/03-pre-ha-20261106T064753Z` (odoo.dump 12.9 MB, MANIFEST, SHA256SUMS: odoo.dump `73b9ab81eb4c80d65dd4…`, MANIFEST `50f4e15a95a730dac806…`); counts before = after: res_partner 30006, product_template 3010, sale_order 4000, crm_lead 8000, mail_message 90061, modules installed 169; `verify_backup.sh` exit 0 (ENV-001 sha256 ok, ENV-002 restore into a throwaway `postgres:18` without published port with counts in the MANIFEST ranges ok, ENV-003 ok), `VERIFIED` written, throwaway container removed, production container never a restore target (ENV-005 = exit 0). Deviation: the rebuilt `backup.sh` dumps the database only (no filestore tarball; §8 row "User rulings 2026-11-04 (a)"); the filestore holds attachments only and the HA drill needs the database.
 - 6.2 run (2026-11-06, stack rebuilt by `deploy.sh` from the final code, Odoo load via `rpc_load.py`, `suggest_ground_truth.py` 330 s + 3 min wait): COV-E2E-001 passed (after fixing the Query inspector at 1600×950, §8); new `web/e2e/qa_tour.spec.ts` QA-TOUR-001 passed (9.4 min): every non-exempt `FULLHD_ROUTES` entry under load has `assertFits` at 1920×1080 and 1920×950, 0 serious/critical axe violations, rows > 0 on the data routes, ≥ 2 ASH wait-group cards, no page-wide horizontal scrollbar at 1440×900, no console error or 4xx/5xx (404 excluded); 195 screenshots in `test/e2e/_artifacts/ui/qa/` (1920×1080, 1920×950, 1440×900), sampled by agent-2 (Fleet, Index suggestions, ASH, Locks, Queries): no clipped caption, no overlap, no scrollbar; minor: Index suggestions "Est. size" "upper bound" beside "Unknown" is tight (accepted). Live batch `-g 'VIS-0(00|10|15|16|20|30|31|32)|VIS-FHD|TBL-E2E|FHD-|SRCH-E2E|SET-E2E|PREF-E2E|RET-E2E|ADV-E2E|NOTI-E2E|CLNAME-E2E|VIS-CAP|VIS-LOCKS|VIS-RDY|VIS-041|HDR-E2E'`: 37 passed, 6 failed; reruns: VIS-015, ADV-E2E-001, VIS-LOCKS-001, VIS-040 passed after spec updates (§8); VIS-031 tps 24h and NOTI-E2E-001/002 not green (§8, decisions). VIS-010 6h and VIS-031 tps 6h passed. REQ-17: `/api/v1/instances/<id>/settings` returns 77 settings including `autovacuum*` with value, unit, source and context. G-WEB-STATIC: tsc ok, `eslint .` exit 0 (2 known warnings), prettier ok on `src` and `e2e`; vitest focused `src/features/queries src/features/fleet src/features/settings src/lib` 75 files / 711 passed; full vitest ran before the last tile-detail edit 199 files / 1859 passed. G-SECRETS before commit.
 - 6.1 run (2026-11-06, HEAD 89d711e): G-GO-FULL (`make fmt-check lint vet-tags test`) ok, 40 s, 32 packages ok; G-GO-INT-ALL (`-tags=integration -race -shuffle=on`, skipping TestINTRO002/TestINTGIS001/TestINTEXT002 = "not run: image not local") ok, ~2 min uncached, 3506 PASS lines, 0 FAIL, SKIP: TestINTFIRSTRUN001 (needs `PGLENS_FIRSTRUN_LONG=1`, 11 min), TestINTIO001/002 pg15 (pg_stat_io needs PG16), TestPlaceholderMentionsBuildCommand; no new module download observed (pgxmock/v5 note from earlier runs stands); G-WEB-FULL: typecheck, lint exit 0, vitest 199 files / 1861 tests (1859 in the plain run), coverage gates ok, budget initial 194.29 KiB (< 350), lazy chunks < 500; G-RO `TestINTRO001` ok. No baseline failure tolerated or hit.
 - 17.3 run (2026-11-06): G-WEB-STATIC typecheck ok, `eslint .` exit 0 (2 warnings: `IndexAnalysisPage.tsx:30` and `InstanceStatusBanners.tsx:20`, both `react-refresh/only-export-components`), prettier ok; G-WEB-UNIT full `vitest run` 199 files / 1861 tests passed; `make web-budget` initial entry 194.29 KiB (< 350); G-DEPLOY ok; G-VIS live on the final build: VIS-CAP-001..005, FHD-FIT-001, FHD-MEASURE-001, FHD-INST-001, HDR-E2E-001 all passed (9/9, 12.3 min); after the last width change (Relations table) VIS-CAP-004/005, FHD-FIT-001, FHD-INST-001 passed again and a probe found 0 of 20 truncated Relation cells. C-17 review rounds (Opus 5.5, screenshots 1920×1080): round 1 "no" (4 blockers, 20 majors, fixed in 6befc69); round 2 "no" (1 major: column ⓘ overlapping the next header, plus mediums; fixed in 44083f4, guard VIS-CAP-005); round 3 "no" with one remaining major (Relations > Tables Relation column truncated), fixed by trimming the neighbouring column widths and measured at 0/20 truncated; autonomous decision: no fourth Opus pass for 17.3, the P17 advisor review re-checks it. Minors recorded, not fixed: Relations Index bloat TABLE shown twice and INDEX truncated; Locks "Oldest prepared transaction 0s" when there are none (should say none); Activity caption lists items that live on the Blocking card; Findings rule catalogue RULE text cut while NEEDS has room; Sequences FEEDS truncated while LIMIT is wide; Internals "n/a" for 24 h and 7 d without ⓘ; table footers "of 1 suggestions", "of 1 instances". Guard proofs (mutations, then spec restored, `git status --short web/e2e` clean): VIS-CAP-005 fails with injected `th button{position:relative;left:40px}` ("outside its cell"); VIS-CAP-004 first did NOT fail with `.line-clamp-2{-webkit-line-clamp:1}` (captions there have one line), then fails with `main [class*="line-clamp-"]{max-width:14rem}` (268 offenders). Relations probe 0/20 truncated cells at 1920. `go test -tags=e2e ./test/e2e/... -list UI`: 12 tests (TestUI_Smoke, Failover, UnauthenticatedNavigation, AgentOutage, StandaloneLag, DisabledASH, PlanOnly, Charts, BlockingTree, Cancel, FindingMute, Accessibility). G-SECRETS: diff patterns 0, cached 0 (checked before each commit). Earlier run: 17.2 run (2026-11-05): G-WEB-STATIC typecheck ok, lint 0 errors (2 pre-existing warnings: IndexAnalysisPage, InstanceStatusBanners), prettier ok; G-WEB-UNIT `vitest run --coverage` 195 files / 1697 tests passed (after fixing a race in CAPTION-PAGE-004: `findByRole` table wait); `make web-coverage-gate web-budget` ok, initial bundle 185.90 KiB (< 350). Captions: 190+ entries over 7 captionsets, CAPTION_ALLOWLIST and CARD_ALLOWLIST empty, DYNAMIC_ALLOWLIST 9 sites; 18 `columnHelp` ids wired via `meta.help` (CAPTION-006 checks them). Advisor Opus 5.5 review (10 items) fixed; independent read-only Opus 5.5 sampling of 44 entries: 34 correct, 10 defects (alerts pending state, product-limits, host load, estimated markers, events limit, wording) corrected in the captionsets; card D31 gaps recorded in §8. G-SECRETS (a) diff HEAD 0, cached 0; only match in tree is the fake canary fixture NotificationsPanel.test.tsx; (b) not runnable (webhook deferred).
@@ -226,7 +227,7 @@ Latest result per gate; earlier detail in `history.md`.
 | 17.3 | phase_18.md | 17.2 | DONE | 1 | closure commit of 17.3 |
 | 6.1 | phase_07.md | phases 0–5, 9–17 closed | DONE | 1 | §7 6.1 run |
 | 6.2 | phase_07.md | 6.1 | DONE | 1 | §7 6.2 run |
-| 6.3 | phase_07.md | 6.2 | TODO | 1 | — |
+| 6.3 | phase_07.md | 6.2 | DONE | 1 | §7 6.3 run |
 | 6.4 | phase_07.md | 6.2, 6.3, 0.4 | TODO | 1 | — |
 | 7.0 | phase_08.md | 6.3, 10.2 | TODO | 1 | — |
 | 7.1 | phase_08.md | 7.0 | TODO | 1 | — |
@@ -356,7 +357,7 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | TAXPANEL-* | 5.1 | G-WEB-UNIT | DONE | §7 5.1 |
 | VIS-* | 5.1 | G-VIS | DONE | VIS-041 `-g VIS-041` 1 passed (§7 5.1) |
 | QA-TOUR-* | 6.2 | G-VIS / G-QA | DONE | QA-TOUR-001 passed (§7 6.2) |
-| ENV-* | 6.3 | G-GO-FOCUS | TODO | — |
+| ENV-* | 6.3 | G-GO-FOCUS | DONE | §7 6.3 (ENV-001/002/003 ok) |
 | QA-CLEAN-* | 6.4 | G-QA-HARNESS | TODO | — |
 | QA-TRACE-* | 6.4 | G-QA-HARNESS | TODO | — |
 | SORIGIN-E2E-* | 6.4 | G-VIS / G-QA | TODO | — |
