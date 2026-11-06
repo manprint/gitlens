@@ -2301,7 +2301,7 @@ Events are the system's way of notifying you of changes in replication topology 
 | `orphan_standby` | a standby's upstream cannot be resolved for more than 60 seconds | Primary is down but the standby has not been promoted. Either the primary is recovering, or you need to promote the standby and reconnect it. |
 | `role_change` | any instance changed role (except failovers, which emit `failover_detected` instead) | Expected during planned promotion or recovery. Check the instance's new role via `/api/v1/clusters`. |
 | **Replication slots** | |
-| `slot_inactive` | a replication slot has been inactive (not actively feeding a standby) for more than 30 seconds; the window is fixed and is not read from the configuration | Standby is down or disconnected. Check if the standby needs to be restarted or reconnected. |
+| `slot_inactive` | a replication slot has been inactive (not actively feeding a standby) for more than 30 seconds; the window is fixed and is not read from the configuration | Standby is down or disconnected. Check if the standby needs to be restarted or reconnected. After a switchover, an old primary that now runs as a standby can keep the slots it served as primary: they stay inactive and retain WAL, so drop them on that standby (`pg_drop_replication_slot`). |
 | **Cluster health** | |
 | `no_primary_in_cluster` | no instance in the cluster has reported the primary role for about 135 to 165 seconds: a primary counts for 90 seconds after its last push, then the event follows 60 seconds later | Critical: the cluster has no leader. Investigate why all instances went down or why none are reporting as primary. Promote a standby if needed. |
 | **Other** | |

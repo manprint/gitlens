@@ -722,6 +722,31 @@ async function haScript(script: string, ...args: string[]): Promise<RunResult> {
 }
 
 const REDUNDANCY = 'replica.redundancy_reduced'
+/** GAP-6: physical slots on a node that no consumer uses (a rejoined node must hold none). */
+async function inactiveSlots(node: string): Promise<number> {
+  return Number(
+    await psqlOn(
+      node,
+      "SELECT count(*) FROM pg_replication_slots WHERE slot_type = 'physical' AND NOT active",
+    ),
+  )
+}
+
+/** slot_inactive episodes of one instance started since `since` (state all), or still open. */
+async function slotInactiveEpisodes(
+  api: APIRequestContext,
+  instanceId: string | undefined,
+  since: Date,
+): Promise<PglensAlert[]> {
+  const response = await api.get('/api/v1/alerts?state=all&rule_id=slot_inactive')
+  if (!response.ok()) return []
+  return ((await response.json()) as PglensAlert[]).filter(
+    (alert) =>
+      alert.instance_id === instanceId &&
+      (alert.state !== 'resolved' || new Date(alert.started_at) >= since),
+  )
+}
+
 /** No episode of the rule open, pending included: a pending one would fire dated before t0. */
 async function expectNoOpen(api: APIRequestContext, rule: string): Promise<void> {
   await expect
@@ -924,6 +949,14 @@ test.describe.serial('HA-DRILL', () => {
     const ids = await idsByAddr(api)
     const oldLeader = (await hactlStatus(page))?.leader ?? ''
     const target = oldLeader === 'pg-ha-2' ? 'pg-ha-3' : 'pg-ha-2'
+    // GAP-6 (7.5.5) precondition: no slot_inactive episode open for the old leader.
+    await expect
+      .poll(async () => (await slotInactiveEpisodes(api, ids.get(oldLeader), new Date())).length, {
+        timeout: 480_000,
+        intervals: [10_000],
+        message: 'D1 no slot_inactive episode open for the old leader',
+      })
+      .toBe(0)
     const t0 = new Date()
     const load = startLoad(120)
     const probe = odooProbe()
@@ -936,6 +969,17 @@ test.describe.serial('HA-DRILL', () => {
     await expectFailoverRecorded(api, ids, oldLeader, target, t0, 'D1')
     await expectLagContinuity(api, page, ids, target, done, 'D1')
     await expectHealthy(api, page, ROLE_WAIT)
+    // GAP-6 (7.5.5): the demoted leader keeps no slot of its primary term, and pglens raises no
+    // slot_inactive for it (the alert would fire ~30 s plus one pass after a scrape).
+    expect(await inactiveSlots(oldLeader), 'D1 V-6 the demoted leader holds no inactive slot').toBe(
+      0,
+    )
+    const settle = 120_000 - (Date.now() - done.getTime())
+    if (settle > 0) await new Promise((resolve) => setTimeout(resolve, settle))
+    expect(
+      (await slotInactiveEpisodes(api, ids.get(oldLeader), t0)).length,
+      'D1 V-6 no slot_inactive episode for the demoted leader',
+    ).toBe(0)
   })
 
   test('HA-DRILL-002 D2 hard failover: docker kill the primary', async ({
@@ -1053,6 +1097,7 @@ test.describe.serial('HA-DRILL', () => {
     const rejoinStarted = new Date()
     await haScript('rejoin.sh', victim)
     await expectHealthy(api, page, ROLE_WAIT + 60_000)
+    expect(await inactiveSlots(victim), 'D4 V-6 the rejoined node holds no inactive slot').toBe(0)
     await expectRolesAndAgent(api, leader, [...ids.keys()], rejoinStarted, 'D4', page)
     expect
       .soft(
@@ -1185,6 +1230,7 @@ test.describe.serial('HA-DRILL', () => {
 
     await haScript('rejoin.sh', standby)
     await expectHealthy(api, page, ROLE_WAIT + 60_000)
+    expect(await inactiveSlots(standby), 'D3 V-6 the rejoined node holds no inactive slot').toBe(0)
     expectOdoo(await probe(), 'D3', 5_000)
     await expect
       // O-9: after a reconnect the agent resumes the receiver check up to ~2 min later, and the
