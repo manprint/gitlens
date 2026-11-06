@@ -447,7 +447,7 @@ function InstanceStatements({
             <MetricTile
               captionId="slow.statements-ranked"
               className={HEADER_TILE_FLEX}
-              detail={`Ranks at most ${STATEMENT_FETCH_LIMIT} statements.${response?.truncated ? ' Some may be missing.' : ''}`}
+              detail={`At most ${STATEMENT_FETCH_LIMIT} ranked${response?.truncated ? ', some missing' : ''}.`}
               label="Statements ranked"
               unit="statements"
               value={String(rows.length)}

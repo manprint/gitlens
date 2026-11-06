@@ -363,7 +363,7 @@ function WindowField({
         </Badge>
         <Button
           aria-describedby={resetHelpId}
-          aria-label={`Reset ${label} to default`}
+          aria-label={`${resetting ? 'Resetting…' : 'Reset to default'}: ${label}`}
           disabled={disabled || window.source === 'default'}
           onClick={onReset}
           size="xs"

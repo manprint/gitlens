@@ -237,8 +237,8 @@ describe('AdvisorPanel', () => {
     await flushNetwork()
     expect(screen.getByRole('textbox', { name: 'Unused-index history' })).toHaveValue('1')
 
-    const reset = screen.getByRole('button', { name: 'Reset Unused-index history to default' })
-    expect(screen.getByRole('button', { name: 'Reset Backup history to default' })).toBeDisabled()
+    const reset = screen.getByRole('button', { name: 'Reset to default: Unused-index history' })
+    expect(screen.getByRole('button', { name: 'Reset to default: Backup history' })).toBeDisabled()
     fireEvent.click(reset)
     await flushNetwork()
     expect(bodies[1]).toEqual({ 'window.unused_index': null })

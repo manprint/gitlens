@@ -170,7 +170,7 @@ test('VIS-015 replication lag shows a readable chart or states that there is no 
     await page.setViewportSize({ width, height: 1000 })
     await lag.scrollIntoViewIfNeeded()
     if (cluster.instance_count <= 1) {
-      await expect(lag.getByText(/No replication lag/)).toBeVisible()
+      await expect(lag.getByRole('heading', { name: 'No replication lag' })).toBeVisible()
     } else {
       const edge = lag.getByRole('article').first()
       await expect(edge.getByText(/UTC · step \d+[smhd]$/)).toBeVisible()
@@ -1565,7 +1565,8 @@ async function assertAdvisorHeadroom(page: Page, path: string, sectionId: string
         `ADV-E2E-001 caption at ${viewport.width}×${viewport.height}: ${JSON.stringify(cut)}`,
       )
       expect(cut.scrollWidth, `${path}: caption truncated`).toBeLessThanOrEqual(cut.clientWidth)
-      expect(cut.height, `${path}: caption on one line`).toBeLessThanOrEqual(24)
+      // D30/I-16: the caption is clamped to two lines (≈ 2 × 20 px) and must not be cut.
+      expect(cut.height, `${path}: caption within two lines`).toBeLessThanOrEqual(48)
     }
     const box = await section.boundingBox()
     expect(box, `${path} section box`).not.toBeNull()
@@ -1671,7 +1672,7 @@ test('ADV-E2E-001 a rule disabled in Settings leaves the Findings page within on
     await page.goto('/settings?tab=advisor&view=windows')
     const input = page.getByRole('textbox', { name: 'Unused-index history' })
     await expect(input).toBeVisible({ timeout: 30_000 })
-    const reset = page.getByRole('button', { name: 'Reset Unused-index history to default' })
+    const reset = page.getByRole('button', { name: 'Reset to default: Unused-index history' })
     if (await reset.isEnabled()) {
       // A previous run kept 1 hour: back to the default first, so Save writes it again.
       await reset.click()
@@ -2956,13 +2957,11 @@ test('VIS-LOCKS-001 the Locks page splits sessions by origin into two tables tha
     { timeout: 30_000 },
   )
   await expect(page.getByRole('list', { name: 'Active sessions' })).toHaveCount(0)
-  const by = first.connections?.truncated
-    ? first.connections.totals?.by_origin
-    : first.connections?.by_origin
-  const count = (key: string) => by?.find((row) => row.key === key)?.count ?? 0
-  await expect(
-    page.getByText(`application ${count('application')} · pglens ${count('pglens')}`),
-  ).toBeVisible({ timeout: 30_000 })
+  // Under load the session counts move between the API read and the render: the strip
+  // must show the split; exact counts are compared per origin in the loop below.
+  await expect(page.getByText(/\d+ application connections · \d+ pglens connections/)).toBeVisible({
+    timeout: 30_000,
+  })
   await page.screenshot({ path: `${ARTIFACT_DIR}/vis-locks-001-blocking-1920.png` })
 
   for (const origin of ['application', 'pglens'] as const) {
@@ -3080,7 +3079,7 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
   ] as const) {
     await page.setViewportSize({ width, height })
     await page.goto(`/indexes?instance=${instanceId}&tab=suggestions&db=odoo`)
-    const table = page.getByRole('table', { name: 'Index suggestions' })
+    const table = page.getByRole('table', { name: 'Suggested indexes' })
     await expect(table).toBeVisible({ timeout: 30_000 })
     await expect(
       page.getByText('Suggestions are estimates from statement statistics'),

@@ -106,7 +106,7 @@ describe('queries captions (CAPTION-PAGE)', () => {
     const ranked = screen.getByRole('article', { name: 'Statements ranked' })
     expect(within(ranked).getByText('1')).toBeVisible()
     expect(ranked).toHaveTextContent(/1\s*statement(?!s)/)
-    expect(ranked).toHaveTextContent('Ranks at most 200 statements.')
+    expect(ranked).toHaveTextContent('At most 200 ranked.')
     expect(within(ranked).queryByText(/of 200 max/)).not.toBeInTheDocument()
   })
 

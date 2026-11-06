@@ -56,7 +56,7 @@ function SummaryFilter({
   return (
     <div className="relative h-full" data-caption-id={captionId}>
       <button
-        aria-label={`${children} ${count}: ${label}`}
+        aria-label={`${children} ${count}${unit !== undefined && typeof count === 'number' ? ` ${unit}` : ''}: ${label}`}
         aria-pressed={active}
         className={cn(
           'bg-card shadow-card group flex h-full w-full flex-col justify-between gap-1.5 rounded-xl border py-3 pr-8 pl-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60',
@@ -75,7 +75,7 @@ function SummaryFilter({
         <span className="flex items-baseline gap-1.5">
           <strong className="text-foreground text-2xl font-semibold tracking-tight tabular-nums">
             {count}
-          </strong>
+          </strong>{' '}
           {unit !== undefined && typeof count === 'number' ? (
             <span className="text-muted-foreground text-xs">{unit}</span>
           ) : null}

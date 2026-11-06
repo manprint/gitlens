@@ -92,7 +92,7 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string, term: strin
 
   return (
     // From 1600 px the link and the statement share one line (D26).
-    <div className="min-w-64 space-y-1 min-[1600px]:flex min-[1600px]:items-center min-[1600px]:gap-2 min-[1600px]:space-y-0">
+    <div className="min-w-64 space-y-1 min-[1600px]:flex min-[1600px]:min-w-0 min-[1600px]:items-center min-[1600px]:gap-2 min-[1600px]:space-y-0 min-[1600px]:overflow-hidden">
       <Link
         className="text-primary text-xs font-semibold underline-offset-4 hover:underline min-[1600px]:shrink-0 min-[1600px]:whitespace-nowrap"
         to={queryPath(instanceId, row.queryid, row.datname)}
@@ -135,7 +135,7 @@ function statementColumns(
     },
     {
       id: 'calls',
-      meta: { width: '7rem' },
+      meta: { width: '5.5rem' },
       header: 'Calls',
       accessorFn: (row) => summariseStatement(row).calls,
       cell: ({ row }) => {
@@ -149,7 +149,7 @@ function statementColumns(
     },
     {
       id: 'total-time',
-      meta: { width: '10rem', help: 'statements.total-time' },
+      meta: { width: '8rem', help: 'statements.total-time' },
       header: 'Total time',
       accessorFn: (row) => summariseStatement(row).total,
       cell: ({ row }) => {
@@ -163,7 +163,7 @@ function statementColumns(
     },
     {
       id: 'mean-time',
-      meta: { width: '10rem', help: 'statements.mean-time' },
+      meta: { width: '8rem', help: 'statements.mean-time' },
       header: 'Mean time',
       accessorFn: (row) => summariseStatement(row).mean,
       cell: ({ row }) => {
@@ -175,7 +175,7 @@ function statementColumns(
     },
     {
       id: 'share-total',
-      meta: { width: '13rem', help: 'statements.share-of-listed' },
+      meta: { width: '9.5rem', help: 'statements.share-of-listed' },
       header: 'Share of listed time',
       enableSorting: false,
       cell: ({ row }) => {
@@ -189,7 +189,7 @@ function statementColumns(
     },
     {
       id: 'rows',
-      meta: { width: '7rem' },
+      meta: { width: '5.5rem' },
       header: 'Rows',
       accessorFn: (row) =>
         typeof row.rows === 'number' && Number.isFinite(row.rows) ? row.rows : null,
@@ -197,7 +197,7 @@ function statementColumns(
     },
     {
       id: 'cache-hit-ratio',
-      meta: { width: '12.5rem', help: 'statements.cache-hit-ratio' },
+      meta: { width: '8rem', help: 'statements.cache-hit-ratio' },
       header: 'Cache hit ratio',
       accessorFn: (row) => summariseStatement(row).cacheHitRatio,
       cell: ({ row }) => {
@@ -211,7 +211,7 @@ function statementColumns(
     },
     {
       id: 'wal-bytes',
-      meta: { width: '8.5rem', help: 'statements.wal' },
+      meta: { width: '6.5rem', help: 'statements.wal' },
       header: 'WAL',
       accessorFn: (row) =>
         typeof row.wal_bytes === 'number' && Number.isFinite(row.wal_bytes) ? row.wal_bytes : null,
@@ -228,7 +228,7 @@ function statementColumns(
     },
     {
       id: 'temporary-bytes',
-      meta: { width: '17rem', help: 'statements.temp-bytes-per-call' },
+      meta: { width: '11rem', help: 'statements.temp-bytes-per-call' },
       header: 'Temporary bytes/call',
       accessorFn: (row) => summariseStatement(row).tempBytesPerCall,
       cell: ({ row }) => {
@@ -418,12 +418,12 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   )
 
   return (
-    <div className="space-y-8 min-[1600px]:space-y-4">
+    <div className="space-y-8 min-[1600px]:space-y-2">
       <PageHeader
         icon={Zap}
         eyebrow="Query performance"
         title="Query inspector"
-        subtitle="Every statement pg_stat_statements recorded on this instance in the selected time range. Change the ranking to find the slowest, most frequent or most I/O-heavy queries, and open one to see its plan."
+        subtitle="Every statement pg_stat_statements recorded here in the selected range. Re-rank it, then open one to see its plan."
         freshness={
           <FreshnessBadge dataUpdatedAt={statementsQuery.dataUpdatedAt} policy="statements" />
         }

@@ -3,7 +3,7 @@ import type { CaptionEntry } from '../captions'
 /** Captions of the queries route group (D30); rules in the plan, phase 17. */
 export const queriesCaptions = {
   'queries.statements-section': {
-    what: 'Statements recorded by pg_stat_statements on this instance, ranked by the chosen measure and cut to the top 50.',
+    what: 'pg_stat_statements rows of this instance, ranked by the chosen measure and cut to the top 50.',
     source:
       'Server statements endpoint over metrics_statements, written by the stat_statements check from pg_stat_statements; one row per queryid and database, ranked and limited on the server.',
     unit: 'Statements; each row carries calls, milliseconds, rows, blocks and bytes.',

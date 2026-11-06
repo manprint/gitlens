@@ -584,7 +584,7 @@ describe('SlowQueriesPage Full HD layout (D26)', () => {
     renderLoaded({ comparable_scope: 'cluster', statements: STATEMENTS, truncated: true })
     await flushNetwork(30)
     const ranked = screen.getByRole('article', { name: 'Statements ranked' })
-    expect(ranked).toHaveTextContent('Some may be missing.')
+    expect(ranked).toHaveTextContent('some missing.')
     expect(CAPTIONS['slow.statements-ranked'].howToRead).toContain('checks.stat_statements.top_n')
   })
 
