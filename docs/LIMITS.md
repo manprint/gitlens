@@ -350,3 +350,32 @@ at 1366 px or at 2560 px; the end-to-end check `VIS-FHD-002` lists the tables th
 scroll inside their card in `test/e2e/_artifacts/ui/fullhd/sideways-tables.txt`.
 The Index tax table is one of them at 1366 px: its sort and help controls need
 about 1340 px.
+
+## 19. High availability is observed, not managed
+
+pglens reads each node of a replicated cluster and reports what the nodes
+report; it does not elect, promote, fence or rejoin a node, and it has no view
+of the controller that does (Patroni, repmgr, a proxy). Consequences:
+
+- A failover is seen at the next scrape of the nodes involved, so a switch and
+  switch back within one interval can go unseen (section 8). The
+  `failover_detected` event and the topology change follow the scrape, not the
+  controller's own clock.
+- A standby that stops reporting keeps its last known edge, drawn dashed after
+  60 seconds; pglens cannot tell a stopped node from a network partition
+  between the agent and that node.
+- Activity statistics on a standby are counted by the standby; the console
+  notes it on the Tables and indexes section and on Index analysis, not on
+  other per-instance charts.
+- `cancel` and `terminate` on a standby need `pg_signal_backend` granted on the
+  primary (roles replicate) and `allow_signal` on the target; PostgreSQL still
+  refuses to signal a superuser's session.
+- Alert episodes after a restart of the server: an event that arrived while its
+  episode was already open may reopen it once, and a clock skew of more than two
+  evaluation passes between the database and the writer can merge or split
+  episodes.
+
+The HA lab in `test/ha/hactl` is a test fixture: a single proxy probes the
+nodes, promotes the most advanced standby when the leader fails and refuses
+writes on a split brain, without consensus; it is not a model for a
+production controller.

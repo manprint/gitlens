@@ -2290,6 +2290,33 @@ curl -s -b cookies.txt "localhost:8080/api/v1/clusters/7381927364512345678/repli
 
 The `cluster_id` returned by these endpoints is byte-identical before and after a failover or promote, proving invariant I-1 is honored.
 
+### High-availability clusters
+
+pglens observes an HA cluster; it never promotes, fences or reconfigures a
+node. With every node in the agent configuration it shows:
+
+- the current primary and each standby edge on the cluster page; an edge is
+  dashed (not live) when its standby stops streaming or has not reported for
+  60 seconds, and keeps its last known upstream;
+- a `failover_detected` event when a different node becomes primary, under the
+  same `cluster_id`;
+- `no_primary_in_cluster` while no node reports itself primary, and
+  `replica.redundancy_reduced` while a member seen in the last hour is not
+  streaming; each outage is its own alert episode with its own notification;
+- per-standby write, flush and replay lag in seconds, and replay lag in bytes;
+- on a standby, a note that activity statistics are the standby's own while
+  sizes and definitions match the primary;
+- on-demand commands against the standby itself: `explain` runs there, and
+  `cancel`/`terminate` signal the standby's own sessions (see On-demand
+  operations for the T2 grant and `allow_signal`).
+
+The HA lab is a test fixture, not part of the product: the repository holds
+its controller (`test/ha/hactl`, one proxy that elects the leader), and an
+external lab stack runs it in front of three PostgreSQL 18 nodes for the
+`HA-DRILL` end-to-end drills (switchover, hard failover, standby loss, rejoin,
+commands on a standby). Its limits and pglens's are in
+[docs/LIMITS.md](docs/LIMITS.md#19-high-availability-is-observed-not-managed).
+
 ## Wait-event analysis
 
 What it answers: where the database is spending its time, right now and historically. It samples `pg_stat_activity` once per second, aggregates into 10-second windows, and stores the sample counts by wait event. No extension or restart required — it works on managed PostgreSQL including Amazon RDS.
