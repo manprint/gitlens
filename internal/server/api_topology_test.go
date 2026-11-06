@@ -181,8 +181,8 @@ func TestTopologyAPI_HandleReplication_MockPool_ExpandsPerMetric(t *testing.T) {
 			{}, // topology edges
 			{}, // standby names reported by primaries
 			{rows: [][]any{
-				{from.String(), &to, "", "receiver", nil, ts, nil, nil, 50.0},
-				{from.String(), nil, "", "receiver", nil, ts, nil, nil, nil}, // no upstream: must be skipped, not crash
+				{from.String(), &to, "", "receiver", nil, ts, nil, nil, 50.0, nil},
+				{from.String(), nil, "", "receiver", nil, ts, nil, nil, nil, nil}, // no upstream: must be skipped, not crash
 			}},
 		},
 	}
@@ -197,7 +197,7 @@ func TestTopologyAPI_HandleReplication_MockPool_ExpandsPerMetric(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp replicationResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Len(t, resp.Edges, 3)
+	require.Len(t, resp.Edges, 4)
 
 	byMetric := make(map[string]replicationSeriesResp, len(resp.Edges))
 	for _, e := range resp.Edges {
@@ -209,6 +209,48 @@ func TestTopologyAPI_HandleReplication_MockPool_ExpandsPerMetric(t *testing.T) {
 	require.Equal(t, 50.0, *byMetric["replay_lag_sec"].Series[0].Value)
 	require.Nil(t, byMetric["write_lag_sec"].Series[0].Value)
 	require.Nil(t, byMetric["flush_lag_sec"].Series[0].Value)
+	// A receiver reports no byte lag: the bytes series is a null gap.
+	require.Nil(t, byMetric["replay_lag_bytes"].Series[0].Value)
+}
+
+// TestHAV31ReplayLagBytes (HA-V-3-1): the primary's
+// byte lag is served as a fourth series per edge, also when PostgreSQL
+// reports no time lag (idle cluster); the three time series are unchanged.
+func TestHAV31ReplayLagBytes(t *testing.T) {
+	primary, standby := uuid.New(), uuid.New()
+	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cidDB := store.ToDB(pgtype.ClusterID(123))
+	pool := &mockPool{
+		queryResults: []*mockRows{
+			{rows: [][]any{{cidDB, primary.String(), "pg-primary"}, {cidDB, standby.String(), "pg-standby-a"}}},
+			{rows: [][]any{{cidDB, standby.String(), primary.String()}}},
+			{rows: [][]any{{cidDB, primary.String(), "pg-standby-a"}}},
+			{rows: [][]any{
+				{primary.String(), nil, "pg-standby-a", "sender", strPtr("async"), ts, nil, nil, nil, 4096.0},
+			}},
+		},
+	}
+	topo := &TopologyAPI{pool: pool}
+	r := chi.NewRouter()
+	topo.RegisterRoutes(r)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
+		"/api/v1/clusters/123/replication?from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z", http.NoBody))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp replicationResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Edges, 4)
+	byMetric := make(map[string]replicationSeriesResp, len(resp.Edges))
+	for _, e := range resp.Edges {
+		require.Equal(t, standby.String(), e.From)
+		require.Len(t, e.Series, 1)
+		byMetric[e.Metric] = e
+	}
+	require.NotNil(t, byMetric["replay_lag_bytes"].Series[0].Value)
+	require.Equal(t, 4096.0, *byMetric["replay_lag_bytes"].Series[0].Value)
+	for _, metric := range []string{"write_lag_sec", "flush_lag_sec", "replay_lag_sec"} {
+		require.Nil(t, byMetric[metric].Series[0].Value, metric)
+	}
 }
 
 // TestTopologyAPI_HandleReplication_PrimaryRowsAreEdges: the primary's rows
@@ -226,10 +268,10 @@ func TestTopologyAPI_HandleReplication_PrimaryRowsAreEdges(t *testing.T) {
 			{rows: [][]any{{cidDB, standby.String(), primary.String()}}},
 			{rows: [][]any{{cidDB, primary.String(), "pg-standby-a"}, {cidDB, primary.String(), "reporting"}}},
 			{rows: [][]any{
-				{standby.String(), &primary, "", "receiver", nil, ts, nil, nil, 9.0},
-				{primary.String(), nil, "pg-standby-a", "sender", strPtr("sync"), ts, 1.0, 2.0, 3.0},
-				{primary.String(), nil, "reporting", "sender", strPtr("async"), ts, 4.0, 5.0, 6.0},
-				{primary.String(), nil, "slot_a", "slot", nil, ts, nil, nil, nil},
+				{standby.String(), &primary, "", "receiver", nil, ts, nil, nil, 9.0, nil},
+				{primary.String(), nil, "pg-standby-a", "sender", strPtr("sync"), ts, 1.0, 2.0, 3.0, 7.0},
+				{primary.String(), nil, "reporting", "sender", strPtr("async"), ts, 4.0, 5.0, 6.0, 8.0},
+				{primary.String(), nil, "slot_a", "slot", nil, ts, nil, nil, nil, nil},
 			}},
 		},
 	}
@@ -242,7 +284,7 @@ func TestTopologyAPI_HandleReplication_PrimaryRowsAreEdges(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp replicationResp
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Len(t, resp.Edges, 6, "two standbys x three metrics; the receiver duplicate and the slot are not edges")
+	require.Len(t, resp.Edges, 8, "two standbys x four metrics; the receiver duplicate and the slot are not edges")
 	values := map[string]float64{}
 	for _, e := range resp.Edges {
 		require.Equal(t, primary.String(), e.To)
@@ -250,12 +292,14 @@ func TestTopologyAPI_HandleReplication_PrimaryRowsAreEdges(t *testing.T) {
 		values[e.From+"/"+e.Metric+"/"+*e.SyncState] = *e.Series[0].Value
 	}
 	require.Equal(t, map[string]float64{
-		standby.String() + "/write_lag_sec/sync":  1,
-		standby.String() + "/flush_lag_sec/sync":  2,
-		standby.String() + "/replay_lag_sec/sync": 3,
-		"reporting/write_lag_sec/async":           4,
-		"reporting/flush_lag_sec/async":           5,
-		"reporting/replay_lag_sec/async":          6,
+		standby.String() + "/write_lag_sec/sync":    1,
+		standby.String() + "/flush_lag_sec/sync":    2,
+		standby.String() + "/replay_lag_sec/sync":   3,
+		standby.String() + "/replay_lag_bytes/sync": 7,
+		"reporting/write_lag_sec/async":             4,
+		"reporting/flush_lag_sec/async":             5,
+		"reporting/replay_lag_sec/async":            6,
+		"reporting/replay_lag_bytes/async":          8,
 	}, values)
 }
 

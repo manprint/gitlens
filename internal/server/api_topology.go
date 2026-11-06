@@ -280,7 +280,8 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 	// 0014 have no source and are told apart by their columns.
 	rows, err := t.pool.Query(ctx,
 		`SELECT instance_id, upstream_id, slot_name, `+store.ReplicationSourceSQL+` AS source,
-		        sync_state, ts, write_lag_sec, flush_lag_sec, replay_lag_sec
+		        sync_state, ts, write_lag_sec, flush_lag_sec, replay_lag_sec,
+		        replay_lag_bytes::float8
 		 FROM metrics_replication
 		 WHERE tenant_id='default' AND cluster_id=$1 AND ts >= $2 AND ts < $3
 		 ORDER BY ts`,
@@ -299,6 +300,9 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 		writePoints  []metricPoint
 		flushPoints  []metricPoint
 		replayPoints []metricPoint
+		// bytesPoints is the primary's replay byte lag: the only lag
+		// PostgreSQL reports on an idle cluster (receiver rows have none).
+		bytesPoints []metricPoint
 	}
 	edgeMap := make(map[string]*edgeMetrics) // key = source:from:to
 	var order []string
@@ -309,8 +313,8 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 		var slotName, source string
 		var syncState *string
 		var ts time.Time
-		var wLag, fLag, rLag *float64
-		if scanErr := rows.Scan(&instID, &upID, &slotName, &source, &syncState, &ts, &wLag, &fLag, &rLag); scanErr != nil {
+		var wLag, fLag, rLag, rBytes *float64
+		if scanErr := rows.Scan(&instID, &upID, &slotName, &source, &syncState, &ts, &wLag, &fLag, &rLag, &rBytes); scanErr != nil {
 			writeError(w, http.StatusInternalServerError, "scan metric failed", scanErr.Error())
 			return
 		}
@@ -341,7 +345,7 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 		em, exists := edgeMap[key]
 		if !exists {
 			em = &edgeMetrics{from: fromID, to: toID, standbyName: standbyName, sender: source == "sender",
-				writePoints: []metricPoint{}, flushPoints: []metricPoint{}, replayPoints: []metricPoint{}}
+				writePoints: []metricPoint{}, flushPoints: []metricPoint{}, replayPoints: []metricPoint{}, bytesPoints: []metricPoint{}}
 			edgeMap[key] = em
 			order = append(order, key)
 		}
@@ -351,6 +355,7 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 		em.writePoints = append(em.writePoints, metricPoint{TS: ts, Value: wLag})
 		em.flushPoints = append(em.flushPoints, metricPoint{TS: ts, Value: fLag})
 		em.replayPoints = append(em.replayPoints, metricPoint{TS: ts, Value: rLag})
+		em.bytesPoints = append(em.bytesPoints, metricPoint{TS: ts, Value: rBytes})
 	}
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
@@ -375,7 +380,7 @@ func (t *TopologyAPI) handleReplication(w http.ResponseWriter, r *http.Request) 
 		for _, series := range []struct {
 			metric string
 			points []metricPoint
-		}{{"write_lag_sec", em.writePoints}, {"flush_lag_sec", em.flushPoints}, {"replay_lag_sec", em.replayPoints}} {
+		}{{"write_lag_sec", em.writePoints}, {"flush_lag_sec", em.flushPoints}, {"replay_lag_sec", em.replayPoints}, {"replay_lag_bytes", em.bytesPoints}} {
 			edgeSeries = append(edgeSeries, replicationSeriesResp{
 				From:        em.from,
 				To:          em.to,

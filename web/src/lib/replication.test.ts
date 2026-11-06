@@ -4,6 +4,8 @@ import type { ReplicationInstance, ReplicationMetricEdge, TopologyEdge } from '.
 import {
   alignSeries,
   buildGraph,
+  currentValue,
+  REPLAY_LAG_FRESH_MS,
   detectAnomalies,
   hasGaps,
   replicationInstanceLabel,
@@ -296,5 +298,50 @@ describe('toSlotRows', () => {
     expect(active?.inactiveAgeSeconds).toBeNull()
     expect(neverActive?.inactiveAgeSeconds).toBeNull()
     expect(neverActive?.owningInstance).toBe(PRIMARY.instance_id)
+  })
+})
+
+describe('currentValue', () => {
+  const now = Date.parse('2026-08-27T02:00:00Z')
+  const bytes = (from: string, series: { ts: string; value: number | null }[]) =>
+    ({ from, to: 'p', metric: 'replay_lag_bytes', series }) satisfies ReplicationMetricEdge
+
+  it('HA-V-3-2 reads the newest fresh value of one edge and metric only', () => {
+    const edges = [
+      bytes('a', [
+        { ts: '2026-08-27T01:59:30Z', value: 10 },
+        { ts: '2026-08-27T01:59:50Z', value: 4096 },
+      ]),
+      bytes('b', [{ ts: '2026-08-27T01:59:55Z', value: 1 }]),
+      {
+        from: 'a',
+        to: 'p',
+        metric: 'replay_lag_sec',
+        series: [{ ts: '2026-08-27T01:59:55Z', value: 2 }],
+      },
+    ] satisfies ReplicationMetricEdge[]
+    expect(currentValue(edges, 'a', 'replay_lag_bytes', now)).toBe(4096)
+    expect(currentValue(edges, 'a', 'replay_lag_sec', now)).toBe(2)
+  })
+
+  it('HA-V-3-2 a null newest point, a stale point or no series is null', () => {
+    expect(
+      currentValue(
+        [
+          bytes('a', [
+            { ts: '2026-08-27T01:59:30Z', value: 10 },
+            { ts: '2026-08-27T01:59:50Z', value: null },
+          ]),
+        ],
+        'a',
+        'replay_lag_bytes',
+        now,
+      ),
+    ).toBeNull()
+    const stale = new Date(now - REPLAY_LAG_FRESH_MS - 1_000).toISOString()
+    expect(
+      currentValue([bytes('a', [{ ts: stale, value: 10 }])], 'a', 'replay_lag_bytes', now),
+    ).toBeNull()
+    expect(currentValue([], 'a', 'replay_lag_bytes', now)).toBeNull()
   })
 })

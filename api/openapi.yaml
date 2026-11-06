@@ -257,7 +257,15 @@ components:
         standby_name:
           type: string
           description: The application_name the primary reports the standby under; absent on edges read from the standby's own receiver.
-        metric: { type: string, enum: [write_lag_sec, flush_lag_sec, replay_lag_sec] }
+        metric:
+          type: string
+          enum: [write_lag_sec, flush_lag_sec, replay_lag_sec, replay_lag_bytes]
+          description: >-
+            The lag this series measures. replay_lag_bytes is the WAL the
+            standby has not replayed yet, as the primary (or a cascading
+            standby) reports it; null on edges read from the standby's own
+            receiver. On an idle cluster PostgreSQL reports no time lag, so
+            it is the only non-null lag there.
         sync_state: { type: [string, 'null'] }
         series: { type: array, items: { $ref: '#/components/schemas/MetricPoint' } }
     Slot:

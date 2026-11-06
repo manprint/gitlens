@@ -282,6 +282,31 @@ function compareTimestamp(a: string, b: string): number {
   return a.localeCompare(b)
 }
 
+/** How old the newest lag point may be and still count as the lag now. */
+export const REPLAY_LAG_FRESH_MS = 60 * 1_000
+
+/**
+ * The lag of one edge end and metric now: the newest point only. A null
+ * newest point was not measured, and one older than REPLAY_LAG_FRESH_MS is no
+ * measurement of now (a stopped standby), so both read null.
+ */
+export function currentValue(
+  edges: readonly ReplicationMetricEdge[],
+  from: string,
+  metric: ReplicationMetricEdge['metric'],
+  now: number,
+): number | null {
+  let newest: SeriesPoint | undefined
+  for (const edge of edges) {
+    if (edge.from !== from || edge.metric !== metric) continue
+    for (const point of edge.series) {
+      if (newest === undefined || Date.parse(point.ts) > Date.parse(newest.ts)) newest = point
+    }
+  }
+  if (newest === undefined || newest.value === null) return null
+  return now - Date.parse(newest.ts) > REPLAY_LAG_FRESH_MS ? null : newest.value
+}
+
 /** Align one edge's three metric responses on one timestamp axis. */
 export function alignSeries(edges: readonly ReplicationMetricEdge[]): AlignedReplicationSeries {
   const timestamps = [

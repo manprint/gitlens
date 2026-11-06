@@ -280,7 +280,10 @@ Cluster Detail brings together topology, replication lag, slot health,
 configuration drift, and the event timeline. A failover keeps the same
 `cluster_id`, so the cluster remains one continuous story. Lag charts name each
 end of an edge by its monitored instance's address, and a standby that is not
-monitored by the `application_name` its primary reports. The slot table lists
+monitored by the `application_name` its primary reports. Under each standby's
+lag chart, "Replay lag (bytes)" shows how much WAL the standby has still to
+replay, as the primary reports it; it reads `Unknown` when the newest sample is
+missing or older than 60 seconds. The slot table lists
 every replication slot the cluster's instances report (latest reading of each):
 its owner, type, activity, WAL status, retained WAL, the WAL it can still
 retain before `max_slot_wal_keep_size` invalidates it (`Unlimited` when no
@@ -1766,7 +1769,7 @@ curl -s -b cookies.txt "localhost:8080/api/v1/clusters/7381927364512345678/repli
 }
 ```
 
-**Time range query parameters:** `from` and `to` are required, in RFC3339 format (e.g., `2026-08-27T00:00:00Z`). Missing intervals are `null`, never `0` or interpolated. The response includes three series per edge: `write_lag_sec`, `flush_lag_sec`, and `replay_lag_sec` (bytes counterparts are available in metrics but shown here in seconds for readability).
+**Time range query parameters:** `from` and `to` are required, in RFC3339 format (e.g., `2026-08-27T00:00:00Z`). Missing intervals are `null`, never `0` or interpolated. The response includes four series per edge: `write_lag_sec`, `flush_lag_sec`, `replay_lag_sec`, and `replay_lag_bytes` (WAL bytes not yet replayed, `pg_wal_lsn_diff` of the primary's current WAL position and the standby's `replay_lsn`; on a cascading standby, its last received position).
 
 Like a topology edge, a lag edge runs from the standby to its primary: `to`
 is the primary's instance ID, and `from` is the standby's instance ID when it

@@ -337,8 +337,9 @@ func TestAPI_Topology_ReplicationSeries_WithMetrics(t *testing.T) {
 	// One row in metrics_replication expands into one edge per lag metric
 	// (write/flush/replay) so a consumer can chart each independently and see
 	// "null gaps" for the metrics that weren't reported — only replay_lag_sec
-	// was inserted here, so write/flush come back with a nil series value.
-	require.Len(t, resp.Edges, 3)
+	// was inserted here, so write/flush and the byte lag come back with a nil
+	// series value.
+	require.Len(t, resp.Edges, 4)
 
 	byMetric := make(map[string]replicationSeriesResp, len(resp.Edges))
 	for _, e := range resp.Edges {

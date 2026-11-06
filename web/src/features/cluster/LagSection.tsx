@@ -8,8 +8,10 @@ import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts
 import { buildLagOption } from '@/components/charts/lag.options'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { EmptyCaptioned } from './EmptyCaptioned'
+import { formatBytes } from '@/lib/format/bytes'
 import {
   alignSeries,
+  currentValue,
   hasGaps,
   replicationInstanceLabel,
   type AlignedReplicationSeries,
@@ -31,6 +33,11 @@ export interface LagSectionProps {
   instances?: readonly ReplicationInstance[]
   /** A controlled range keeps retention and empty-state behaviour easy to verify. */
   range?: TimeRangeResult
+}
+
+// The newest replay byte lag of a standby, read against the clock now.
+function replayBytesNow(group: EdgeGroup): number | null {
+  return currentValue(group.metrics, group.from, 'replay_lag_bytes', Date.now())
 }
 
 interface EdgeGroup {
@@ -113,6 +120,8 @@ export function LagSection({
             const aligned = alignSeries(group.metrics)
             const heading = edgeHeading(group, instances)
             const hasData = aligned.timestamps.length > 0
+            // The chart keeps seconds; the byte lag now is printed apart (no mixed units).
+            const bytes = replayBytesNow(group)
             return (
               <article key={`${group.from}\u0000${group.to}`} aria-label={heading}>
                 <ChartCard
@@ -140,6 +149,16 @@ export function LagSection({
                     </p>
                   )}
                 </ChartCard>
+                <dl className="mt-2 flex gap-2 text-sm">
+                  <dt className="text-muted-foreground">Replay lag (bytes)</dt>
+                  <dd className="tabular-nums">
+                    {bytes === null ? (
+                      <Unknown reason="No fresh byte lag sample: the primary has not reported this standby in the last 60 seconds." />
+                    ) : (
+                      formatBytes(bytes)
+                    )}
+                  </dd>
+                </dl>
               </article>
             )
           })}

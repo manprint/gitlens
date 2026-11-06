@@ -1419,8 +1419,11 @@ export interface components {
             to: components["schemas"]["InstanceId"];
             /** @description The application_name the primary reports the standby under; absent on edges read from the standby's own receiver. */
             standby_name?: string;
-            /** @enum {string} */
-            metric: "write_lag_sec" | "flush_lag_sec" | "replay_lag_sec";
+            /**
+             * @description The lag this series measures. replay_lag_bytes is the WAL the standby has not replayed yet, as the primary (or a cascading standby) reports it; null on edges read from the standby's own receiver. On an idle cluster PostgreSQL reports no time lag, so it is the only non-null lag there.
+             * @enum {string}
+             */
+            metric: "write_lag_sec" | "flush_lag_sec" | "replay_lag_sec" | "replay_lag_bytes";
             sync_state?: string | null;
             series: components["schemas"]["MetricPoint"][];
         };

@@ -6,6 +6,7 @@ import type { Schemas } from '@/api/types'
 import { ErrorState } from '@/components/state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { selectedDatabase } from '@/lib/databases'
+import { currentValue } from '@/lib/replication'
 
 import { InstanceHeader, type ReplayLag } from './InstanceHeader'
 import { CatalogSection } from './CatalogSection'
@@ -30,8 +31,7 @@ import { SettingsSection } from './SettingsSection'
 // The header shows the newest replay-lag reading, so a short window holds it.
 const REPLAY_LAG_WINDOW: { durationMs: number } = { durationMs: 5 * 60 * 1_000 }
 // The server bounds a cluster's replay lag to the last 60 seconds, so an older
-// reading is a blip that has aged out, not the lag now.
-const REPLAY_LAG_FRESH_MS = 60 * 1_000
+// reading is a blip that has aged out, not the lag now (REPLAY_LAG_FRESH_MS).
 
 // A standby's own lag is the replay series of the edge it reports from. Only
 // the newest point counts: a null newest point is not measured, and an older
@@ -42,15 +42,7 @@ function ownReplayLag(
   instanceId: string,
   now: number,
 ): number | null {
-  let newest: Schemas['SeriesPoint'] | undefined
-  for (const edge of edges) {
-    if (edge.from !== instanceId || edge.metric !== 'replay_lag_sec') continue
-    for (const point of edge.series) {
-      if (newest === undefined || Date.parse(point.ts) > Date.parse(newest.ts)) newest = point
-    }
-  }
-  if (newest === undefined || newest.value === null) return null
-  return now - Date.parse(newest.ts) > REPLAY_LAG_FRESH_MS ? null : newest.value
+  return currentValue(edges, instanceId, 'replay_lag_sec', now)
 }
 
 function replayLagOf(

@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('echarts-for-react/esm/core', () => ({
@@ -7,6 +7,7 @@ vi.mock('echarts-for-react/esm/core', () => ({
 
 import type { TimeRangeResult } from '@/lib/timerange'
 import type { ReplicationMetricEdge } from '@/lib/replication'
+import { formatBytes } from '@/lib/format/bytes'
 import { NOW } from '@/test/time'
 import { renderWithProviders } from '@/test/render'
 
@@ -45,6 +46,33 @@ function longRange(): TimeRangeResult {
 }
 
 describe('LagSection', () => {
+  it('HA-V-3-3 prints the current replay byte lag of an edge, Unknown without one', () => {
+    const from = '00000000-0000-0000-0000-000000000001'
+    const to = '00000000-0000-0000-0000-000000000002'
+    const withBytes: ReplicationMetricEdge[] = [
+      ...edges,
+      {
+        from,
+        to,
+        metric: 'replay_lag_bytes',
+        series: [{ ts: '2026-08-27T01:59:50Z', value: 4096 }],
+      },
+    ]
+    const { unmount } = renderWithProviders(<LagSection edges={withBytes} />)
+    expect(screen.getByRole('term')).toHaveTextContent('Replay lag (bytes)')
+    expect(screen.getByRole('definition')).toHaveTextContent(formatBytes(4096))
+    unmount()
+
+    renderWithProviders(<LagSection edges={edges} />)
+    const unknown = screen.getByRole('definition')
+    expect(unknown).toHaveTextContent('—')
+    expect(
+      within(unknown).getByTitle(
+        'No fresh byte lag sample: the primary has not reported this standby in the last 60 seconds.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('UI-CLUS-018 renders Degraded and names the 30-day raw retention', () => {
     renderWithProviders(<LagSection edges={edges} range={longRange()} />)
 

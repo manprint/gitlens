@@ -265,7 +265,7 @@ test.describe('HA-STATIC', () => {
       expect(edge.confidence).toBe('high')
     }
 
-    // DESIGN V-3: lag in seconds within ±1 s or ±10 % (the API serves no byte lag, GAP-3).
+    // DESIGN V-3: lag in seconds within ±1 s or ±10 %, replay byte lag within ±1 MiB or ±10 %.
     // An idle primary makes PostgreSQL report NULL lag; WAL-only messages (no table data)
     // keep the lag columns filled until every standby metric has a sample in pglens.
     const from = new Date()
@@ -322,6 +322,32 @@ test.describe('HA-STATIC', () => {
       }
     }
 
+    // GAP-3 (7.5.2): the replay byte lag the primary reports, served per edge.
+    const byteRows = await psqlOn(
+      primary.addr,
+      "SELECT application_name, pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn)::bigint FROM pg_stat_replication WHERE state = 'streaming';",
+    )
+    const byteTruth = new Map(
+      byteRows.split('\n').map((line) => {
+        const [name = '', bytes = '0'] = line.split('|')
+        return [name, +bytes]
+      }),
+    )
+    for (const standby of standbys) {
+      const edge = series.find(
+        (row) => row.from === standby.instance_id && row.metric === 'replay_lag_bytes',
+      )
+      expect(edge?.to, `${standby.addr} replay_lag_bytes edge`).toBe(primary.instance_id)
+      const last = [...(edge?.series ?? [])].reverse().find((point) => point.value !== null)
+      expect(last, `${standby.addr} replay_lag_bytes: a sample`).toBeDefined()
+      const value = last?.value ?? Number.NaN
+      const expected = byteTruth.get(standby.addr) ?? Number.NaN
+      expect(
+        Math.abs(value - expected),
+        `${standby.addr} replay_lag_bytes pglens ${value} vs pg ${expected}`,
+      ).toBeLessThanOrEqual(Math.max(1024 * 1024, expected * 0.1))
+    }
+
     await page.goto(`/clusters/${cluster.cluster_id}?section=topology`)
     const table = page.getByRole('table', { name: 'Replication topology edges' })
     await expect(table.locator('tbody tr')).toHaveCount(2, { timeout: 30_000 })
@@ -332,7 +358,8 @@ test.describe('HA-STATIC', () => {
       ).toContainText(nodeName(primary.addr))
     }
 
-    await page.goto(`/clusters/${cluster.cluster_id}?section=lag&range=1h`)
+    // 15 minutes: a switchover drill (HA-DRILL-002) in the last hour leaves its edges in range.
+    await page.goto(`/clusters/${cluster.cluster_id}?section=lag&range=15m`)
     const lag = page.locator('section[aria-labelledby="replication-lag-heading"]')
     await expect(lag).toBeVisible({ timeout: 60_000 })
     await expect(lag.getByRole('article')).toHaveCount(2)
@@ -342,6 +369,8 @@ test.describe('HA-STATIC', () => {
       })
       await article.scrollIntoViewIfNeeded()
       await expect.poll(() => canvasNotBlank(article), { timeout: 30_000 }).toBe(true)
+      const bytesNow = article.locator('dt:text-is("Replay lag (bytes)") + dd')
+      await expect(bytesNow, `${standby.addr} byte lag now`).toHaveText(/\d/, { timeout: 30_000 })
     }
   })
 
@@ -1164,7 +1193,17 @@ test.describe.serial('HA-DRILL', () => {
               (value, i) =>
                 value !== null && Math.abs(value - (pg[i] ?? 0)) <= Math.max(1, (pg[i] ?? 0) * 0.1),
             )
-            if (addr === standby) ok &&= (values[2] ?? 0) > 1
+            if (addr === standby) {
+              // GAP-3 (7.5.2): the delayed standby's replay byte lag is served and positive.
+              const bytesEdge = edges.find(
+                (row) => row.from === ids.get(addr) && row.metric === 'replay_lag_bytes',
+              )
+              const bytes =
+                [...(bytesEdge?.series ?? [])].reverse().find((point) => point.value !== null)
+                  ?.value ?? null
+              notes.push(`${addr}: replay_lag_bytes ${bytes}`)
+              ok &&= (values[2] ?? 0) > 1 && (bytes ?? 0) > 0
+            }
           }
           observed = notes.join('; ')
           return ok
@@ -1172,7 +1211,7 @@ test.describe.serial('HA-DRILL', () => {
         {
           timeout: 120_000,
           intervals: [3_000],
-          message: 'D3 V-3 write/flush/replay lag under load',
+          message: 'D3 V-3 write/flush/replay lag and replay byte lag under load',
         },
       )
       .toBe(true)
