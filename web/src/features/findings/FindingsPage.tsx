@@ -380,7 +380,7 @@ export function FindingsPage() {
     )
   const description =
     defaultView && (hiddenMuted > 0 || hiddenResolved > 0)
-      ? `${shownText}. By default, ${hiddenMuted} muted and ${hiddenResolved} resolved findings are hidden. Use the state filter to show them.`
+      ? `${shownText}; ${hiddenMuted} muted and ${hiddenResolved} resolved hidden.`
       : shownText
 
   // One table per tab (15.3, D26); the tab list sits in the page header line.
@@ -394,7 +394,7 @@ export function FindingsPage() {
         icon={Lightbulb}
         eyebrow="Checkup"
         title="Advisor findings"
-        subtitle="Automatic health checks on the collected PostgreSQL statistics: missing or unused indexes, bloat, vacuum, configuration and more. Each finding shows the evidence behind it and what to do. Findings come from collected statistics, not query plans; index recommendations are candidates for review, not automatic changes."
+        subtitle="Automatic health checks on the collected PostgreSQL statistics: missing or unused indexes, bloat, vacuum, configuration and more. Each finding shows its evidence and what to do; recommendations are candidates for review."
         freshness={<FreshnessBadge dataUpdatedAt={findingsQuery.dataUpdatedAt} policy="findings" />}
         actions={
           <TabsList aria-label="Findings views">

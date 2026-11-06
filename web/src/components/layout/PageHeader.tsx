@@ -1,5 +1,9 @@
 import type { ComponentType, ReactNode } from 'react'
 
+import type { CaptionId } from '@/lib/captions'
+
+import { InfoHint } from './InfoHint'
+
 interface PageHeaderProps {
   title: string
   subtitle?: ReactNode
@@ -20,6 +24,12 @@ interface PageHeaderProps {
    * (the Full HD reference screen) do both sit on one line.
    */
   wrapActionsBelowFullHd?: boolean
+  /**
+   * For a header whose actions leave no room for the subtitle: from 1600 px the
+   * subtitle gives way to an ⓘ after the title, whose tooltip holds the caption's
+   * text and details. Below 1600 px the subtitle is shown as usual.
+   */
+  subtitleHint?: CaptionId
 }
 
 export function PageHeader({
@@ -31,6 +41,7 @@ export function PageHeader({
   eyebrow,
   truncateTitle = false,
   wrapActionsBelowFullHd = false,
+  subtitleHint,
 }: PageHeaderProps) {
   return (
     // From 1600 px the eyebrow, title and subtitle share one line (D26).
@@ -67,10 +78,19 @@ export function PageHeader({
           >
             {title}
           </h1>
+          {subtitleHint === undefined ? null : (
+            <InfoHint
+              className="hidden min-[1600px]:inline-flex min-[1600px]:shrink-0"
+              id={subtitleHint}
+              label={title}
+            />
+          )}
           {subtitle ? (
             // From 1600 px the subtitle stays within two lines (D26); the full text is its title.
             <p
-              className="text-muted-foreground mt-1.5 max-w-3xl text-sm leading-relaxed min-[1600px]:mt-0 min-[1600px]:line-clamp-2 min-[1600px]:max-w-none min-[1600px]:min-w-0"
+              className={`text-muted-foreground mt-1.5 max-w-3xl text-sm leading-relaxed min-[1600px]:mt-0 min-[1600px]:line-clamp-2 min-[1600px]:max-w-none min-[1600px]:min-w-0${
+                subtitleHint === undefined ? '' : 'min-[1600px]:hidden'
+              }`}
               title={typeof subtitle === 'string' ? subtitle : undefined}
             >
               {subtitle}

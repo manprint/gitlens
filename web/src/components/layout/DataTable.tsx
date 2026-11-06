@@ -247,7 +247,7 @@ function DataTableView<TData extends RowData>({
         {captionId !== undefined ? (
           // Below 1600 px the caption is a full line above the controls; from 1600 px it
           // sits beside them, two lines at most in a bounded width (D26).
-          <div className="order-first flex w-full min-w-0 items-center gap-1 self-center min-[1600px]:order-none min-[1600px]:w-auto min-[1600px]:max-w-sm min-[1600px]:min-w-48 min-[1600px]:flex-initial">
+          <div className="order-first flex w-full min-w-0 items-center gap-1 self-center min-[1600px]:order-none min-[1600px]:w-auto min-[1600px]:max-w-md min-[1600px]:min-w-48 min-[1600px]:flex-initial">
             <Caption className="text-xs" id={captionId} marked={false} oneLine />
             <InfoHint className="shrink-0" id={captionId} label={ariaLabel} />
           </div>

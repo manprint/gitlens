@@ -10,13 +10,13 @@ export const settingsCaptions = {
     howToRead: 'Sessions are held in server memory and end at a server restart.',
   },
   'settings.product-limits': {
-    what: 'The supported scale and the known limits of this release: retention, PostgreSQL versions, replication, databases per instance, estimates and sampling.',
+    what: 'The supported scale and known limits of this release: retention, PostgreSQL versions, replication and sampling.',
     source:
       'Fixed text of this page; most rows follow the limits document of the repository, while the replication and databases-per-instance rows are not in it. The live retention of each metrics family is read on the Data retention tab.',
     window:
       'This release; retention defaults are set on the server, the database budget in the agent configuration.',
     howToRead:
-      'Raw retention links to the Data retention tab; the other rows link to the limits document. Bloat figures are estimates and active session history is a sample, not a full trace.',
+      'Raw retention links to the Data retention tab; the other rows link to the limits document. Bloat figures are estimates and active session history is a sample, not a full trace. The limits also cover the databases per instance.',
   },
   'settings.authentication': {
     what: 'How the console and the agent authenticate: one shared password, no user accounts or roles, and a separate agent token.',

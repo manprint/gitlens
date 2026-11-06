@@ -472,13 +472,13 @@ export const instanceCaptions = {
     howToRead: 'A dash in a growth column means no size was measured near that time.',
   },
   'internals.slru': {
-    what: 'Hit ratio and activity of each SLRU cache: small memory caches for transaction status, row-lock groups (multixact), subtransactions and serializable isolation.',
+    what: 'Hit ratio and activity of each SLRU cache, the small memory caches behind transaction status and row locks.',
     source:
       'pg_stat_slru counters (slru check) as per-second rates averaged over the last hour; hit ratio is hits divided by hits plus reads.',
     unit: '% hit ratio; blocks and events per second',
     window: 'Last hour; the check runs every minute.',
     howToRead:
-      'A read that misses a cache goes to disk under the cache lock and stalls every session that needs it: watch the subtransaction and multixact caches.',
+      'A read that misses a cache goes to disk under the cache lock and stalls every session that needs it: watch the subtransaction and multixact caches. The caches hold transaction status, row-lock groups (multixact), subtransactions and serializable isolation.',
   },
   'internals.temp-files': {
     what: 'Databases whose queries spilled to temporary files: files created per minute and bytes written per second.',

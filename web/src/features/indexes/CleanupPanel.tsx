@@ -323,7 +323,7 @@ export function CleanupPanel({
         </>
       }
       captionId="indexes.cleanup"
-      description="Indexes that look unused, repeat another index or are invalid, with the disk space and index writes that dropping them would save. Primary keys and unique indexes are never listed; pglens drops nothing: copy the script, review it and run it yourself."
+      description="Indexes that look unused, duplicate or invalid, and what dropping them would save."
       notes={notes}
       stats={[
         {

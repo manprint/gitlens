@@ -56,7 +56,8 @@ export const queriesCaptions = {
       'Count of the rows returned by the server statements endpoint, requested with a limit of 200.',
     unit: 'Statements.',
     window: 'Selected time range.',
-    howToRead: 'At 200 the list is cut at the page limit.',
+    howToRead:
+      'At 200 the list is cut at the page limit. When the agent kept only its top-N budget for this window (checks.stat_statements.top_n), some statements may be missing.',
   },
   'slow.table': {
     what: 'Statements ranked by mean time per call or by total time, with their calls, mean time, total time and share of the listed time.',
@@ -65,7 +66,7 @@ export const queriesCaptions = {
     unit: 'Calls, milliseconds, percent.',
     window: 'Selected time range.',
     howToRead:
-      'Rank 1 has the highest value of the chosen ranking. The share is relative to the listed statements, not to all database time.',
+      'Rank 1 has the highest value of the chosen ranking. The share is relative to the listed statements, not to all database time. Open a query to run EXPLAIN and see its plan history.',
   },
   'slow.rank-by': {
     what: 'Chooses whether statements are ranked by mean time per call or by total time.',
@@ -125,7 +126,7 @@ export const queriesCaptions = {
     unit: 'Findings.',
     window: 'State at the latest advisor evaluation of each rule.',
     howToRead:
-      'Open: the rule condition held at its last evaluation. Degraded: the rule could not be evaluated, which is not a healthy result. Muted: silenced until its expiry. Resolved: the condition has cleared.',
+      'Open: the rule condition held at its last evaluation. Degraded: the rule could not be evaluated, which is not a healthy result. Muted: silenced until its expiry. Resolved: the condition has cleared. Findings come from collected statistics, not query plans; index recommendations are candidates for review, not automatic changes.',
   },
   'findings.summary': {
     what: 'Counts of open findings per severity and of findings whose rule could not be evaluated; each button filters the list.',

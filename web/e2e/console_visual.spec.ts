@@ -3519,3 +3519,37 @@ test('VIS-CAP-003 every ⓘ opens its tooltip on hover and on keyboard focus, in
   }
   expect(failures, failures.join('\n')).toEqual([])
 })
+
+test('VIS-CAP-004 no caption or description is cut by a line clamp or an ellipsis at 1920×1080', async ({
+  api,
+  signedInPage: page,
+}) => {
+  test.setTimeout(liveTimeout(0, FULLHD_ROUTES.length * 30_000))
+  const values = await routeValues(api)
+  const failures: string[] = []
+  for (const route of CAPTION_ROUTES) {
+    await test.step(route.path, async () => {
+      await openCaptionRoute(page, route, values)
+      const clipped = await page.evaluate(() => {
+        const out: string[] = []
+        const candidates = document.querySelectorAll<HTMLElement>(
+          'main [class*="line-clamp-"], main p.truncate, main p[class*=":truncate"]',
+        )
+        for (const element of candidates) {
+          if (element.closest('th, td, [role="tooltip"], .sr-only') !== null) continue
+          if (element.clientHeight === 0 || element.clientWidth === 0) continue
+          const cutHeight = element.scrollHeight > element.clientHeight + 1
+          const cutWidth = element.scrollWidth > element.clientWidth + 1
+          if (cutHeight || cutWidth) {
+            out.push(
+              `${element.tagName} [${element.className.slice(0, 60)}] ${cutHeight ? 'height' : 'width'} ${element.scrollHeight}/${element.clientHeight} ${element.scrollWidth}/${element.clientWidth}: ${(element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)}`,
+            )
+          }
+        }
+        return out
+      })
+      clipped.forEach((entry) => failures.push(`${route.path}: ${entry}`))
+    })
+  }
+  expect(failures, failures.join('\n')).toEqual([])
+})

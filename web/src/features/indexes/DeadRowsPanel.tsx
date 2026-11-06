@@ -405,7 +405,7 @@ export function DeadRowsPanel({
   return (
     <IndexPanel
       captionId="indexes.dead-rows"
-      description={`${formatCount(scoped.length)} tables. Dead space is an estimate: the heap size times the dead share of its rows. The trend follows the ${TREND_TABLES} worst tables over the selected time range.`}
+      description={`${formatCount(scoped.length)} tables. Dead space is an estimate from heap size and dead rows.`}
       notes={notes}
       stats={[
         {

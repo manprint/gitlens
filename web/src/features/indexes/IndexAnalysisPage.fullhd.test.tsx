@@ -229,7 +229,7 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
     expect(header).toContainElement(note)
     expect(note.className).not.toMatch(/truncate/)
     expect(note.getAttribute('title')).toMatch(/^The list is incomplete\. .*top_n/)
-    expect(screen.getByText(/^2 indexes\. Scan figures/)).toHaveClass('min-[1600px]:line-clamp-2')
+    expect(screen.getByText(/^2 indexes\. Scan figures/)).toHaveClass('min-[1600px]:line-clamp-3')
   })
 
   it('FHD-APPLY-038 a tab change drops the view and a database change sends the new tables to page 1', async () => {

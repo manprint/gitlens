@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import SlowQueriesPage, { STATEMENT_FETCH_LIMIT } from './SlowQueriesPage'
 
 import { base as clusters } from '@/test/fixtures/getClusters'
+import { CAPTIONS } from '@/lib/captions'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -579,12 +580,12 @@ describe('SlowQueriesPage Full HD layout (D26)', () => {
     ).toBeTruthy()
   })
 
-  it('FHD-APPLY-003 states the top-N cut in the list header description', async () => {
+  it('FHD-APPLY-003 states the top-N cut on the Statements ranked tile, the detail in its ⓘ', async () => {
     renderLoaded({ comparable_scope: 'cluster', statements: STATEMENTS, truncated: true })
     await flushNetwork(30)
-    const description = screen.getByTitle(/Some statements may be missing/)
-    expect(description).toHaveTextContent('Some statements may be missing')
-    expect(description).toHaveClass('min-[1600px]:truncate')
+    const ranked = screen.getByRole('article', { name: 'Statements ranked' })
+    expect(ranked).toHaveTextContent('Some may be missing.')
+    expect(CAPTIONS['slow.statements-ranked'].howToRead).toContain('checks.stat_statements.top_n')
   })
 
   it('FHD-APPLY-004 keeps the controls in a bar when there is no statement to list', async () => {

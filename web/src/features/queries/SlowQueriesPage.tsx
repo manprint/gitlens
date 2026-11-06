@@ -48,14 +48,15 @@ const RANKINGS: readonly { value: Ranking; label: string; hint: string }[] = [
   {
     value: 'total',
     label: 'Total time',
-    hint: 'The statements that consume the most database time overall (mean × calls).',
+    hint: 'The statements that use the most database time overall.',
   },
 ]
 
 const ORDER_BY = { mean: 'mean_exec_time', total: 'total_exec_time' } as const
 
 // The tiles share the list header, so from 1600 px they are one short line each (D26).
-const HEADER_TILE = 'min-[1600px]:py-1.5'
+const HEADER_TILE = 'min-[1600px]:shrink-0 min-[1600px]:py-1'
+const HEADER_TILE_FLEX = 'min-[1600px]:min-w-0 min-[1600px]:flex-1 min-[1600px]:py-1'
 
 function readRanking(value: string | null): Ranking {
   return value === 'total' ? 'total' : 'mean'
@@ -412,26 +413,19 @@ function InstanceStatements({
         className="bg-card shadow-card overflow-hidden rounded-xl border"
       >
         {/* The summary tiles share the list header; from 1600 px on one line (D26). */}
-        <div className="flex flex-col gap-4 border-b px-5 py-4 min-[1600px]:flex-row min-[1600px]:items-center min-[1600px]:justify-between min-[1600px]:py-2">
-          <div className="min-w-0">
+        <div className="flex flex-col gap-4 border-b px-5 py-4 min-[1600px]:flex-row min-[1600px]:items-center min-[1600px]:justify-between min-[1600px]:py-1">
+          <div className="min-w-0 min-[1600px]:w-80 min-[1600px]:shrink-0">
             <h2 className="text-base font-semibold" id="slowest-list-title">
               Ranked by {ranking === 'mean' ? 'mean time per call' : 'total time'}
             </h2>
             <p
-              className="text-muted-foreground mt-0.5 text-sm min-[1600px]:truncate"
-              title={`${hint ?? ''} Open a query to run EXPLAIN and see its plan history.${response?.truncated ? ' Some statements may be missing: the agent kept only its top-N budget (checks.stat_statements.top_n) in this window.' : ''}`}
+              className="text-muted-foreground mt-0.5 text-sm min-[1600px]:line-clamp-2 min-[1600px]:text-xs min-[1600px]:leading-snug"
+              title={hint}
             >
-              {hint} Open a query to run EXPLAIN and see its plan history.
-              {response?.truncated ? (
-                <>
-                  {' '}
-                  Some statements may be missing: the agent kept only its top-N budget (
-                  <code>checks.stat_statements.top_n</code>) in this window.
-                </>
-              ) : null}
+              {hint}
             </p>
           </div>
-          <div className="grid gap-4 min-[1600px]:flex min-[1600px]:shrink-0 min-[1600px]:gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 min-[1600px]:flex min-[1600px]:min-w-0 min-[1600px]:gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MetricTile
               captionId="slow.slowest-mean"
               className={HEADER_TILE}
@@ -452,8 +446,8 @@ function InstanceStatements({
             />
             <MetricTile
               captionId="slow.statements-ranked"
-              className={HEADER_TILE}
-              detail={`The page ranks at most ${STATEMENT_FETCH_LIMIT} statements.`}
+              className={HEADER_TILE_FLEX}
+              detail={`Ranks at most ${STATEMENT_FETCH_LIMIT} statements.${response?.truncated ? ' Some may be missing.' : ''}`}
               label="Statements ranked"
               unit="statements"
               value={String(rows.length)}

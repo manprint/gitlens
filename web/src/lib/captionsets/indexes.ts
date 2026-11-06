@@ -2,6 +2,15 @@ import type { CaptionEntry } from '../captions'
 
 /** Captions of the indexes route group (D30); rules in the plan, phase 17. */
 export const indexesCaptions = {
+  'indexes.page': {
+    what: "Every index the agent reports for a server, how big and how used, with the advisor's findings on unused, duplicate, redundant, invalid and missing indexes.",
+    source:
+      'getInstanceIndexes rows and the index.* advisor findings of getFindings, for the server and database picked on the page.',
+    unit: 'indexes, findings',
+    window: 'Latest collection and latest advisor evaluation.',
+    howToRead:
+      'The tabs split the indexes into the inventory, the removable ones, tables with dead rows, suggested new indexes and the cost of the indexes of each table.',
+  },
   'indexes.inventory': {
     what: 'Every index the agent reported for the server, one row per index, with its columns, access method, size, scan rate and last scan time.',
     source:
@@ -37,7 +46,7 @@ export const indexesCaptions = {
     unit: 'foreign keys',
     window: 'Latest advisor evaluation of the open findings.',
     howToRead:
-      'If rows of the referenced table are never deleted or re-keyed, the index is not needed. Up to 200 foreign keys per database are reported, the largest referencing tables first.',
+      'These are indexes that are missing, so they do not appear in the inventory. If rows of the referenced table are never deleted or re-keyed, the index is not needed. Up to 200 foreign keys per database are reported, the largest referencing tables first.',
     thresholds: 'Severity is warning when the referencing table is 10 MiB or larger, info below.',
   },
   'indexes.summary-primary': {
@@ -128,7 +137,7 @@ export const indexesCaptions = {
     unit: 'indexes, bytes, index entries per second',
     window: 'Latest collection and latest advisor evaluation.',
     howToRead:
-      'Confirmed candidates rest on an advisor finding. Raw-counter candidates only had no scan since the last statistics reset: not a verdict, and left out of the confirmed totals. Primary keys and unique indexes are never listed.',
+      'Confirmed candidates rest on an advisor finding. Raw-counter candidates only had no scan since the last statistics reset: not a verdict, and left out of the confirmed totals. Primary keys and unique indexes are never listed. pglens drops nothing: copy the script, review it and run it yourself.',
   },
   'indexes.cleanup-reason': {
     what: 'Why an index is listed: invalid, duplicate, redundant prefix or unused (advisor findings), or never scanned (raw counters only).',

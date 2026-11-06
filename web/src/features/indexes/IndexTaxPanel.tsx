@@ -182,7 +182,7 @@ export function IndexTaxPanel({
   return (
     <IndexPanel
       captionId="indexes.tax"
-      description="What the indexes of each table cost: how many there are, how much space they hold, how much of it looks unused and how many index entries every write adds."
+      description="What each table's indexes cost: how many, how big, how much looks unused, entries added per write."
       notes={
         <>
           {incomplete ? (

@@ -826,22 +826,21 @@ export function IndexesPanel({
   const heading: Record<IndexView, { title: string; description: string }> = {
     inventory: {
       title: 'Index inventory',
-      description: `${formatCount(rows.length)} indexes. Scan figures are per-second rates over the last collection interval.`,
+      description: `${formatCount(rows.length)} indexes. Scan figures are per-second rates.`,
     },
     summary: {
       title: 'Index summary',
       description:
-        'What the indexes in scope are made of: their kinds, access methods and databases, and the tables that carry the most.',
+        'What the indexes in scope are made of: kinds, access methods, databases and top tables.',
     },
     findings: {
       // Short titles keep the header line within 1920 px beside the figures and the actions.
       title: 'Index findings',
-      description: `${formatCount(counts.unused)} unused · ${formatCount(counts.duplicate)} duplicate groups · ${formatCount(counts.redundant)} redundant prefixes · ${formatCount(counts.invalid)} invalid · ${formatCount(counts.divergence)} diverging · ${formatCount(gaps.length)} foreign keys without an index`,
+      description: `${formatCount(counts.unused)} unused · ${formatCount(counts.duplicate)} duplicate · ${formatCount(counts.redundant)} redundant · ${formatCount(counts.invalid)} invalid · ${formatCount(counts.divergence)} diverging · ${formatCount(gaps.length)} foreign keys`,
     },
     'foreign-keys': {
       title: 'Unindexed foreign keys',
-      description:
-        'Deleting or re-keying a referenced row scans the referencing table. These are indexes that are missing, so they do not appear in the inventory.',
+      description: 'Deleting or re-keying a referenced row scans the referencing table.',
     },
   }
 

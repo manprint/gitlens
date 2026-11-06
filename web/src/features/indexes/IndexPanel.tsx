@@ -158,7 +158,7 @@ export function IndexPanel({
             </span>
           )}
           <p
-            className="text-muted-foreground mt-0.5 text-sm min-[1600px]:mt-0 min-[1600px]:line-clamp-2 min-[1600px]:min-w-[10rem] min-[1600px]:flex-[1_1_10rem] min-[1600px]:text-xs min-[1600px]:leading-snug"
+            className="text-muted-foreground mt-0.5 text-sm min-[1600px]:mt-0 min-[1600px]:line-clamp-3 min-[1600px]:min-w-[10rem] min-[1600px]:flex-[1_1_10rem] min-[1600px]:text-xs min-[1600px]:leading-snug"
             title={description}
           >
             {description}

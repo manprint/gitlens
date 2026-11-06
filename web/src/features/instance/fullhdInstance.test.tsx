@@ -147,7 +147,7 @@ describe('Instance tabs at Full HD', () => {
     expect(skipped).toHaveTextContent(/2 tables have no bloat estimate/)
     const exact = screen.getByText(/pglens never installs extensions/)
     expect(exact).toHaveAttribute('title', expect.stringMatching(/^An exact measurement runs/))
-    expect(exact).toHaveClass('min-[1600px]:truncate')
+    expect(exact).toHaveClass('min-[1600px]:line-clamp-2')
     // The notes come before the table.
     expect(follows(exact, screen.getByRole('table', { name: 'Table bloat estimates' }))).toBe(true)
   })
@@ -234,10 +234,10 @@ describe('Instance tabs at Full HD', () => {
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.getAllByRole('table')).toHaveLength(1)
     expect(screen.getByRole('table', { name: 'Logical slots' })).toBeInTheDocument()
-    // The decoding window is a note of the toolbar line, truncated with its full text.
+    // The decoding window is a note of the toolbar line, two lines at most with its full text.
     expect(
       screen.getByTitle('Decoding of each logical slot, averaged over the last 60 minutes.'),
-    ).toHaveClass('min-[1600px]:truncate', 'min-[1600px]:basis-0')
+    ).toHaveClass('min-[1600px]:line-clamp-2', 'min-[1600px]:basis-0')
   })
 
   it('FHD-APPLY-046 internals: the WAL tile sits in the heading and the SLRU hint in the toolbar line', async () => {
@@ -286,7 +286,7 @@ describe('Instance tabs at Full HD', () => {
     expect(screen.getAllByRole('table')).toHaveLength(1)
     // The hint follows the search box on the toolbar line, before the table.
     const hint = screen.getByText(/A page missing from a cache/)
-    expect(hint).toHaveClass('min-[1600px]:truncate')
+    expect(hint).toHaveClass('min-[1600px]:line-clamp-2')
     expect(follows(screen.getByRole('search', { name: 'SLRU caches search' }), hint)).toBe(true)
     expect(follows(hint, screen.getByRole('table', { name: 'SLRU caches' }))).toBe(true)
 

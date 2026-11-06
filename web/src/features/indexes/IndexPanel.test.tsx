@@ -57,7 +57,7 @@ describe('IndexPanel header on a Full HD screen (bug-HDR)', () => {
       'Every index the agent reported, with its size, scans and advisor flags.',
     )
     expect(titleBlock).toContainElement(description)
-    expect(description).toHaveClass('min-[1600px]:line-clamp-2', 'min-[1600px]:flex-[1_1_10rem]')
+    expect(description).toHaveClass('min-[1600px]:line-clamp-3', 'min-[1600px]:flex-[1_1_10rem]')
     expect(description.className).not.toMatch(/truncate/)
   })
 

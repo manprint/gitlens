@@ -113,7 +113,7 @@ describe('FindingsPage', () => {
     expect(screen.getByRole('heading', { name: 'Visible degraded' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Hidden muted' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Hidden resolved' })).not.toBeInTheDocument()
-    expect(screen.getByText(/1 muted and 1 resolved findings are hidden/)).toBeInTheDocument()
+    expect(screen.getByText(/1 muted and 1 resolved hidden\./)).toBeInTheDocument()
   })
 
   it('UI-FIND-012 round-trips state, severity, scope, cluster, and instance filters through the URL', async () => {
@@ -649,13 +649,13 @@ describe('FindingsPage', () => {
       'min-[1600px]:h-6',
     )
     // The count is a polite live region on its own two-line clamp of the filter group (17.2).
-    const description = within(section).getByText(/0 resolved findings are hidden/, {
+    const description = within(section).getByText(/0 resolved hidden/, {
       selector: 'p.min-\\[1600px\\]\\:line-clamp-2',
     })
     expect(description).toHaveAttribute('aria-live', 'polite')
     expect(description).toHaveAttribute(
       'title',
-      expect.stringMatching(/^1 of 2 findings shown\. By default, 1 muted/),
+      expect.stringMatching(/^1 of 2 findings shown; 1 muted/),
     )
   })
 

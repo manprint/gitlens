@@ -81,6 +81,7 @@ function IndexPageHeader({ actions }: { actions?: ReactNode }) {
     <PageHeader
       eyebrow="Index management"
       icon={ListTree}
+      subtitleHint="indexes.page"
       subtitle="Every index the agent reports for a server: how many there are, which columns they cover, how big they are and how they are used, with the advisor's findings on unused, duplicate, redundant and invalid indexes and on foreign keys that lack one."
       title="Index analysis"
       wrapActionsBelowFullHd

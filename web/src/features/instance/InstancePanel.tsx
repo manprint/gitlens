@@ -32,7 +32,7 @@ export function InstanceViewTabs({
 /**
  * A hint or notice in a table's toolbar line (`toolbarExtra`). Below 1600 px it
  * wraps onto its own line; from 1600 px it takes the free width of the toolbar
- * line, truncated, with the full text in its title (D26).
+ * line in at most two small lines, with the full text in its title (D26).
  */
 export function ToolbarNote({
   children,
@@ -49,7 +49,7 @@ export function ToolbarNote({
       className={
         wrap
           ? 'text-muted-foreground text-sm'
-          : 'text-muted-foreground text-sm min-[1600px]:min-w-0 min-[1600px]:shrink min-[1600px]:grow min-[1600px]:basis-0 min-[1600px]:self-center min-[1600px]:truncate'
+          : 'text-muted-foreground text-sm min-[1600px]:line-clamp-2 min-[1600px]:min-w-0 min-[1600px]:shrink min-[1600px]:grow min-[1600px]:basis-0 min-[1600px]:self-center min-[1600px]:text-xs min-[1600px]:leading-snug'
       }
       title={children}
       {...(status ? { role: 'status' } : {})}
@@ -121,8 +121,8 @@ export function InstancePanel({
       {...(id === undefined ? {} : { id })}
       {...(captionId === undefined ? {} : { 'data-card': '', 'data-caption-id': captionId })}
     >
-      <div className="flex flex-col gap-3 border-b px-5 py-4 min-[1600px]:flex-row min-[1600px]:items-center min-[1600px]:justify-between min-[1600px]:gap-4 min-[1600px]:border-b-0 min-[1600px]:px-0 min-[1600px]:pt-0 min-[1600px]:pb-2">
-        <div className="min-w-0">
+      <div className="flex flex-col gap-3 border-b px-5 py-4 min-[1600px]:flex-row min-[1600px]:flex-wrap min-[1600px]:items-center min-[1600px]:justify-between min-[1600px]:gap-x-4 min-[1600px]:gap-y-2 min-[1600px]:border-b-0 min-[1600px]:px-0 min-[1600px]:pt-0 min-[1600px]:pb-2">
+        <div className="min-w-0 min-[1600px]:flex-[1_1_30rem]">
           <div className="min-[1600px]:flex min-[1600px]:items-baseline min-[1600px]:gap-3">
             <div className="flex items-center gap-1 min-[1600px]:shrink-0">
               <h2 id={titleId} className="text-foreground text-base font-semibold">

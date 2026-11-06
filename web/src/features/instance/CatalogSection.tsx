@@ -757,7 +757,7 @@ function SequencesTab({ response }: { response: Schemas['SequencesResponse'] }) 
       }
       notes={
         <>
-          <ToolbarNote>{`A sequence runs out at the nearer of its own bound and the bound of the integer column it feeds. pglens only reads sequences; it never advances them.`}</ToolbarNote>
+          <ToolbarNote>{`A sequence runs out at the nearer of its own bound and its column's bound. pglens only reads sequences, never advances them.`}</ToolbarNote>
           {hidden > 0 ? (
             <ToolbarNote
               status
@@ -1083,7 +1083,7 @@ function FunctionsTab({ response }: { response: Schemas['FunctionsResponse'] }) 
       }
       notes={
         <>
-          <ToolbarNote>{`The tracked functions with the most time in their own body and the most calls, averaged over the last ${minutes} minutes. Own time leaves out the functions a function calls.`}</ToolbarNote>
+          <ToolbarNote>{`The tracked functions with the most own time and the most calls, averaged over the last ${minutes} minutes.`}</ToolbarNote>
           {untracked.length > 0 ? (
             <ToolbarNote
               status

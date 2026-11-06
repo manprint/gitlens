@@ -7,6 +7,7 @@ import { expectNoA11yViolations } from '@/test/a11y'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { custom as advisorWindows } from '@/test/fixtures/getAdvisorWindows'
 import { base as clusters } from '@/test/fixtures/getClusters'
+import { CAPTIONS } from '@/lib/captions'
 import { formatRate } from '@/lib/format'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
@@ -332,9 +333,14 @@ describe('CleanupPanel on a Full HD screen (15.3)', () => {
       expect(note.className).not.toMatch(/truncate/)
       expect(note.getAttribute('title')).toContain(headline)
     }
-    const description = within(line).getByText(/^Indexes that look unused, repeat another index/)
-    expect(description).toHaveTextContent('Primary keys and unique indexes are never listed')
-    expect(description).toHaveClass('min-[1600px]:line-clamp-2')
+    const description = within(line).getByText(/^Indexes that look unused, duplicate or invalid/)
+    expect(description).toHaveAttribute('title', description.textContent)
+    expect(description).toHaveClass('min-[1600px]:line-clamp-3')
+    // What the short line leaves out is in the card's ⓘ.
+    expect(CAPTIONS['indexes.cleanup'].howToRead).toContain(
+      'Primary keys and unique indexes are never listed',
+    )
+    expect(CAPTIONS['indexes.cleanup'].howToRead).toContain('pglens drops nothing')
 
     const table = screen.getByRole('table', { name: 'Cleanup candidates' })
     expect(table).toHaveClass('min-[1600px]:table-fixed')

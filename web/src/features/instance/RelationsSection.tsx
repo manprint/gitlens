@@ -721,7 +721,7 @@ const EXACT_BLOAT_NOTE =
 function ExactBloatNotice({ currentTier }: { currentTier: PermTier }) {
   return (
     <div className="text-muted-foreground space-y-2 text-sm min-[1600px]:flex min-[1600px]:min-w-0 min-[1600px]:flex-1 min-[1600px]:items-center min-[1600px]:gap-3 min-[1600px]:space-y-0 min-[1600px]:text-xs">
-      <p className="min-[1600px]:min-w-0 min-[1600px]:truncate" title={EXACT_BLOAT_NOTE}>
+      <p className="min-[1600px]:line-clamp-2 min-[1600px]:min-w-0" title={EXACT_BLOAT_NOTE}>
         An exact measurement runs <code>pgstattuple</code> on the agent in a read-only transaction.
         It reads the whole table (bounded at 50 seconds) and needs the extension to be installed
         already in the database that holds the table: pglens never installs extensions, and the
