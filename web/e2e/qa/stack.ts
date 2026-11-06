@@ -46,12 +46,26 @@ export function run(
 export const LIFECYCLE_SERVICES = ['pglens-server', 'pglens-agent', 'timescaledb', 'odoo'] as const
 export type LifecycleService = (typeof LIFECYCLE_SERVICES)[number]
 export const BASE_SERVICES = ['odoo-db', 'odoo', 'timescaledb', 'pglens-server', 'pglens-agent']
+/** Services ha/compose.ha.yml adds (plan 005 7.2); present once the HA migration ran. */
+export const HA_SERVICES = ['pg-ha-2', 'pg-ha-3', 'hactl']
+/** PostgreSQL nodes: in HA only ha/rejoin.sh starts a stopped one (never compose). */
+export const DB_NODES = ['odoo-db', 'pg-ha-2', 'pg-ha-3']
+
+/** The services a healthy stack runs: the base five, plus the HA three in HA mode. */
+export const expectedServices = () =>
+  haActive() ? [...BASE_SERVICES, ...HA_SERVICES] : BASE_SERVICES
+
+/**
+ * HA mode (plan 005 7.2): `ha/ACTIVE` exists. `migrate.sh odoo` writes it and
+ * `rollback.sh` removes it; container presence is no criterion (rollback keeps the
+ * stopped HA containers, a drill may remove hactl).
+ */
+export const haActive = () => existsSync(join(STACK_DIR, 'ha', 'ACTIVE'))
 
 /** Global `docker compose` options (project and files) of the stack. */
 export function composeArgs(): string[] {
   const args = ['compose', '-p', COMPOSE_PROJECT, '-f', join(STACK_DIR, 'compose.yml')]
-  const ha = join(STACK_DIR, 'ha', 'compose.ha.yml')
-  if (existsSync(ha)) args.push('-f', ha)
+  if (haActive()) args.push('-f', join(STACK_DIR, 'ha', 'compose.ha.yml'))
   return args
 }
 
@@ -113,9 +127,13 @@ export async function down(): Promise<void> {
   )
 }
 
-/** Arguments of `up()`: only the lifecycle services, never their dependencies (odoo-db). */
+/**
+ * Arguments of `up()`: only the lifecycle services (plus hactl in HA mode), never
+ * their dependencies (the database nodes).
+ */
 export function upArgs(): string[] {
-  return [...composeArgs(), 'up', '-d', '--no-deps', ...LIFECYCLE_SERVICES]
+  const services = haActive() ? [...LIFECYCLE_SERVICES, 'hactl'] : [...LIFECYCLE_SERVICES]
+  return [...composeArgs(), 'up', '-d', '--no-deps', ...services]
 }
 
 /** Starts the non-database services again; odoo-db is never recreated. */
@@ -125,13 +143,19 @@ export async function up(): Promise<void> {
 }
 
 /**
- * `compose up -d` over every service, odoo-db included. Only LIFE-DOWN-UP-FULL
- * and the 7.x HA drills may call it (test-strategy.md §2).
+ * `compose up -d` over every service, odoo-db included (single node only; in HA the
+ * database nodes are left to ha/rejoin.sh). Only LIFE-DOWN-UP-FULL and the 7.x HA
+ * drills may call it (test-strategy.md §2).
  */
 export async function upAll(): Promise<void> {
   await assertLifecycleAllowed()
+  // Starting a stopped old leader by hand would fork the timeline (DESIGN §5): in HA
+  // only the non-database services come up; rejoin.sh brings a node back.
+  const args = haActive()
+    ? ['up', '-d', '--no-recreate', '--no-deps', ...LIFECYCLE_SERVICES, 'hactl']
+    : ['up', '-d', '--no-recreate']
   await timed('up (all services)', () =>
-    run('docker', [...composeArgs(), 'up', '-d', '--no-recreate'], { timeoutMs: 600_000 }),
+    run('docker', [...composeArgs(), ...args], { timeoutMs: 600_000 }),
   )
 }
 

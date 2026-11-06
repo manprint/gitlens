@@ -21,7 +21,7 @@ import {
   truth,
 } from './pg'
 import { newRunId, RUN_ID_PATTERN } from './runid'
-import { BASE_SERVICES, stackStatus, stop, upArgs, waitReady } from './stack'
+import { expectedServices, stackStatus, stop, upArgs, waitReady } from './stack'
 
 test.describe.configure({ mode: 'serial', retries: 0 })
 test.setTimeout(120_000)
@@ -137,9 +137,9 @@ test('QA-HARNESS-009 api.get lists the monitored instance', async () => {
   expect(rows.some((row) => row.up === true)).toBe(true)
 })
 
-test('QA-HARNESS-012 stackStatus lists the five base services running', async () => {
+test('QA-HARNESS-012 stackStatus lists the expected services running (base five, plus HA three)', async () => {
   const rows = await stackStatus()
-  for (const service of BASE_SERVICES) {
+  for (const service of expectedServices()) {
     expect(rows.find((row) => row.service === service)?.state, service).toBe('running')
   }
 })
@@ -178,7 +178,13 @@ test('QA-HARNESS-015 commands run with argument arrays, never shell strings', as
     expect(code, file).not.toMatch(/shell:\s*true/)
     // This spec spells the forbidden patterns itself, so it is exempt from the two below.
     if (file === 'harness.spec.ts') continue
-    expect(source, file).not.toMatch(/\bexec\(/)
+    // child_process exec (bare call or named import); a RegExp method call is fine.
+    expect(source, file).not.toMatch(/(?<!\.)\bexec\(/)
+    expect(source, file).not.toMatch(
+      /import\s*\{[^}]*\bexec\b[^}]*\}\s*from\s*'(node:)?child_process'/,
+    )
+    expect(source, file).not.toMatch(/import\s+\*\s+as\s+\w+\s+from\s+'(node:)?child_process'/)
+    expect(source, file).not.toMatch(/\bexecSync\b/)
     expect(source, file).not.toMatch(/'-c'|"-c"/)
   }
   const args = upArgs()

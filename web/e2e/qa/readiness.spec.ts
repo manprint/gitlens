@@ -10,7 +10,7 @@ import * as api from './api'
 import { BUDGET, qaTimeout } from './budget'
 import { assertLifecycleAllowed, assertStimulusAllowed, STACK_DIR } from './guard'
 import { consoleGuard } from './observe'
-import { query } from './pg'
+import { dbContainer, query } from './pg'
 import { composeArgs, restart, run, stackStatus, waitReady } from './stack'
 
 /**
@@ -244,21 +244,24 @@ async function inspect(service: string): Promise<{
 
 /** Ground truth: a setting as a role sees it in a fresh session, through the local socket. */
 async function showAs(role: string, setting: string): Promise<string> {
-  const { stdout } = await run('docker', [
-    'exec',
-    'pglens-odoo-odoo-db-1',
-    'psql',
-    '-U',
-    role,
-    '-d',
-    'postgres',
-    '-X',
-    '-A',
-    '-t',
-    '-q',
-    '-c',
-    `SHOW ${setting}`,
-  ])
+  const { stdout } = await run(
+    'docker',
+    [
+      'exec',
+      '-i',
+      await dbContainer(),
+      'psql',
+      '-U',
+      role,
+      '-d',
+      'postgres',
+      '-X',
+      '-A',
+      '-t',
+      '-q',
+    ],
+    { input: `SHOW ${setting};\n` },
+  )
   return stdout.trim()
 }
 

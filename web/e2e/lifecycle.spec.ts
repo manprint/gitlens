@@ -14,9 +14,11 @@ import { consoleGuard } from './qa/observe'
 import { database, query } from './qa/pg'
 import { originOf, truthSessions, type ApiLocks } from './qa/sessionTruth'
 import {
-  BASE_SERVICES,
   composeArgs,
+  DB_NODES,
   down,
+  expectedServices,
+  haActive,
   LIFECYCLE_SERVICES,
   rebuild,
   restart,
@@ -153,9 +155,15 @@ async function pglensSql(sql: string): Promise<string> {
 
 test.afterEach(async () => {
   const rows = await stackStatus()
-  const missing = BASE_SERVICES.filter(
+  const missing = expectedServices().filter(
     (name) => !rows.some((row) => row.service === name && row.state === 'running'),
   )
+  const nodesDown = haActive() ? missing.filter((name) => DB_NODES.includes(name)) : []
+  if (nodesDown.length > 0) {
+    throw new Error(
+      `HA database node(s) ${nodesDown.join(', ')} not running: run ha/rejoin.sh <node> (never compose)`,
+    )
+  }
   if (missing.includes('odoo-db')) await upAll()
   else if (missing.length > 0) await up()
   await waitReady(BUDGET.serviceRestart)
@@ -844,6 +852,7 @@ test('LIFE-DOWN-UP everything returns, volumes intact, Odoo reachable, downtime 
 test('LIFE-DOWN-UP-FULL PostgreSQL restarts cleanly, Odoo data intact, agent resumes without a new instance, gap shown @lifecycle @destructive', async ({
   signedInPage: page,
 }) => {
+  test.skip(haActive(), 'single-node drill: under HA a full down/up must go through ha/rejoin.sh')
   // waitReady < 180 s + down and up (2 restart allowances) + 60 s = 180_000 + 2 * 120_000 + 60_000
   test.setTimeout(qaTimeout([180_000], 2))
 

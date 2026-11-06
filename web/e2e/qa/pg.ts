@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 
 import { assertStimulusAllowed, GuardError, sqlIdent, sqlInt } from './guard'
-import { run } from './stack'
+import { haActive, run } from './stack'
 
 /**
  * Ground truth and stimulus on the monitored PostgreSQL. Everything goes through
@@ -9,7 +9,59 @@ import { run } from './stack'
  * database port is exposed. Stimulus SQL is built from constants and validated
  * integers/identifiers only.
  */
-const container = () => process.env.PGLENS_QA_DB_CONTAINER ?? 'pglens-odoo-odoo-db-1'
+const SINGLE_NODE = 'pglens-odoo-odoo-db-1'
+const hactlUrl = () => process.env.PGLENS_QA_HACTL_URL ?? 'http://127.0.0.1:8008'
+const LEADER_WAIT_MS = 30_000
+let leaderCache: { container: string; at: number } | null = null
+
+interface HactlStatus {
+  leader?: string
+  split_brain?: boolean
+  writes_blocked?: boolean
+  promoting?: unknown
+  failover?: string
+}
+
+/** Why hactl's state forbids harness SQL now, or null when one stable leader takes it. */
+function unsettled(status: HactlStatus | null): string | null {
+  if (status === null) return 'hactl /status unreachable'
+  if (status.split_brain) return 'split brain'
+  if (!status.leader || !/^[a-z0-9-]{1,30}$/.test(status.leader)) return 'no leader'
+  if (status.promoting) return 'promotion in progress'
+  if (status.failover && status.failover !== 'idle') return `failover ${status.failover}`
+  // docker exec bypasses the proxy: a write now could land after a switchover's final LSN.
+  if (status.writes_blocked) return 'writes blocked (switchover)'
+  return null
+}
+
+/**
+ * The writable PostgreSQL container: `PGLENS_QA_DB_CONTAINER` when set; the single
+ * node outside HA mode; in HA mode (plan 005 7.2) the hactl leader, cached 2 s
+ * because a drill can move it. In HA it waits up to 30 s for one settled leader and
+ * then refuses (unreachable hactl, split brain, promotion, blocked writes).
+ */
+export async function dbContainer(): Promise<string> {
+  const pinned = process.env.PGLENS_QA_DB_CONTAINER
+  if (pinned) return pinned
+  if (!haActive()) return SINGLE_NODE
+  if (leaderCache && Date.now() - leaderCache.at < 2_000) return leaderCache.container
+  const deadline = Date.now() + LEADER_WAIT_MS
+  for (;;) {
+    const status = await fetch(`${hactlUrl()}/status`, { signal: AbortSignal.timeout(3_000) })
+      .then((response) => (response.ok ? (response.json() as Promise<HactlStatus>) : null))
+      .catch(() => null)
+    const reason = unsettled(status)
+    if (reason === null) {
+      leaderCache = { container: `pglens-odoo-${status?.leader}-1`, at: Date.now() }
+      return leaderCache.container
+    }
+    if (Date.now() >= deadline) {
+      throw new GuardError(`HA mode: no settled hactl leader after ${LEADER_WAIT_MS} ms: ${reason}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+  }
+}
+
 /** The monitored database the stimulus runs in (`PGLENS_QA_DB`, `odoo` by default). */
 export const database = () => process.env.PGLENS_QA_DB ?? 'odoo'
 const PSQL = ['psql', '-U', 'odoo', '-X', '-A', '-t', '-q', '-v', 'ON_ERROR_STOP=1']
@@ -33,7 +85,7 @@ export async function query(
       // The client timeout only kills docker exec; the server must stop the statement too.
       '-e',
       `PGOPTIONS=-c statement_timeout=${QUERY_TIMEOUT_MS}`,
-      container(),
+      await dbContainer(),
       ...PSQL,
       '-d',
       dbname,
@@ -87,10 +139,19 @@ function safeAppName(name: string): string {
 }
 
 /** A long-lived psql session fed through stdin; closing stdin ends it. */
-function holdSession(applicationName: string, sql: string): ChildProcess {
+async function holdSession(applicationName: string, sql: string): Promise<ChildProcess> {
   const child = spawn(
     'docker',
-    ['exec', '-i', '-e', `PGAPPNAME=${applicationName}`, container(), ...PSQL, '-d', database()],
+    [
+      'exec',
+      '-i',
+      '-e',
+      `PGAPPNAME=${applicationName}`,
+      await dbContainer(),
+      ...PSQL,
+      '-d',
+      database(),
+    ],
     { stdio: ['pipe', 'ignore', 'ignore'] },
   )
   child.on('error', (error) => console.log(`[qa/pg] session ${applicationName}: ${error.message}`))
@@ -137,7 +198,7 @@ export async function openSessions(
   const children: ChildProcess[] = []
   const close = () => endSessions(children, name)
   registerCleanup(close)
-  for (let index = 0; index < count; index += 1) children.push(holdSession(name, body))
+  for (let index = 0; index < count; index += 1) children.push(await holdSession(name, body))
   await waitFor(
     async () => (await sessionCount(name)) >= count,
     30_000,
@@ -173,7 +234,7 @@ export async function lockPair(
     if (waiter !== name) await endSessions([], waiter)
   }
   registerCleanup(release)
-  children.push(holdSession(name, lock))
+  children.push(await holdSession(name, lock))
   await waitFor(
     async () =>
       (await queryInt(
@@ -182,7 +243,7 @@ export async function lockPair(
     30_000,
     'lock holder',
   )
-  children.push(holdSession(waiter, lock))
+  children.push(await holdSession(waiter, lock))
   await waitFor(
     async () =>
       (await queryInt(

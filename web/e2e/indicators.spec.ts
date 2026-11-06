@@ -10,6 +10,7 @@ import {
   cpuBurn,
   database,
   lockPair,
+  dbContainer,
   openSessions,
   QA_SCHEMA,
   query,
@@ -1119,7 +1120,6 @@ const HOST_TITLE = 'CPU used (%)'
  * their share a 60 s burst fills in a bucket (requiredRise).
  */
 const MAX_BURNERS = 4
-const dbContainer = () => process.env.PGLENS_QA_DB_CONTAINER ?? 'pglens-odoo-odoo-db-1'
 
 interface CpuTimes {
   busy: number
@@ -1128,7 +1128,7 @@ interface CpuTimes {
 
 /** `cpu` line of /proc/stat of the kernel the PG container runs on: user nice system idle iowait irq softirq steal. */
 async function procStat(): Promise<CpuTimes> {
-  const { stdout } = await run('docker', ['exec', dbContainer(), 'cat', '/proc/stat'])
+  const { stdout } = await run('docker', ['exec', await dbContainer(), 'cat', '/proc/stat'])
   const line = stdout.split('\n').find((row) => row.startsWith('cpu '))
   if (line === undefined) throw new Error('/proc/stat has no cpu line')
   const fields = line.trim().split(/\s+/).slice(1, 9).map(Number)
@@ -1137,7 +1137,7 @@ async function procStat(): Promise<CpuTimes> {
 }
 
 async function hostCores(): Promise<number> {
-  const { stdout } = await run('docker', ['exec', dbContainer(), 'nproc'])
+  const { stdout } = await run('docker', ['exec', await dbContainer(), 'nproc'])
   return Math.max(1, Number(stdout.trim()))
 }
 
