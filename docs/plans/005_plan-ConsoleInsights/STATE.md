@@ -17,16 +17,16 @@ See `PROTOCOL.md` (static cold-start rules).
 - Invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-06 11:20 CET, explicit; clears the deadline stop latch). Style delegated (host dispatches subagents); acting as agent-1:claude-opus-5-5 (the session model; implements agent-2 units under the substitution rule). `advisor` tool disabled by the user this session: required agent-1 reviews are done by fresh-context read-only review agents with `model: opus` (independent of the implementing context) and recorded as such; Haiku agents for mechanical work.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: RUNNING
-- Type: sub-phase
-- ID / attempt: 8.2 / 1
-- Status: DONE 8.2 (2026-11-07 08:00 UTC); next P8 closure
+- Type: phase closure
+- ID / attempt: P8 / 1
+- Status: DONE P8 (2026-11-07 08:05 UTC); next PLAN closure
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: 7.0 agent-1:claude-opus-5-5; 7.1 agent-2 → actual agent-1:claude-opus-5-5 (substitution); supervisor review: fresh Opus 5.5 review agent
 - File / unit heading: phase_09.md → 8.2 (S1 done; S2 G-VIS done with correction 7.5.8 attempt 2; G-HA done; G-QA run 2 + reruns; activity breakdown fix verifying)
 - Current step: 8.2 (8.1 DONE: T2 on all three nodes, `allow_signal: true` kept). Lab now runs `allow_signal: true` on the three targets (backup `ha/agent.ha.yaml.bak-757`). Gap register `ha-findings.md`: GAP-6 lab slots (7.5.5), GAP-7 alert episode merge (7.5.6 FIXED), GAP-8 V-11 at T2 (7.5.7 FIXED), GAP-9 Full HD fit under HA data (7.5.8 FIXED). Backup `04-final-20261107T020829Z` VERIFIED until 2026-11-08 02:08 UTC.
-- Next action: P8 closure → PLAN closure.
+- Next action: PLAN closure.
 - Stop latch: none (deadline latch cleared 2026-11-06 11:20 CET by the explicit invocation).
-- Last closure: 8.2
+- Last closure: P8
 - Unit base: HEAD 8320781 (6.3 closure); branch `feat/index-analysis` (never switch or create branches)
 - Repo state: HEAD 8320781 + the 6.4 handoff commit (new specs `web/e2e/indicators.spec.ts`, `indicators_slow.spec.ts`, `lifecycle.spec.ts`, `qa/traceability.ts`, `qa/traceability.spec.ts`, STATE); uncommitted only `internal/webui/dist/index.html` (never staged), `.claude/` and `web/src/node_modules/` (not owned).
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
@@ -265,7 +265,7 @@ README obligation per phase: see the Documentation table below; each phase file'
 | 5 | phase_06.md | P5 | DONE | 1 | gates §7 P5; README Index analysis section + docs/api.md; advisor approved |
 | 6 | phase_07.md | P6 | DONE | R-P6 (Opus review agent, APPROVE-WITH-FIXES, fixes verified) / closure commit `phase(005/P6)` |
 | 7 | phase_08.md | P7 | DONE | R-P7 (Opus review agent, PASS-WITH-NOTES, 7 fixes applied, V-9 note) / closure commit `phase(005/P7)` |
-| 8 | phase_09.md | P8 | TODO | — |
+| 8 | phase_09.md | P8 | DONE | S6 advisor review (fresh Opus agent) APPROVE after fixes / closure commit `phase(005/P8)` |
 | 9 | phase_10.md | P9 | DONE | R-P9 / unit:P9:1 |
 | 10 | phase_11.md | P10 | DONE | unit:P10:1 |
 | 11 | phase_12.md | P11 | DONE (11.5b done after Q2, unit:11.5b:1) | R-P11, R-P11b / unit:P11:1 |
