@@ -182,7 +182,11 @@ function stepOf(points: readonly Point[]): number {
   return middle
 }
 
-/** The last six buckets that ended before the stimulus; null buckets are dropped, or read as 0 with `zeroFill`. */
+/**
+ * The last six buckets that ended before the stimulus; null buckets are dropped, or read as 0
+ * with `zeroFill`. A `zeroFill` series is sparse (the ASH API omits empty buckets), so only
+ * buckets of the last six steps count: older ones belong to an earlier test.
+ */
 function idleValues(
   points: readonly Point[],
   stepS: number,
@@ -191,6 +195,7 @@ function idleValues(
 ): number[] {
   return points
     .filter((point) => point.at + stepS * 1000 <= startMs)
+    .filter((point) => !zeroFill || point.at >= startMs - 7 * stepS * 1000)
     .slice(-6)
     .map((point) => (zeroFill ? (point.value ?? 0) : point.value))
     .filter((value): value is number => value !== null)
@@ -305,16 +310,21 @@ const applicationCount = (response: ApiLocks, app: string) =>
   response.connections?.by_application.find((row) => row.key === app)?.count ?? 0
 
 interface ActivityResponse {
-  metrics?: Record<string, { value: number; labels?: Record<string, string> }[]>
+  metrics?: Record<string, { ts: string; value: number; labels?: Record<string, string> }[]>
 }
 
-/** Latest `pg_connections_by_application` samples of `app`, summed (one labelset per application). */
+/**
+ * The `pg_connections_by_application` sample of `app` in the latest scrape (0 when absent).
+ * The endpoint returns more than one scrape, so only the newest `ts` counts.
+ */
 async function activityApplicationCount(id: string, app: string): Promise<number> {
   const response = await pglens.get<ActivityResponse>(
     `/api/v1/instances/${encodeURIComponent(id)}/activity`,
   )
-  return (response.metrics?.pg_connections_by_application ?? [])
-    .filter((sample) => sample.labels?.application_name === app)
+  const samples = response.metrics?.pg_connections_by_application ?? []
+  const latest = Math.max(...samples.map((sample) => Date.parse(sample.ts)))
+  return samples
+    .filter((sample) => Date.parse(sample.ts) === latest && sample.labels?.application_name === app)
     .reduce((sum, sample) => sum + sample.value, 0)
 }
 
@@ -394,26 +404,35 @@ const TPS_TITLE = 'Transactions per second'
 /** The Odoo database commits 1-3 times a second by itself; 60 per second keeps the burst well above that noise. */
 const BURST = { rate: 60, writes: 60 * (STIMULUS.tps / 1000) }
 
+const TPS_IDLE_WAIT = 7 * 60_000
+
 test('IND-TPS a 60 s commit burst lifts the Overview TPS chart, the API series and xact_commit alike @indicators', async ({
   signedInPage: page,
   api,
 }) => {
-  test.setTimeout(qaTimeout([STIMULUS.tps, BUDGET.databaseStats]))
+  test.setTimeout(qaTimeout([TPS_IDLE_WAIT, STIMULUS.tps, BUDGET.databaseStats]))
   const guard = consoleGuard(page)
   const id = await pickInstance(api)
   const db = database()
   const sent = trackQueries(page)
-  await openAt(page, `/instances/${encodeURIComponent(id)}?range=1h&db=${encodeURIComponent(db)}`)
-  await expect(
-    page
-      .getByRole('table', { name: `${TPS_TITLE} data`, exact: true })
-      .locator('tbody tr')
-      .first(),
-  ).toBeAttached()
+  // An earlier test may have stopped the agent (IND-NOTIF): wait until the last six buckets
+  // hold the three idle samples the control needs.
+  let idle: Point[] = []
+  let stepS = 0
+  await expect(async () => {
+    await openAt(page, `/instances/${encodeURIComponent(id)}?range=1h&db=${encodeURIComponent(db)}`)
+    await expect(
+      page
+        .getByRole('table', { name: `${TPS_TITLE} data`, exact: true })
+        .locator('tbody tr')
+        .first(),
+    ).toBeAttached()
+    idle = await uiPoints(page, TPS_TITLE, 'Commits')
+    stepS = stepOf(idle)
+    expect(idleValues(idle, stepS, Date.now()).length).toBeGreaterThanOrEqual(3)
+  }).toPass({ timeout: TPS_IDLE_WAIT, intervals: [30_000] })
 
   const tStart = Date.now()
-  const idle = await uiPoints(page, TPS_TITLE, 'Commits')
-  const stepS = stepOf(idle)
   const idleBuckets = idleValues(idle, stepS, tStart)
   const base = baselineOf(idleBuckets)
   // The rate-chart step is at least 60 s, so a 60 s burst fills only half a bucket at worst
@@ -506,15 +525,21 @@ test('IND-CONN 12 sessions of qa-app move the Connections used tile and the Appl
   signedInPage: page,
   api,
 }) => {
-  test.setTimeout(qaTimeout([BUDGET.activity, BUDGET.activity]))
+  test.setTimeout(qaTimeout([BUDGET.activity, BUDGET.activity, BUDGET.activity]))
   const guard = consoleGuard(page)
   const id = await pickInstance(api)
-  await openAt(page, `/instances/${encodeURIComponent(id)}/locks`)
-  await expect(page.getByRole('article', { name: 'Connections used', exact: true })).toContainText(
-    /application connections?/,
-  )
-  const baseline = await connectionsTile(page)
-  if (baseline === null) throw new Error('the Connections used tile shows no figures')
+  // Right after an agent restart the tile has no sample yet: wait for its figures.
+  let polled = null as Tile | null
+  await expect(async () => {
+    await openAt(page, `/instances/${encodeURIComponent(id)}/locks`)
+    await expect(
+      page.getByRole('article', { name: 'Connections used', exact: true }),
+    ).toContainText(/application connections?/)
+    polled = await connectionsTile(page)
+    expect(polled, 'the Connections used tile shows figures').not.toBeNull()
+  }).toPass({ timeout: BUDGET.activity, intervals: [10_000] })
+  if (polled === null) throw new Error('the Connections used tile shows no figures')
+  const baseline: Tile = polled
 
   // CONTROL: nothing of qa-app anywhere, and the tile agrees with PostgreSQL at rest.
   const idleTruth = await truth.connections()
@@ -618,6 +643,10 @@ test('IND-CONN 12 sessions of qa-app move the Connections used tile and the Appl
     if (qa !== 0) problems.push(`pg_stat_activity still has ${qa} ${CONN_APP}`)
     if (applicationCount(await locksApi(id), CONN_APP) !== 0)
       problems.push('API still counts qa-app')
+    // The activity series keeps qa-app until its samples leave the window; IND-CONN-APP's
+    // control starts from zero.
+    const metric = await activityApplicationCount(id, CONN_APP)
+    if (metric !== 0) problems.push(`API activity metric still counts ${metric} ${CONN_APP}`)
     // +-1: the Odoo workers' drift since the baseline.
     if (tile === null || Math.abs(tile.application - baseline.application) > 1) {
       problems.push(

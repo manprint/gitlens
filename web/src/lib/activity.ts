@@ -68,17 +68,22 @@ export function breakdown(
   name: string,
   labelName: string,
 ): ActivityBreakdown[] {
+  // The agent omits a zero row, so a labelset missing from the newest scrape is gone:
+  // an older sample of it in the window must not keep a closed application listed.
+  const series = seriesFor(metrics, name)
+  const newest = timestampValue(latestMetric(series)?.ts)
   const seriesByLabels = new Map<string, ActivityMetricLike[]>()
-  for (const metric of seriesFor(metrics, name)) {
+  for (const metric of series) {
+    if (newest !== null && timestampValue(metric.ts) !== newest) continue
     const key = labelKey(metric.labels)
-    const series = seriesByLabels.get(key) ?? []
-    series.push(metric)
-    seriesByLabels.set(key, series)
+    const samples = seriesByLabels.get(key) ?? []
+    samples.push(metric)
+    seriesByLabels.set(key, samples)
   }
 
   const grouped = new Map<string, number>()
-  for (const series of seriesByLabels.values()) {
-    const metric = latestMetric(series)
+  for (const samples of seriesByLabels.values()) {
+    const metric = latestMetric(samples)
     const label = metric?.labels?.[labelName] ?? 'Unknown'
     const value = finiteValue(metric?.value)
     if (value !== null) grouped.set(label, (grouped.get(label) ?? 0) + value)

@@ -8,10 +8,10 @@ import { expect, type Page } from '@playwright/test'
 import { test } from '../fixtures'
 import * as api from './api'
 import { BUDGET, qaTimeout } from './budget'
-import { assertLifecycleAllowed, assertStimulusAllowed, STACK_DIR } from './guard'
+import { assertLifecycleAllowed, assertStimulusAllowed } from './guard'
 import { consoleGuard } from './observe'
 import { dbContainer, query } from './pg'
-import { composeArgs, restart, run, stackStatus, waitReady } from './stack'
+import { agentYaml, composeArgs, restart, run, stackStatus, waitReady } from './stack'
 
 /**
  * 14.3 live degrade/restore drills (RDY-E2E-001..005). Each drill degrades one
@@ -28,7 +28,7 @@ test.describe.configure({ mode: 'serial', retries: 0 })
 const MONITOR_ROLE = 'pglens_monitor'
 const AGENT = 'pglens-agent'
 const SERVER = 'pglens-server'
-const AGENT_YAML = join(STACK_DIR, 'agent.yaml')
+const AGENT_YAML = agentYaml()
 const DATA_MOUNT = '/var/lib/postgresql'
 const GOOGLE_CHAT_ENV = 'PGLENS_GOOGLE_CHAT_WEBHOOK_URL'
 const POLL_MS = 3_000
@@ -576,8 +576,9 @@ test('RDY-E2E-005 adding a notification channel to the server clears RDY-NOTIF-0
   signedInPage: page,
 }) => {
   test.setTimeout(qaTimeout(Array<number>(4).fill(BUDGET.readinessFlags), 2))
-  // A server restart ends the console session: the 401 of /api/v1/session is expected.
-  const browser = consoleGuard(page, [{ url: /\/api\/v1\/session$/, status: 401 }])
+  // A server restart ends the in-memory console session: until the page signs in again,
+  // the session check and any poll in flight (e.g. the header's firing alerts) get 401.
+  const browser = consoleGuard(page, [{ url: /\/api\/v1\//, status: 401 }])
   const begin = await start()
   const target = 'RDY-NOTIF-01'
   // The channel value is never printed: only whether it is set.

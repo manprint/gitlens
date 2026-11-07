@@ -62,6 +62,10 @@ export const expectedServices = () =>
  */
 export const haActive = () => existsSync(join(STACK_DIR, 'ha', 'ACTIVE'))
 
+/** The agent config the running agent mounts: `ha/agent.ha.yaml` in HA mode. */
+export const agentYaml = () =>
+  haActive() ? join(STACK_DIR, 'ha', 'agent.ha.yaml') : join(STACK_DIR, 'agent.yaml')
+
 /** Global `docker compose` options (project and files) of the stack. */
 export function composeArgs(): string[] {
   const args = ['compose', '-p', COMPOSE_PROJECT, '-f', join(STACK_DIR, 'compose.yml')]

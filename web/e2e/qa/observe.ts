@@ -74,9 +74,14 @@ export function consoleGuard(page: Page, allowed: AllowedFailure[] = []) {
     problems.push(`console.error: ${message.text()}`)
   })
   page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`))
-  page.on('requestfailed', (request) =>
-    problems.push(`requestfailed: ${request.url()} ${request.failure()?.errorText ?? ''}`),
-  )
+  page.on('requestfailed', (request) => {
+    const error = request.failure()?.errorText ?? ''
+    // A whitelisted request cut short by the next navigation (the sign-in after a restart).
+    if (error.includes('ERR_ABORTED') && allowed.some((rule) => rule.url.test(request.url()))) {
+      return
+    }
+    problems.push(`requestfailed: ${request.url()} ${error}`)
+  })
   page.on('response', (response) => {
     if (response.status() >= 400 && !isAllowed(response.url(), response.status())) {
       problems.push(`HTTP ${response.status()}: ${response.url()}`)

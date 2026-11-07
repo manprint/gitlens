@@ -28,25 +28,27 @@ export async function waitForFreshData(
   await expect.poll(predicate, { timeout: options.timeout ?? FRESH_DATA_TIMEOUT }).toBe(true)
 }
 
+async function signIn(page: Page): Promise<void> {
+  const password = process.env.PGLENS_UI_PASSWORD
+  if (!password) {
+    throw new Error('PGLENS_UI_PASSWORD is required by the signedInPage fixture')
+  }
+  await page.goto('/login')
+  await page.getByLabel('Password', { exact: true }).fill(password)
+  await page.getByRole('button', { name: /sign in|log in|accedi/i }).click()
+  await expect(page).not.toHaveURL(/\/login(?:[/?#]|$)/)
+}
+
 export const test = base.extend<TestFixtures, WorkerFixtures>({
   authenticatedStorageState: [
     async ({ browser }, use) => {
-      const password = process.env.PGLENS_UI_PASSWORD
-      if (!password) {
-        throw new Error('PGLENS_UI_PASSWORD is required by the signedInPage fixture')
-      }
-
       const context = await browser.newContext({
         baseURL: uiBaseURL(),
         locale: 'en-US',
         timezoneId: 'UTC',
       })
       try {
-        const page = await context.newPage()
-        await page.goto('/login')
-        await page.getByLabel('Password', { exact: true }).fill(password)
-        await page.getByRole('button', { name: /sign in|log in|accedi/i }).click()
-        await expect(page).not.toHaveURL(/\/login(?:[/?#]|$)/)
+        await signIn(await context.newPage())
         await use(await context.storageState())
       } finally {
         await context.close()
@@ -63,7 +65,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       timezoneId: 'UTC',
     })
     try {
-      await use(await context.newPage())
+      const page = await context.newPage()
+      // The server keeps UI sessions in memory: a server restart by an earlier test of this
+      // worker drops the shared session, so sign in again.
+      if ((await context.request.get('/api/v1/instances')).status() === 401) await signIn(page)
+      await use(page)
     } finally {
       await context.close()
     }

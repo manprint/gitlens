@@ -31,9 +31,10 @@ describe('activity derivation', () => {
     expect(latestSampleAt({})).toBeNull()
   })
 
-  it('aggregates state and database labels from their newest samples', () => {
+  it('aggregates state and database labels from the newest scrape only', () => {
     const metrics = {
       pg_backends: [
+        // Absent from the newest scrape: its sessions ended (the agent omits zero rows).
         metric(2, first, { state: 'active', wait_event_type: 'CPU' }),
         metric(3, second, { state: 'active', wait_event_type: 'Lock' }),
         metric(4, second, { state: 'idle', wait_event_type: 'CPU' }),
@@ -45,8 +46,8 @@ describe('activity derivation', () => {
     }
 
     expect(breakdown(metrics, 'pg_backends', 'state')).toEqual([
-      { label: 'active', value: 5 },
       { label: 'idle', value: 4 },
+      { label: 'active', value: 3 },
     ])
     expect(oldestStateAge(metrics)).toBe(20)
   })

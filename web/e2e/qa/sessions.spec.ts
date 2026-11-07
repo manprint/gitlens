@@ -1,12 +1,11 @@
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 
 import { expect, type Page } from '@playwright/test'
 
 import { test } from '../fixtures'
 import * as api from './api'
 import { BUDGET, qaTimeout } from './budget'
-import { assertLifecycleAllowed, assertStimulusAllowed, STACK_DIR } from './guard'
+import { assertLifecycleAllowed, assertStimulusAllowed } from './guard'
 import { consoleGuard } from './observe'
 import { lockPair, openSessions, query, registerCleanup, runCleanups } from './pg'
 import {
@@ -21,7 +20,7 @@ import {
   truthSessions,
   type TruthSession,
 } from './sessionTruth'
-import { restart, stackStatus, waitReady } from './stack'
+import { agentYaml, restart, stackStatus, waitReady } from './stack'
 
 /**
  * 16.4 live proof of the session origin against `pg_stat_activity` (SORIGIN-E2E-001..003).
@@ -35,8 +34,8 @@ import { restart, stackStatus, waitReady } from './stack'
 test.describe.configure({ mode: 'serial', retries: 0 })
 
 const AGENT = 'pglens-agent'
-const AGENT_YAML = join(STACK_DIR, 'agent.yaml')
-const AGENT_YAML_BACKUP = join(STACK_DIR, 'agent.yaml.bak-16.4')
+const AGENT_YAML = agentYaml()
+const AGENT_YAML_BACKUP = `${AGENT_YAML}.bak-16.4`
 const POLL_MS = 3_000
 const LONG_SLEEP_S = 150
 /** The agent's own first-run delay after a restart bounds the first sample (BUDGET.check15m). */
@@ -380,15 +379,22 @@ test('SORIGIN-E2E-002 a long statement shows its query age, wait event and norma
   await page.setViewportSize({ width: 1920, height: 1080 })
 
   // Warm-up: the integer-literal form `select pg_sleep(1)` shares the queryid of the long one.
+  // The queryid comes from EXPLAIN VERBOSE: pg_stat_statements keeps the text of the first
+  // call, and other tests leave `SELECT pg_sleep($1)` entries of other literal types.
   await query('select pg_sleep(1);\nselect pg_sleep(1);\nselect pg_sleep(1);\n', 'qa-longq')
-  const queryid = (
-    await query(
-      `SELECT queryid::text FROM pg_stat_statements WHERE query = 'select pg_sleep($1)' ORDER BY calls DESC LIMIT 1;`,
-      'qa-harness',
-      'postgres',
-    )
-  ).trim()
-  expect(queryid, 'pg_stat_statements has the warm-up statement').toMatch(/^-?\d+$/)
+  const explain = await query('EXPLAIN (VERBOSE) select pg_sleep(1);', 'qa-harness', 'postgres')
+  const queryid = /Query Identifier: (-?\d+)/.exec(explain)?.[1] ?? ''
+  expect(queryid, 'EXPLAIN VERBOSE names the queryid').toMatch(/^-?\d+$/)
+  expect(
+    (
+      await query(
+        `SELECT count(*) FROM pg_stat_statements WHERE queryid = ${queryid} AND calls >= 3;`,
+        'qa-harness',
+        'postgres',
+      )
+    ).trim(),
+    'pg_stat_statements has the warm-up statement',
+  ).not.toBe('0')
   await until(
     async () => {
       const id = encodeURIComponent(await instanceId())

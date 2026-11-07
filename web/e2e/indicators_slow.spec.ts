@@ -134,8 +134,11 @@ interface Finding {
   degraded_reason?: string
   evidence?: Record<string, unknown>
 }
+// Scoped to the primary: on the HA lab each standby replays the same schema and
+// reports its own finding for the same object.
 async function findingsFor(q: string, rule?: string): Promise<Finding[]> {
   const params = new URLSearchParams({ q, state: 'all', limit: '1000' })
+  params.set('instance_id', await instanceId())
   if (rule) params.set('rule_id', rule)
   return api.get<Finding[]>(`/api/v1/findings?${params.toString()}`)
 }
@@ -185,10 +188,10 @@ async function uiRows(
   return rows.filter((rec) => Object.values(rec).join(' ').includes(term))
 }
 
-const findingRows = (page: Page, term: string, state?: 'all') =>
+const findingRows = async (page: Page, term: string, state?: 'all') =>
   uiRows(
     page,
-    `/findings?q=${encodeURIComponent(term)}${state ? `&state=${state}` : ''}`,
+    `/findings?q=${encodeURIComponent(term)}&instance_id=${await instanceId()}${state ? `&state=${state}` : ''}`,
     'Advisor findings',
     null,
     term,
