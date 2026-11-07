@@ -277,7 +277,8 @@ type retentionSchedule struct {
 	TotalRuns int64
 	Running   bool
 	// Unscheduled is true while the scheduler has not yet given the job a
-	// next start (a job just added without initial_start).
+	// finite next start (a job just added without initial_start, or one the
+	// scheduler holds at -infinity until it picks it up).
 	Unscheduled bool
 }
 
@@ -289,7 +290,8 @@ func retentionScheduleOf(t *testing.T, pool *pgxpool.Pool, hypertable string) re
 		s    retentionSchedule
 		next *time.Time
 	)
-	require.NoError(t, pool.QueryRow(context.Background(), `SELECT j.job_id, j.config->>'drop_after', j.next_start,
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT j.job_id, j.config->>'drop_after',
+			CASE WHEN isfinite(j.next_start) THEN j.next_start END,
 			coalesce(st.total_runs, 0), coalesce(st.job_status = 'Running', false)
 		FROM timescaledb_information.jobs j
 		LEFT JOIN timescaledb_information.job_stats st USING (job_id)
