@@ -18,10 +18,13 @@ services:
     # phase_06.md specifies 16 MiB; that is not fillable by the agent's real
     # (non-configurable) check cadence within any reasonable test window — see
     # SYS-AGENT-003's own comment in test/scenario/agent.go for the full
-    # reasoning. 16 KiB exercises the exact same real-ENOSPC code path in a
-    # couple of minutes of real agent traffic instead of hours.
+    # reasoning. 2 MiB (below the 8 MiB segment roll) exercises the exact same
+    # real-ENOSPC code path within a minute of real agent traffic instead of
+    # hours. It must still hold the agent's first envelopes: with every check's
+    # first run inside its warm-up cap a single envelope is ~300 KiB, which
+    # latched a smaller buffer full before the instance ever registered.
     tmpfs:
-      - /var/lib/pglens/buffer:size=16k
+      - /var/lib/pglens/buffer:size=2m
     healthcheck:
       test: ["CMD", "/usr/local/bin/pglens-agent", "--healthcheck"]
       interval: 2s

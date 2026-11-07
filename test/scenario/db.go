@@ -17,7 +17,10 @@ func init() {
 		Topology: TopologyStandalone,
 		Covers:   []string{"phase_06.md#5.7"},
 		Smoke:    false,
-		Expect:   Expectations{Invariants: []string{"I-1", "I-2", "I-3", "I-4"}},
+		// Ten monitored databases: every database-scoped check reports
+		// once per database, so the instance carries roughly the default
+		// single-database budget plus ~100 series per extra database.
+		Expect: Expectations{Invariants: []string{"I-1", "I-2", "I-3", "I-4"}, MaxSeriesPerInstance: 3000},
 		Run: func(ctx context.Context, e *Env) error {
 			var instanceID string
 			resolveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -53,7 +56,13 @@ func init() {
 			const perRank = 20
 			for i := 1; i <= n; i++ {
 				name := fmt.Sprintf("db%02d", i)
-				if _, err := e.Exec("pg", "psql", "-U", "postgres", "-c", fmt.Sprintf("CREATE DATABASE %s", name)); err != nil {
+				// template0, not template1: the test image installs TimescaleDB
+				// into template1, and its ~50 catalog tables and ~40 indexes per
+				// database would make table_stats/index_stats (which now run
+				// within their two-minute warm-up) report several thousand
+				// counter series across ten databases. The budget under test
+				// is the database one; the databases only need activity.
+				if _, err := e.Exec("pg", "psql", "-U", "postgres", "-c", fmt.Sprintf("CREATE DATABASE %s TEMPLATE template0", name)); err != nil {
 					return fmt.Errorf("create database %s: %w", name, err)
 				}
 				args := []string{"psql", "-U", "postgres", "-d", name}

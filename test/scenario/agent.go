@@ -160,14 +160,14 @@ func init() {
 			// ENOSPC — but the agent's own check intervals are NOT
 			// configurable (V001-F09; only `checks.ash.enabled` is a real
 			// config consumer), so real envelope data accrues at whatever
-			// rate the fixed check cadence produces it: on the order of a
-			// few KB per ~10s at best. Filling 16 MiB at that rate would
-			// take hours, not a testable window. `agent-container-tiny-
-			// buffer.yml` therefore uses a 16 KiB tmpfs instead — 1000x
-			// smaller, same exact code path (real ENOSPC on a real
+			// rate the fixed check cadence produces it. Filling 16 MiB
+			// would take too long for a testable window. `agent-container-
+			// tiny-buffer.yml` therefore uses a 2 MiB tmpfs instead — 8x
+			// smaller and below one segment roll, still holding the first
+			// ~300 KiB envelopes, same exact code path (real ENOSPC on a real
 			// filesystem -> buffer.Buffer.handleWriteError ->
 			// BufferFull=true -> every subsequent Queue() drops and counts),
-			// fillable in a couple of minutes of real agent traffic. A
+			// fillable in about a minute of real agent traffic. A
 			// deliberate, documented correction to the plan's literal size,
 			// not a fake/synthetic trigger.
 			resolveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

@@ -38,6 +38,10 @@ type Scenario struct {
 type Expectations struct {
 	Events     []string // Event types expected to appear
 	Invariants []string // Invariant conditions that must hold
+	// MaxSeriesPerInstance overrides the I-8 series ceiling for a scenario
+	// whose topology legitimately reports more series than the default
+	// single-database budget allows; zero keeps the default.
+	MaxSeriesPerInstance float64
 }
 
 // APIClient is the subset of test/harness.APIClient's real methods a

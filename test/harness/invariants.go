@@ -90,13 +90,20 @@ func joinLines(lines []string) string {
 // component that owns a background loop.
 func (h *Harness) AssertInvariants(t *testing.T) {
 	t.Helper()
+	h.AssertInvariantsWithBudget(t, DefaultMetricBudget())
+}
+
+// AssertInvariantsWithBudget is AssertInvariants held to a scenario's own
+// metric budget.
+func (h *Harness) AssertInvariantsWithBudget(t *testing.T, budget MetricBudget) {
+	t.Helper()
 	pool := h.DB(t)
 	if pool == nil {
 		t.Fatal("AssertInvariants: no DB pool (call after Start)")
 	}
 	AwaitFirstMetricsRow(context.Background(), pool, metricsIngestWait)
 	AssertDBInvariants(context.Background(), t, pool)
-	h.AssertServerMetricInvariants(t, DefaultMetricBudget())
+	h.AssertServerMetricInvariants(t, budget)
 }
 
 // AssertServerMetricInvariants scrapes the server's /metrics and holds it to

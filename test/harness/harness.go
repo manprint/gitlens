@@ -1156,7 +1156,11 @@ func (h *Harness) Scenario(t *testing.T, id string) {
 		},
 		AssertInvariants: func(t *testing.T) {
 			invariantsChecked = true
-			h.AssertInvariants(t)
+			budget := DefaultMetricBudget()
+			if s.Expect.MaxSeriesPerInstance > 0 {
+				budget.MaxSeriesPerInstance = s.Expect.MaxSeriesPerInstance
+			}
+			h.AssertInvariantsWithBudget(t, budget)
 		},
 		KillServerReplica: func() error { return h.KillServerReplica(t) },
 	}

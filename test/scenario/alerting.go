@@ -139,6 +139,17 @@ func alertInstance(ctx context.Context, e *Env) (string, error) {
 		err := e.DB.QueryRow(ctx, `SELECT instance_id::text FROM instances ORDER BY last_seen DESC LIMIT 1`).Scan(&id)
 		return err == nil && id != "", err
 	})
+	if err != nil {
+		return id, err
+	}
+	// The instance row lands with the agent's first envelope, which can carry
+	// no check result yet. The scenarios stop the agent next, so wait until it
+	// has reported data: the end-of-run invariants need a non-empty store.
+	err = poll(ctx, 500*time.Millisecond, func(ctx context.Context) (bool, error) {
+		var n int
+		err := e.DB.QueryRow(ctx, `SELECT count(*) FROM metrics WHERE instance_id::text = $1`, id).Scan(&n)
+		return err == nil && n > 0, err
+	})
 	return id, err
 }
 
