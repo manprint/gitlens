@@ -30,3 +30,32 @@ func TestWIRECOV001_InstanceRoundTrip(t *testing.T) {
 	require.NotContains(t, string(bare), "agent_started_at")
 	require.NotContains(t, string(bare), "check_intervals")
 }
+
+// WIRE-COV-002: the first-run warm-up cap steps at one and fifteen minutes,
+// and the first-run bound is the shorter of the interval and its cap, zero for
+// a non-positive interval.
+func TestWIRECOV002_FirstRunWarmup(t *testing.T) {
+	t.Parallel()
+	caps := map[time.Duration]time.Duration{
+		15 * time.Second: 30 * time.Second,
+		time.Minute:      30 * time.Second,
+		5 * time.Minute:  120 * time.Second,
+		15 * time.Minute: 120 * time.Second,
+		time.Hour:        600 * time.Second,
+	}
+	for interval, want := range caps {
+		require.Equal(t, want, wire.FirstRunWarmupCap(interval), interval)
+	}
+	bounds := map[time.Duration]time.Duration{
+		-time.Second:     0,
+		0:                0,
+		15 * time.Second: 15 * time.Second,
+		time.Minute:      30 * time.Second,
+		90 * time.Second: 90 * time.Second,
+		15 * time.Minute: 120 * time.Second,
+		time.Hour:        600 * time.Second,
+	}
+	for interval, want := range bounds {
+		require.Equal(t, want, wire.FirstRunBound(interval), interval)
+	}
+}
