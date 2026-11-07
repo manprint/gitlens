@@ -16,17 +16,17 @@ See `PROTOCOL.md` (static cold-start rules).
 
 - Invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-06 11:20 CET, explicit; clears the deadline stop latch). Style delegated (host dispatches subagents); acting as agent-1:claude-opus-5-5 (the session model; implements agent-2 units under the substitution rule). `advisor` tool disabled by the user this session: required agent-1 reviews are done by fresh-context read-only review agents with `model: opus` (independent of the implementing context) and recorded as such; Haiku agents for mechanical work.
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
-- Scope result: RUNNING
-- Type: phase closure
-- ID / attempt: P8 / 1
-- Status: DONE P8 (2026-11-07 08:05 UTC); next PLAN closure
+- Scope result: COMPLETE (2026-11-07; deviations awaiting the user's confirmation: FINAL_REPORT.md)
+- Type: plan closure
+- ID / attempt: PLAN / 1
+- Status: DONE PLAN (2026-11-07 08:10 UTC)
 - Intent: execute the plan in the order of §11 "Execution order" with exhaustive tests and no regressions.
 - Assigned: 7.0 agent-1:claude-opus-5-5; 7.1 agent-2 → actual agent-1:claude-opus-5-5 (substitution); supervisor review: fresh Opus 5.5 review agent
 - File / unit heading: phase_09.md → 8.2 (S1 done; S2 G-VIS done with correction 7.5.8 attempt 2; G-HA done; G-QA run 2 + reruns; activity breakdown fix verifying)
 - Current step: 8.2 (8.1 DONE: T2 on all three nodes, `allow_signal: true` kept). Lab now runs `allow_signal: true` on the three targets (backup `ha/agent.ha.yaml.bak-757`). Gap register `ha-findings.md`: GAP-6 lab slots (7.5.5), GAP-7 alert episode merge (7.5.6 FIXED), GAP-8 V-11 at T2 (7.5.7 FIXED), GAP-9 Full HD fit under HA data (7.5.8 FIXED). Backup `04-final-20261107T020829Z` VERIFIED until 2026-11-08 02:08 UTC.
-- Next action: PLAN closure.
+- Next action: none; user confirms A1–A3, REQ-20 `allow_signal`, deletes the test webhook, reviews and pushes.
 - Stop latch: none (deadline latch cleared 2026-11-06 11:20 CET by the explicit invocation).
-- Last closure: P8
+- Last closure: PLAN
 - Unit base: HEAD 8320781 (6.3 closure); branch `feat/index-analysis` (never switch or create branches)
 - Repo state: HEAD 8320781 + the 6.4 handoff commit (new specs `web/e2e/indicators.spec.ts`, `indicators_slow.spec.ts`, `lifecycle.spec.ts`, `qa/traceability.ts`, `qa/traceability.spec.ts`, STATE); uncommitted only `internal/webui/dist/index.html` (never staged), `.claude/` and `web/src/node_modules/` (not owned).
 - Network: user authorised internet use (2026-11-05 message "autorizzo ad usare la rete internet"); still no push.
@@ -275,7 +275,7 @@ README obligation per phase: see the Documentation table below; each phase file'
 | 15 | phase_16.md | P15 | DONE | §7 P15 final run |
 | 16 | phase_17.md | P16 | DONE | R-P16 (advisor, attempt 2; attempt 1 rejected) / unit:P16:2 |
 | 17 | phase_18.md | P17 | DONE | §7 17.3 run; closure commit `phase(005/P17)` |
-| PLAN | — | PLAN | TODO | — |
+| PLAN | — | PLAN | DONE | final gates = 8.2 (§7 8.2 S1–S6); FINAL_REPORT.md; closure commit `plan(005)` |
 
 Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains a reason and does not automatically satisfy dependent units. 11.5b may end BLOCKED (Q2) without blocking P11 closure when recorded.
 

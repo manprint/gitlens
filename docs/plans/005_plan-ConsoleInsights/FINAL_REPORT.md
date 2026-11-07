@@ -102,4 +102,4 @@ Highlights:
 
 ## Commits
 
-Local commits `5929be2..HEAD` (138 up to the 8.2 G-QA commit `03c9e6f`, plus the 8.2, P8 and PLAN closures): `git log --oneline 5929be2..HEAD`. Plan `d7647d0`, baseline `ce13a72` (D32). Phase closures include `00248fe` P16, `e86d1bf` P4, `3504309` P5, `e9459be` P15, `89d711e` P17, `14f671a` P6, `dda99e9` P7; correction `ce50126` (7.5.8 attempt 2) and `03c9e6f` (8.2 G-QA fixes and the activity breakdown fix).
+Local commits `5929be2..HEAD` (138 up to the 8.2 G-QA commit `03c9e6f`, plus `5ffdbba` 8.2, `bb5a587` P8 and the PLAN closure): `git log --oneline 5929be2..HEAD`. Plan `d7647d0`, baseline `ce13a72` (D32). Phase closures include `00248fe` P16, `e86d1bf` P4, `3504309` P5, `e9459be` P15, `89d711e` P17, `14f671a` P6, `dda99e9` P7; correction `ce50126` (7.5.8 attempt 2) and `03c9e6f` (8.2 G-QA fixes and the activity breakdown fix).
