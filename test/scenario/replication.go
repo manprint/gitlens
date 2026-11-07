@@ -595,9 +595,13 @@ func init() {
 			// picked up by the next replication_streaming scrape (10s
 			// interval), shipped by the next push (5s interval) and written
 			// by the server, which is ~15s before a loaded runner is taken
-			// into account. This is a timing margin, not a weaker assertion —
-			// the poll still requires replay_lag_sec to be exactly 0.
-			zeroCtx, cancelZero := context.WithTimeout(ctx, 30*time.Second)
+			// into account. 60s, not 30s: a scrape that lands while any WAL
+			// record is received but not yet replayed reports now() minus the
+			// last replayed commit (the CASE guard), so on a busy runner one
+			// of only ~3 samples in 30s can miss 0. This is a timing margin,
+			// not a weaker assertion — the poll still requires the latest
+			// replay_lag_sec to be exactly 0.
+			zeroCtx, cancelZero := context.WithTimeout(ctx, 60*time.Second)
 			defer cancelZero()
 			if err := poll(zeroCtx, 2*time.Second, func(ctx context.Context) (bool, error) {
 				var lag *float64
