@@ -14,7 +14,8 @@ See `PROTOCOL.md` (static cold-start rules).
 
 ## 1. Current unit and scope
 
-- Invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-06 11:20 CET, explicit; clears the deadline stop latch). Style delegated (host dispatches subagents); acting as agent-1:claude-opus-5-5 (the session model; implements agent-2 units under the substitution rule). `advisor` tool disabled by the user this session: required agent-1 reviews are done by fresh-context read-only review agents with `model: opus` (independent of the implementing context) and recorded as such; Haiku agents for mechanical work.
+- Invocation (current run): `/plan-execute-verify verify 005` (2026-11-07 13:20 UTC; settings from §3: full-autonomous true, WIP on); audit V001 closed PASS WITH FINDINGS, correction pass C1, C2 under this invocation. Saved execution scope below unchanged.
+- Previous invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-06 11:20 CET).
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit)
 - Scope result: COMPLETE (2026-11-07; deviations awaiting the user's confirmation: FINAL_REPORT.md)
 - Type: plan closure
@@ -398,7 +399,13 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 ### Audits
 | Report | Verdict | Current unresolved findings | Evidence |
 |--------|---------|-----------------------------|----------|
-| — | — | none | — |
+| [V001](verify/verify_001_2026-11-07.md) | PASS WITH FINDINGS | V001-F1, V001-F2, V001-F3 (MINOR) | gates rerun 2026-11-07 |
+
+### Corrections
+| ID | Closes | Status | Commit |
+|----|--------|--------|--------|
+| V001-C1 | V001-F1, V001-F2 | TODO | — |
+| V001-C2 | V001-F3 | TODO | — |
 
 ## 12. Suspended implementation (only while auditing unfinished work)
 
