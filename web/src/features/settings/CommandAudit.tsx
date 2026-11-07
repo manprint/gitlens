@@ -127,12 +127,15 @@ const AUDIT_COLUMNS: readonly SimpleColumn<CommandAuditEntry>[] = [
   {
     id: 'time',
     header: 'Time',
+    width: '17rem',
+    className: 'whitespace-nowrap',
     sortValue: (entry) => Date.parse(entryTime(entry) ?? '') || null,
     cell: (entry) => <Timestamp label="Recorded" value={entryTime(entry)} />,
   },
   {
     id: 'command',
     header: 'Command',
+    width: '7rem',
     sortValue: (entry) => entry.kind ?? 'unknown',
     cell: (entry) => entry.kind ?? 'unknown',
   },
@@ -145,12 +148,14 @@ const AUDIT_COLUMNS: readonly SimpleColumn<CommandAuditEntry>[] = [
   {
     id: 'requested-by',
     header: 'Requested by',
+    truncate: (entry) => displayValue(entry.requested_by),
     cell: (entry) => displayValue(entry.requested_by),
     help: 'settings.audit-requested-by',
   },
   {
     id: 'state',
     header: 'State',
+    width: '7rem',
     sortValue: entryState,
     cell: entryState,
     help: 'settings.audit-state',

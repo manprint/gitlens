@@ -2964,7 +2964,9 @@ test('VIS-LOCKS-001 the Locks page splits sessions by origin into two tables tha
   await expect(page.getByRole('list', { name: 'Active sessions' })).toHaveCount(0)
   // Under load the session counts move between the API read and the render: the strip
   // must show the split; exact counts are compared per origin in the loop below.
-  await expect(page.getByText(/\d+ application connections · \d+ pglens connections/)).toBeVisible({
+  await expect(
+    page.getByText(/\d+ application connections? · \d+ pglens connections?/),
+  ).toBeVisible({
     timeout: 30_000,
   })
   await page.screenshot({ path: `${ARTIFACT_DIR}/vis-locks-001-blocking-1920.png` })
@@ -3419,7 +3421,9 @@ test('VIS-CAP-002 every summary tile has one primary figure and gives each other
       await openCaptionRoute(page, route, values)
       const problems = await page.evaluate(() => {
         const out: string[] = []
-        for (const tile of document.querySelectorAll<HTMLElement>('article[aria-label]')) {
+        // An article that wraps a card (a cluster lag edge around its chart) is a container, not a tile.
+        const tiles = 'article[aria-label]:not(:has([data-card]))'
+        for (const tile of document.querySelectorAll<HTMLElement>(tiles)) {
           const label = tile.getAttribute('aria-label') ?? '?'
           if (tile.querySelectorAll('.text-2xl, .min-\\[1600px\\]\\:text-xl').length !== 1) {
             out.push(`${label}: not exactly one primary figure`)

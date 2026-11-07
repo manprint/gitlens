@@ -58,6 +58,29 @@ describe('CommandAudit', () => {
     expect(screen.queryByRole('combobox', { name: 'Command audit instance' })).toBeNull()
   })
 
+  it('UI-SET-062 keeps an audit row on one line: Time does not wrap, Requested by truncates', async () => {
+    const requestedBy = 'ui-session 387dc509 from 172.17.0.2'
+    renderAudit([
+      {
+        audit_id: 1,
+        command_id: '00000000-0000-4000-8000-000000000001',
+        instance_id: INSTANCE_ID,
+        kind: 'cancel',
+        args: { pid: 1 },
+        requested_by: requestedBy,
+        executed_at: '2026-09-01T01:00:00Z',
+        outcome: 'ok',
+      },
+    ])
+    await settleAuditQuery()
+    await waitFor(() =>
+      expect(auditTable().getByRole('cell', { name: /2026-09-01/ })).toHaveClass(
+        'whitespace-nowrap',
+      ),
+    )
+    expect(auditTable().getByTitle(requestedBy)).toBeInTheDocument()
+  })
+
   it('UI-SET-037 shows a queryid above 2^53 with every digit', async () => {
     // The server writes queryid as a string, since a JSON number above 2^53
     // loses its last digits when the browser parses it.
