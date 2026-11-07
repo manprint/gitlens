@@ -18,9 +18,9 @@ See `PROTOCOL.md` (static cold-start rules).
 - Previous invocation: `/pev-v3 full-autonomous:true --wip-commit execute 005` (2026-11-06 11:20 CET).
 - Active scope: plan (whole `005_plan-ConsoleInsights`, no selector); full-autonomous true, WIP on (explicit). Unchanged by the audit.
 - Scope result: COMPLETE (2026-11-07; deviations awaiting the user's confirmation: FINAL_REPORT.md).
-- Type: audit correction. ID / attempt: V001-C1 / 1. Status: DONE (2026-11-07).
-- Last closure: V001-C1 (unit:V001-C1:1); plan closure PLAN unit:PLAN:1 (`6c3acef`); audit V001 `30d329e`.
-- Next action: V001-C2 (legacy commit map); then none — the user confirms A1–A3 and REQ-20 `allow_signal`, deletes the test webhook, reviews and pushes.
+- Type: audit correction. ID / attempt: V001-C2 / 1. Status: DONE (2026-11-07).
+- Last closure: V001-C2 (unit:V001-C2:1), V001-C1 `e55f90f`; plan closure PLAN unit:PLAN:1 (`6c3acef`); audit V001 `30d329e`.
+- Next action: none — the user confirms A1–A3 and REQ-20 `allow_signal`, deletes the test webhook, reviews and pushes.
 - Stop latch: none.
 - Branch `feat/index-analysis` (never switch or create branches); uncommitted only `internal/webui/dist/index.html` (never staged), `.claude/`, `web/src/node_modules/` (not owned).
 - Network: user authorised internet use (2026-11-05); still no push.
@@ -137,13 +137,13 @@ none
 ### Audits
 | Report | Verdict | Current unresolved findings | Evidence |
 |--------|---------|-----------------------------|----------|
-| [V001](verify/verify_001_2026-11-07.md) | PASS WITH FINDINGS | V001-F1, V001-F2, V001-F3 (MINOR) | gates rerun 2026-11-07 |
+| [V001](verify/verify_001_2026-11-07.md) | PASS WITH FINDINGS | none (F1–F3 FIXED by C1, C2) | gates rerun 2026-11-07 |
 
 ### Corrections
 | ID | Closes | Status | Commit |
 |----|--------|--------|--------|
 | V001-C1 | V001-F1, V001-F2 | DONE | unit:V001-C1:1 |
-| V001-C2 | V001-F3 | TODO | — |
+| V001-C2 | V001-F3 | DONE | unit:V001-C2:1 |
 
 ## 12. Suspended implementation (only while auditing unfinished work)
 

@@ -944,3 +944,65 @@ Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED, BLOCKED. SKIPPED retains 
 | `README.md` (supported viewport statement), `docs/LIMITS.md` (below 1600 px behaviour), `fullhd-inventory.md`. | P15 (phase_16.md) | DONE | a9542e2, 55f6d39 |
 | `README.md` UI section (captions and the glossary), `web/README.md` (how to add a caption/`captionId`, the card contract and the closed unit list). | P17 (phase_18.md) | DONE | P17 commit |
 
+
+## 2026-11-07 V001-C2/1 complete unit:V001-C2:1
+Gates: every SHA below is an ancestor of HEAD (git merge-base --is-ancestor); review: agent-1 self-review; changes: history.md; notes: audit V001-F3. These closures do not resolve by the exact trailer rule (execution-contract §6 step 4) because their PEV-* lines sit in a paragraph before the `Co-Authored-By:` paragraph, use `PEV-Result: done|DONE`, or lack trailers; history is not rewritten (V001 AD-1). Read each `unit:<id>:<attempt>` reference of these units through this map (legacy SHA reference).
+
+| Unit | Attempt | Completion commit | Cause |
+|------|---------|-------------------|-------|
+| 1.1 | 1 | `70ac9b0` | PEV-Result: DONE, not in trailer block |
+| 1.2 | 1 | `cf87cd7` | PEV-Result: DONE, not in trailer block |
+| 1.3 | 1 | `117a655` | PEV-Result: DONE, not in trailer block |
+| 1.4 | 1 | `6cabce4` | PEV-Result: done, not in trailer block |
+| 1.5 | 1 | `d0934bb` | PEV-Result: done, not in trailer block |
+| 2.1 | 1 | `1193150` | PEV-Result: done, not in trailer block |
+| 2.2 | 1 | `90b4969` | PEV-Result: done, not in trailer block |
+| 2.3 | 1 | `6dd487c` | PEV-Result: done, not in trailer block |
+| 3.1 | 1 | `5aff6d1` | PEV-Result: done, not in trailer block |
+| 3.2 | 1 | `fec6838` | PEV-Result: done, not in trailer block |
+| 4.1 | 1 | `e097d2b` | PEV-* not in trailer block |
+| 4.2 | 1 | `3ab35e9` | PEV-* not in trailer block |
+| 4.3 | 1 | `2c7c731` | PEV-* not in trailer block |
+| 4.4 | 1 | `214a981` | PEV-* not in trailer block |
+| 4.5 | 1 | `5a1522b` | PEV-* not in trailer block |
+| 5.1 | 1 | `c6c7f9b` | PEV-* not in trailer block |
+| 6.1 | 1 | `fc5a213` | PEV-Result: done, not in trailer block |
+| 6.2 | 1 | `090264f` | PEV-Result: DONE, not in trailer block |
+| 6.3 | 1 | `8320781` | PEV-Result: DONE, not in trailer block |
+| 6.4 | 1 | `62a200b` | PEV-* not in trailer block |
+| 11.1 | 1 | `947fb82` | PEV-* not in trailer block |
+| 11.2 | 1 | `4f05d4e` | PEV-* not in trailer block |
+| 11.3 | 1 | `beea07e` | PEV-* not in trailer block |
+| 11.4 | 1 | `d0c5ed8` | PEV-* not in trailer block |
+| 11.5a | 1 | `aad9b26` | PEV-* not in trailer block |
+| 11.5b | 1 | `6d9032b` | PEV-* not in trailer block |
+| 12.1 | 1 | `8afb971` | PEV-* not in trailer block |
+| 12.2 | 1 | `d585191` | PEV-* not in trailer block |
+| 12.3 | 1 | `9f389f6` | PEV-* not in trailer block |
+| 13.1 | 1 | `0b6cedb` | PEV-Result: DONE, not in trailer block |
+| 13.2 | 1 | `2076b4f` | PEV-* not in trailer block |
+| 13.3 | 1 | `83c2ef6` | PEV-* not in trailer block |
+| 14.1 | 1 | `9e35e11` | no trailers |
+| 14.2 | 1 | `7a23734` | PEV-* not in trailer block |
+| 14.3 | 1 | `4b34294` | PEV-* not in trailer block |
+| 15.4 | 1 | `a04375f` | PEV-* not in trailer block |
+| 17.2 | 1 | `f7f2679` | PEV-* not in trailer block |
+| 17.3 | 1 | `b351a38` | PEV-* not in trailer block |
+| P0 | 1 | `ce49894` | PEV-Result: DONE, not in trailer block |
+| P1 | 1 | `baffa78` | PEV-Result: done, not in trailer block |
+| P2 | 1 | `3ee8016` | PEV-Result: done, not in trailer block |
+| P4 | 1 | `e86d1bf` | PEV-* not in trailer block |
+| P5 | 1 | `3504309` | PEV-* not in trailer block |
+| P11 | 1 | `6ce7c81` | PEV-* not in trailer block |
+| P12 | 1 | `27beed1` | PEV-* not in trailer block |
+| P13 | 1 | `a017cbc` | PEV-* not in trailer block |
+| P15 | 1 | `e9459be` | PEV-* not in trailer block |
+| P16 | 2 | `00248fe` | PEV-* not in trailer block |
+| P17 | 1 | `89d711e` | PEV-Result: done, not in trailer block |
+| bug-DL | 1 | `eb1ae60` | PEV-* not in trailer block |
+| bug-HDR | 1 | `e3d0ba3` | PEV-* not in trailer block |
+| 13.2 | 2 | `14f671a` | shipped inside the P6 closure commit (no own completion commit) |
+| P14 | 1 | `afd26ec` | no trailers |
+| 16.1 | 1 | `d254f85` | no trailers |
+| 16.2 | 1 | `95be08c` | no trailers |
+| 16.3 | 1 | `8256b9f` | no trailers |
