@@ -19,11 +19,13 @@ restorable. No pglens archiver metric is proof of recovery readiness.
 
 Scheduled bloat is a statistics-based estimate of table heaps, computed from
 `pg_stats`. It can be wrong in either direction, especially for wide rows,
-heavily TOASTed rows, or stale statistics. It skips relations under 1 MiB,
-tables never analysed, and every table with a column the monitoring role
-cannot read (PostgreSQL hides that column's statistics), which at T0 is usually
-every table. Indexes are not estimated, so the `index.bloat_high` rule has no
-data to evaluate. The exact figure requires the optional `pgstattuple`
+heavily TOASTed rows, or stale statistics. It skips tables never analysed and
+every table with a column the monitoring role cannot read (PostgreSQL hides
+that column's statistics), which at T0 is usually every table; the tables
+reported as hidden this way are those of 1 MiB or more. Btree indexes are
+estimated too (valid, not partial, no expression, every column with visible
+statistics), from their table's live tuple count, so `index.bloat_high`
+evaluates those; other index types get no estimate. The exact figure requires the optional `pgstattuple`
 extension, installed by an administrator, and is collected on demand only, at
 T1; that operation performs a full relation scan.
 

@@ -49,6 +49,8 @@ export async function pager(page: Page, name: string): Promise<string> {
 export interface AllowedFailure {
   url: RegExp
   status: number
+  /** Also accept `net::ERR_ABORTED` of this URL (a request cut short by a navigation). */
+  aborted?: boolean
 }
 
 /**
@@ -77,7 +79,10 @@ export function consoleGuard(page: Page, allowed: AllowedFailure[] = []) {
   page.on('requestfailed', (request) => {
     const error = request.failure()?.errorText ?? ''
     // A whitelisted request cut short by the next navigation (the sign-in after a restart).
-    if (error.includes('ERR_ABORTED') && allowed.some((rule) => rule.url.test(request.url()))) {
+    if (
+      error.includes('ERR_ABORTED') &&
+      allowed.some((rule) => rule.aborted === true && rule.url.test(request.url()))
+    ) {
       return
     }
     problems.push(`requestfailed: ${request.url()} ${error}`)

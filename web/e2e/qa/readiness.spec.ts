@@ -577,8 +577,12 @@ test('RDY-E2E-005 adding a notification channel to the server clears RDY-NOTIF-0
 }) => {
   test.setTimeout(qaTimeout(Array<number>(4).fill(BUDGET.readinessFlags), 2))
   // A server restart ends the in-memory console session: until the page signs in again,
-  // the session check and any poll in flight (e.g. the header's firing alerts) get 401.
-  const browser = consoleGuard(page, [{ url: /\/api\/v1\//, status: 401 }])
+  // the session check and the header's firing-alerts poll get 401, and the sign-in
+  // navigation aborts that poll.
+  const browser = consoleGuard(page, [
+    { url: /\/api\/v1\/session$/, status: 401 },
+    { url: /\/api\/v1\/alerts\?state=firing$/, status: 401, aborted: true },
+  ])
   const begin = await start()
   const target = 'RDY-NOTIF-01'
   // The channel value is never printed: only whether it is set.

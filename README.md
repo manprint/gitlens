@@ -1347,6 +1347,10 @@ address and per origin (`pglens` or `application`; the sessions pglens opens
 itself are told from the application's), as the metrics `pg_connections_by_application`,
 `pg_connections_by_user`, `pg_connections_by_client` and `pg_connections_by_origin`. `checks.activity.by_application` is
 `true` by default; set it to `false` to turn the per-application counts off.
+The agent sends no zero rows, so the console's breakdowns (per state, database
+and application) count only the newest scrape of each metric: an application
+whose sessions all closed leaves the list at the next sample (pglens's own
+sessions keep every breakdown populated).
 The session list of the `locks` check carries no statement text unless
 `checks.locks.session_query_text` is `true` (default `false`); a text that may
 hold a credential is withheld even then.
