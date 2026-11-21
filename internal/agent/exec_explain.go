@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -166,13 +167,20 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if err := dropExplainPrivileges(ctx, conn, target.PGVersion().Major(), args.Analyze); err != nil {
 		return nil, err
 	}
+	// A tuning-workbook variant changes planner settings and adds hints only
+	// now, inside the read-only transaction and after the privilege drop, so
+	// the guard below and the EXPLAIN both see the variant's plan.
+	if err := applyWorkbook(ctx, conn, args); err != nil {
+		return nil, err
+	}
+	planned := withHints(statement, args.Hints)
 	if args.Analyze {
-		if err := guardAnalyze(ctx, conn, code, statement, run); err != nil {
+		if err := guardAnalyze(ctx, conn, code, planned, run); err != nil {
 			return nil, err
 		}
 	}
 
-	explainSQL := fmt.Sprintf("EXPLAIN (%s) %s", options, statement)
+	explainSQL := fmt.Sprintf("EXPLAIN (%s) %s", options, planned)
 	plan, scanErr := run(ctx, explainSQL)
 	if scanErr != nil {
 		if !readOnlyExplainKeyword(keyword) && isInsufficientPrivilege(scanErr) {
@@ -211,11 +219,13 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	// from: "values" typed by the operator, a "recent_execution", "generic"
 	// (GENERIC_PLAN), or "" when the statement has none.
 	result, err := json.Marshal(struct {
-		Plan       json.RawMessage `json:"plan"`
-		PlanHash   string          `json:"plan_hash"`
-		Datname    string          `json:"datname"`
-		ValuesFrom string          `json:"values_from,omitempty"`
-	}{Plan: plan, PlanHash: hash, Datname: datname, ValuesFrom: valuesFrom})
+		Plan       json.RawMessage   `json:"plan"`
+		PlanHash   string            `json:"plan_hash"`
+		Datname    string            `json:"datname"`
+		ValuesFrom string            `json:"values_from,omitempty"`
+		Settings   map[string]string `json:"settings,omitempty"`
+		Hints      string            `json:"hints,omitempty"`
+	}{Plan: plan, PlanHash: hash, Datname: datname, ValuesFrom: valuesFrom, Settings: args.Settings, Hints: args.Hints})
 	if err != nil {
 		return nil, err
 	}
@@ -583,4 +593,59 @@ func structuralPlanFields(value any) any {
 		}
 	}
 	return value
+}
+
+// hintEnableSQL reads whether pg_hint_plan is loaded (NULL: the setting does
+// not exist) and enabled. The agent never sends LOAD: a role that is not
+// superuser cannot, so hints work only where the server preloads the library.
+const hintEnableSQL = "SELECT current_setting('pg_hint_plan.enable_hint', true)"
+
+// setConfigSQL applies one planner setting local to the transaction; name and
+// value are bound, never spliced into SQL text.
+const setConfigSQL = "SELECT set_config($1, $2, true)"
+
+// applyWorkbook checks that hints can take effect and applies the variant's
+// settings in name order. It runs inside the explain's read-only transaction,
+// which ends with ROLLBACK, so nothing outlives the command.
+func applyWorkbook(ctx context.Context, conn check.Conn, args command.Args) error {
+	if err := command.ValidateSettings(args.Settings); err != nil {
+		return rejectedf("%v", err)
+	}
+	if err := command.ValidateHints(args.Hints); err != nil {
+		return rejectedf("%v", err)
+	}
+	if args.Hints != "" {
+		var enabled *string
+		if err := conn.QueryRow(ctx, hintEnableSQL).Scan(&enabled); err != nil {
+			return err
+		}
+		switch {
+		case enabled == nil:
+			return rejectedf("hint_plan_inactive: pg_hint_plan is not loaded on this server; add it to shared_preload_libraries to use hints")
+		case *enabled == "off":
+			return rejectedf("hint_plan_disabled: pg_hint_plan.enable_hint is off on this server")
+		}
+	}
+	names := make([]string, 0, len(args.Settings))
+	for name := range args.Settings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		var applied string
+		if err := conn.QueryRow(ctx, setConfigSQL, name, command.SettingValue(name, args.Settings[name])).Scan(&applied); err != nil {
+			return rejectedf("setting %s could not be applied: %v", name, err)
+		}
+	}
+	return nil
+}
+
+// withHints places the pg_hint_plan comment immediately before the statement
+// text. ValidateHints keeps * and / out of the hints, so the comment cannot
+// be closed early.
+func withHints(statement, hints string) string {
+	if hints == "" {
+		return statement
+	}
+	return "/*+ " + hints + " */ " + statement
 }

@@ -47,6 +47,11 @@ type explainConn struct {
 	recentSQL []string
 	bound     [][]byte
 	boundSQL  string
+
+	// hintEnable is what current_setting('pg_hint_plan.enable_hint', true)
+	// returns (nil: NULL); setConfig records each set_config's arguments.
+	hintEnable *string
+	setConfig  [][]any
 }
 
 func (c *explainConn) guardAnswer(sql string) string {
@@ -117,6 +122,15 @@ func (c *explainConn) QueryRow(_ context.Context, sql string, args ...any) pgx.R
 		c.guardSQL = append(c.guardSQL, sql)
 		return explainRow{value: []byte(c.guardAnswer(sql))}
 	}
+	if sql == hintEnableSQL {
+		c.execSQL = append(c.execSQL, sql)
+		return explainRow{value: c.hintEnable}
+	}
+	if sql == setConfigSQL {
+		c.execSQL = append(c.execSQL, sql)
+		c.setConfig = append(c.setConfig, args)
+		return explainRow{value: args[1].(string)}
+	}
 	if sql == "SELECT current_database()" {
 		return explainRow{value: explainDatname}
 	}
@@ -164,6 +178,8 @@ func (r explainRow) Scan(dest ...any) error {
 	switch dst := dest[0].(type) {
 	case *string:
 		*dst = r.value.(string)
+	case **string:
+		*dst = r.value.(*string)
 	case *[]byte:
 		*dst = append((*dst)[:0], r.value.([]byte)...)
 	case *json.RawMessage:

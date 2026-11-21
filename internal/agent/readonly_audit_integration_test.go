@@ -263,6 +263,19 @@ DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 			require.ErrorContains(t, err, "hypopg_missing: ")
 		}
 
+		// Tuning-workbook variants (plan 007 13.2): settings through set_config
+		// local to the read-only transaction, hints where pg_hint_plan is loaded.
+		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: readID, Datname: "app", Analyze: analyzeRefusal == "", Settings: map[string]string{"enable_seqscan": "off", "work_mem": "1024"}})
+		require.NoError(t, err)
+		var hasHintPlan bool
+		require.NoError(t, admin.QueryRow(ctx, "SELECT current_setting('pg_hint_plan.enable_hint', true) IS NOT NULL").Scan(&hasHintPlan))
+		_, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: readID, Datname: "app", Hints: "SeqScan(ro_audit)"})
+		if hasHintPlan {
+			require.NoError(t, err)
+		} else {
+			require.ErrorContains(t, err, "hint_plan_inactive")
+		}
+
 		// The log reader (plan 007 6.4): settings and the SQL source. Without
 		// the collector or the grants the source refuses; it never writes.
 		settings, err := mgr.ReadLogSettings(ctx)

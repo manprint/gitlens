@@ -34,7 +34,7 @@ func ForEachPostGIS(t *testing.T, fn func(t *testing.T, pg *PG)) {
 		major := major
 		t.Run(fmt.Sprintf("postgis%d", major), func(t *testing.T) {
 			t.Parallel()
-			fn(t, getOrCreateImage(t, major, img, postgisByMajor))
+			fn(t, getOrCreateImage(t, major, img, postgisByMajor, "pg_stat_statements"))
 		})
 	}
 	if !ran {

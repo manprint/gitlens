@@ -74,12 +74,12 @@ func ForEach(t *testing.T, fn func(t *testing.T, pg *PG)) {
 
 func getOrCreate(t *testing.T, major int) *PG {
 	t.Helper()
-	return getOrCreateImage(t, major, images[major], pgByMajor)
+	return getOrCreateImage(t, major, images[major], pgByMajor, "pg_stat_statements")
 }
 
 // getOrCreateImage returns the container of a major version started from
-// img, cached in cache (guarded by globalMu).
-func getOrCreateImage(t *testing.T, major int, img string, cache map[int]*PG) *PG {
+// img with the libraries in preload, cached in cache (guarded by globalMu).
+func getOrCreateImage(t *testing.T, major int, img string, cache map[int]*PG, preload string) *PG {
 	t.Helper()
 	globalMu.Lock()
 	if pg, ok := cache[major]; ok {
@@ -102,7 +102,7 @@ func getOrCreateImage(t *testing.T, major int, img string, cache map[int]*PG) *P
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(90*time.Second)),
 		testcontainers.WithCmd("postgres",
-			"-c", "shared_preload_libraries=pg_stat_statements",
+			"-c", "shared_preload_libraries="+preload,
 			"-c", "compute_query_id=on",
 			"-c", "track_io_timing=on",
 			"-c", "fsync=off",
