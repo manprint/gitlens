@@ -242,3 +242,6 @@ Gates: G-API (gen:api + make api-docs twice) no diff; G-GO-FOCUS TestMCP014_Read
 
 ## 2026-11-21 15.F1/1 complete unit:15.F1:1
 Gates: advisor+agent INTADV/INTWBK 15 PASS; G-GO-INT-ALL rerun: 37 packages ok incl. advisor, agent failed WBK002 pg15 (stale queryid); after fixture fix agent package integration -race ok; fmt-check lint vet-tags 0; review: self-review (agent:opus) accepted; changes: advisor test schema gains findings.message; t.Cleanup(Stop) after each NewEngine; workbookFixture resets this database's pg_stat_statements and filters queryid by dbid; notes: A52; test-only, no production change; other P15 gates stand
+
+## 2026-11-21 P15/1 complete unit:P15:1
+Gates: G-GO-FULL 0; G-I18N 0; G-RO 0; G-WEB-FULL 0; G-API 0; G-GO-INT-ALL green after 15.F1 (37 packages ok + agent rerun); review: self-review (agent:opus) accepted; changes: phase 15 closed: 15.1 Italian e2e, 15.2 reference scenario + parity e2e, 15.3 documents, 15.F1 integration test fixes; board rows 11–14 repaired to DONE (closure commits e841290, 1ef70b2, e97e8e7, 4242004); notes: A50 lab absent; A51 email RESOLVED subject; A52 test-only corrections

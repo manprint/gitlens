@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 21:49 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 21:50 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD ea95903921f94bec1fec41ef4349ae74b425d830 + tree 0056d2ae767b72c05becea5b7a230b5bd9153cf8 · branch main · last WIP tree none
-- Last closure: unit:15.F1:1
-- Next: open P15 · next eligible: P15
+- Base: HEAD 4c44aa8b1e0b124ebd37186aa5d8f8a6c66a1793 + tree b864c4be38ea74cad4d85a9af76bf63579128cdb · branch main · last WIP tree none
+- Last closure: unit:P15:1
+- Next: open PLAN · next eligible: PLAN
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-none
+P15: docs/plans/007_plan-ObservabilityParity/STATE.md,docs/plans/007_plan-ObservabilityParity/history.md
 
 ## 6. Checkpoint
 none
@@ -122,24 +122,17 @@ none
 | 2 ASH dimensions | DONE | 2 | 2.1–2.5 | unit:P2:2 |
 | 3 Notification channels | DONE | 1 | 3.1–3.4 | unit:P3:1 |
 | 4 Period A versus B | DONE | 1 | 4.1–4.3 | unit:P4:1 |
-| · P4 closure | IN_PROGRESS | 1 | — | — |
 | 5 Rollups | DONE | 1 | 5.1–5.4 | unit:P5:1 |
-| · P5 closure | IN_PROGRESS | 1 | — | — |
 | 6 Log ingest | DONE | 1 | 6.1–6.6 | unit:P6:1 |
-| · P6 closure | TODO | 1 | — | — |
 | 7 Automatic plans | DONE | 1 | 7.1–7.4 | unit:P7:1 |
-| · P7 closure: full gates + self-review | IN_PROGRESS | 1 | — | — |
 | 8 Autovacuum history | DONE | 1 | 8.1–8.3 | unit:P8:1 |
-| · Autovacuum history per table | TODO | 1 | — | — |
 | 9 Plan insights | DONE | 1 | 9.1–9.3 | unit:P9:1 |
-| · Plan insights, statistics and comparison | TODO | 1 | — | — |
 | 10 Validated index suggestions | DONE | 1 | 10.1–10.4 | unit:P10:1 |
-| · Validated index suggestions | TODO | 1 | — | — |
-| 11 Query to service link | TODO | 1 | 11.1–11.4 | — |
-| 12 Per-process OS metrics | TODO | 1 | 12.1–12.4 | — |
-| 13 Tuning workbook | TODO | 1 | 13.1–13.4 | — |
-| 14 MCP server | TODO | 1 | 14.1–14.4 | — |
-| 15 Integration and documents | TODO | 1 | 15.1–15.3 | — |
+| 11 Query to service link | DONE | 1 | 11.1–11.4 | unit:P11:1 |
+| 12 Per-process OS metrics | DONE | 1 | 12.1–12.4 | unit:P12:1 |
+| 13 Tuning workbook | DONE | 1 | 13.1–13.4 | unit:P13:1 |
+| 14 MCP server | DONE | 1 | 14.1–14.4 | unit:P14:1 |
+| 15 Integration and documents | DONE | 1 | 15.1–15.3, 15.F1 | unit:P15:1 |
 | PLAN | TODO | 1 | — | — |
 
 Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED (reason kept), BLOCKED.
