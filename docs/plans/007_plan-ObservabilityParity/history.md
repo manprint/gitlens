@@ -74,3 +74,6 @@ Gates: G-WEB-STATIC (tsc, eslint 0 errors, prettier); G-WEB-UNIT 231 files 2052 
 
 ## 2026-11-21 P4/1 complete unit:P4:1
 Gates: G-GO-FULL 35 pkgs ok, lint 0; G-GO-INT TestINTCMP001/002 pass, integration lint 0; G-API no diff; G-I18N 48; G-WEB-FULL typecheck/lint/coverage 231 files/2052 tests/budget rc=0; go.mod unchanged; review: self-review (agent:opus) accepted; changes: none (closure); notes: compare sums identical to handleStatements (grouping only, A10); windows [from,to); per-second normalisation; I-5 GET, 10 s timeout, limit <= 200, <= 31 days; docs: README "Comparing two periods", OpenAPI, help en/it compare-periods
+
+## 2026-11-21 5.1/1 complete unit:5.1:1
+Gates: G-GO-INT ./internal/store/ race (TestINTRLP001-003 + all store integration) pass; server retention integration pass; golangci-lint integration 0; review: self-review (agent:opus) accepted (SQL reviewed before run: IF NOT EXISTS, WITH NO DATA, policies if_not_exists, no refresh in the migration); changes: migration 0035_rollups.sql (metrics_statements_1h, metrics_ash_1h, metrics_1h, refresh 3 d/1 h/30 min, retention 730 d); rollups_integration_test.go; notes: A13
