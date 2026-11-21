@@ -33,6 +33,9 @@ func copyFixtureProc(t *testing.T) string {
 	entries, err := os.ReadDir("testdata/proc")
 	require.NoError(t, err)
 	for _, e := range entries {
+		if e.IsDir() {
+			continue // per-process fixtures of process_test.go
+		}
 		data, err := os.ReadFile(filepath.Join("testdata/proc", e.Name()))
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, e.Name()), data, 0o644))

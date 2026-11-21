@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 15:30 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 15:32 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD d72aa8a8ec7a26860b92252d669643e537d307fa + tree 6d3e3b0df2df3a06543018f24deab6044473e8ce · branch main · last WIP tree none
-- Last closure: unit:P11:1
-- Next: open 12.1 · next eligible: 12.1
+- Base: HEAD e8412904f2e8b1639dc1d4c1086c85b2799904d8 + tree ce0627f73fdb9b053d4b66e48a59ac72358a0edc · branch main · last WIP tree none
+- Last closure: unit:12.1:1
+- Next: open 12.2 · next eligible: 12.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-P11: none
+none
 
 ## 6. Checkpoint
 none
@@ -93,6 +93,7 @@ none
 - A36 (10.4): the action lives in a new `web/src/features/indexes/IndexValidation.tsx` rendered at the end of the expanded suggestion (no own caption, like the statement analysis it belongs to); `web/src/api/commands.ts` needed no change (generic `useCreateCommand`); "commands off" is the instance `perm_tier` below T1, shown through `NotPermitted` as on EXPLAIN; a fresh result shows the browser time of receipt until the next load returns the stored `validated_at`; `index_include` is sent as `[]` (suggestions have no INCLUDE).
 - A37 (11.2): migration is 0041_ash_service.sql (0039/0040 taken); `CheckConfig.ASHTagDimensions()` is a separate method so the phase 2 dimension filter stays unchanged; tag labels are cut at 128 bytes (sqltag), not the 64 of phase 2 dimensions; INTQTAG001 runs on PG 15 and 18; INTQTAG002 checks `group_by=service` on `/api/v1/ash` (`/ash/top` has no group_by, it ranks queries).
 - A38 (11.3): `trace_url_template` is sent only on the signed-in `/api/v1/session` answer (the sign-in page has no trace to link, and the tracing URL stays private); `PGLENS_TRACE_URL_TEMPLATE` is read in `LoadUIConfig` (start-up error through it); plan samples answer `trace_id` (nullable) so the console can link them; unit 11.3 was opened after its edits began, base = HEAD tree 1aa528a, diff reconciled against it.
+- A39 (12.1): the per-process fixtures live as pid folders in `internal/host/testdata/proc/`; `copyFixtureProc` in `collector_test.go` (outside the unit file list) now skips folders so the host collector tests keep copying only the flat files. A postmaster that is gone yields an empty list, not an error; only the postmaster's own unreadable stat/status fails `Processes`.
 
 ## 9. Blockers
 none

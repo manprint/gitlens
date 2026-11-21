@@ -179,3 +179,6 @@ Gates: G-WEB-STATIC (tsc, eslint 0 errors/2 pre-existing warnings, prettier); G-
 
 ## 2026-11-21 P11/1 complete unit:P11:1
 Gates: G-GO-FULL; G-GO-INT 85 PASS 0 SKIP (TestINTQTAG001 pg15/pg18, 002, 003; TestASHD*, TestPGL*, TestAEX*); G-RO (INTRO001 pg15/pg18, INTRO003); G-API no diff; G-WEB-FULL (typecheck, lint, coverage, budget); G-I18N; review: self-review (agent:opus) accepted; changes: Phase 11 closed: query to service link; notes: Review agent:opus: statement text stays in the agent (only tag values, cut to 128 bytes; trace_id 32 hex); service/endpoint inside the I-2 key cap with overflow; links built only from validated hex id and http(s) template (server and console), rel=noopener noreferrer; README + help en/it
+
+## 2026-11-21 12.1/1 complete unit:12.1:1
+Gates: G-GO-FOCUS ./internal/host (race, shuffle); golangci-lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW internal/host/process.go (ParentPID, Processes, ProcessRates, TopProcesses; stat/status/io parsers), process_test.go, fake /proc pid tree 100-105 + 200; notes: TestPROC001-005 PASS; A39; self-review agent:opus: paths only from proc path + numeric pid, command line never read
