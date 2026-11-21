@@ -11,3 +11,6 @@ Gates: S4 check pass (hypopg.so, pg_hint_plan.so; hypopg 1.4.5 created, pg_hint_
 
 ## 2026-11-21 P0/1 complete unit:P0:1
 Gates: baseline recorded (0.1), image check (0.2) pass; review: self-review (agent:opus) — baseline counts and B1 assessed as pre-existing environmental, image verified live; changes: STATE.md, history.md; notes: phase 0 collapsed.
+
+## 2026-11-21 1.1/1 complete unit:1.1:1
+Gates: G-GO-FOCUS pass (MXW-001, MXW-002); G-GO-INT pass (INT-MXW-001 pg15+pg18); G-RO pass; review: self-review (agent:opus) accepted; changes: internal/check/activity.go, activity_test.go, activity_integration_test.go, xmin_horizon_test.go (mock matches datminmxid); notes: second query (not a combined column), same error path as datfrozenxid

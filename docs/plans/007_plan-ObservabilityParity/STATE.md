@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:25 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:24 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD b728cb73793b479d4511e57fab1c82f7a71a34af + tree 1d7158a81017f5d5429515bcfd80e14a468384f6 · branch main · last WIP tree none
-- Last closure: unit:P0:1
-- Next: open 1.1 · next eligible: 1.1
+- Base: HEAD 6f984b348f7f85aa22acdf6675da9b1e02caab69 + tree 93bc421f45f3cc0ece9efcdd5a3f66a4e48f5ace · branch main · last WIP tree none
+- Last closure: unit:1.1:1
+- Next: open 1.2 · next eligible: 1.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -69,7 +69,10 @@ none
 | Phase | Status | Attempt | Sub-phases | Closure ref |
 |-------|--------|---------|------------|-------------|
 | 0 Baseline and test images | DONE | 1 | 0.1–0.2 | unit:P0:1 |
-| 1 Multixact wraparound rule | TODO | 1 | 1.1–1.3 | — |
+| 1 Multixact wraparound rule | IN_PROGRESS | 1 | 1.1–1.3 | — |
+| · 1.1 Agent metric pg_max_datminmxid_age | DONE | 1 | — | unit:1.1:1 |
+| · 1.2 Advisor rule, texts, alert seed | TODO | 1 | — | — |
+| · 1.3 Console texts, help, verification SQL, README | TODO | 1 | — | — |
 | 2 ASH dimensions | TODO | 1 | 2.1–2.5 | — |
 | 3 Notification channels | TODO | 1 | 3.1–3.4 | — |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |

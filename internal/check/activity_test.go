@@ -66,7 +66,7 @@ func TestBuildActivityResult(t *testing.T) {
 }
 
 func TestActivity_ConnectionsUsedRatio(t *testing.T) {
-	res := activityCheckResult([]activityRow{{State: strPtr("active"), WaitEventType: strPtr("CPU"), Count: 25}}, "100", false, nil, nil, nil, 0, 0, 0)
+	res := activityCheckResult([]activityRow{{State: strPtr("active"), WaitEventType: strPtr("CPU"), Count: 25}}, "100", false, nil, nil, nil, 0, 0, 0, 0)
 	for _, m := range res.Metrics {
 		if m.Name == "pg_connections_used_ratio" {
 			require.Equal(t, .25, m.Value)
@@ -77,7 +77,7 @@ func TestActivity_ConnectionsUsedRatio(t *testing.T) {
 }
 
 func TestActivity_StateAgeClampedAtZero(t *testing.T) {
-	res := activityCheckResult(nil, "", false, nil, nil, []activityGroup{{Label: "active", Value: -0.000019}}, 0, 0, 0)
+	res := activityCheckResult(nil, "", false, nil, nil, []activityGroup{{Label: "active", Value: -0.000019}}, 0, 0, 0, 0)
 	require.Equal(t, 0.0, metricValue(res, "pg_max_state_age_seconds", map[string]string{"state": "active"}))
 }
 
@@ -126,7 +126,7 @@ func activityMock(groups map[string][]activityGroup, connections []activityRow) 
 			switch {
 			case strings.Contains(sql, "pg_prepared_xacts"):
 				return &mockRow{vals: []any{float64(0), float64(0)}}
-			case strings.Contains(sql, "datfrozenxid"):
+			case strings.Contains(sql, "datfrozenxid"), strings.Contains(sql, "datminmxid"):
 				return &mockRow{vals: []any{float64(0)}}
 			}
 			return &mockRow{vals: []any{"100"}}
@@ -230,14 +230,43 @@ func TestSORIGIN002_OriginMetricsEmitBothOrigins(t *testing.T) {
 }
 
 func TestActivity_PreparedXactsZeroWhenEmpty(t *testing.T) {
-	res := activityCheckResult(nil, "", false, nil, nil, nil, 0, 0, 0)
+	res := activityCheckResult(nil, "", false, nil, nil, nil, 0, 0, 0, 0)
 	require.Equal(t, 0.0, metricValue(res, "pg_prepared_xacts", nil))
 	require.Equal(t, 0.0, metricValue(res, "pg_oldest_prepared_xact_seconds", nil))
 }
 
 func TestActivity_MaxDatfrozenxidAge(t *testing.T) {
-	res := activityCheckResult(nil, "", false, nil, nil, nil, 0, 0, 123)
+	res := activityCheckResult(nil, "", false, nil, nil, nil, 0, 0, 123, 0)
 	require.Equal(t, 123.0, metricValue(res, "pg_max_datfrozenxid_age", nil))
+}
+
+// MXW-001: the activity result carries the oldest multixact ID age of any
+// database as the gauge pg_max_datminmxid_age.
+func TestMXW001_MaxDatminmxidAge(t *testing.T) {
+	res := activityCheckResult(nil, "", false, nil, nil, nil, 0, 0, 0, 123)
+	require.Equal(t, 123.0, metricValue(res, "pg_max_datminmxid_age", nil))
+}
+
+// MXW-002: a failing multixact age query fails the scrape, as the frozen XID
+// age query does.
+func TestMXW002_MultixactQueryErrorFailsScrape(t *testing.T) {
+	boom := errors.New("canceling statement due to statement timeout")
+	conn := &mockConn{
+		queryFunc: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return &mockRows{}, nil },
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "datminmxid"):
+				return &mockRow{err: boom}
+			case strings.Contains(sql, "pg_prepared_xacts"):
+				return &mockRow{vals: []any{float64(0), float64(0)}}
+			case strings.Contains(sql, "datfrozenxid"):
+				return &mockRow{vals: []any{float64(0)}}
+			}
+			return &mockRow{vals: []any{"100"}}
+		},
+	}
+	_, err := (&activityCheck{}).Scrape(context.Background(), maintenanceTarget(conn))
+	require.ErrorIs(t, err, boom)
 }
 
 func TestActivity_ExistingMetricsUnchanged(t *testing.T) {
@@ -304,7 +333,7 @@ func TestActivity_FailedSubQueryFailsTheScrape(t *testing.T) {
 						return &mockRow{err: boom}
 					case strings.Contains(sql, "pg_prepared_xacts"):
 						return &mockRow{vals: []any{float64(0), float64(0)}}
-					case strings.Contains(sql, "datfrozenxid"):
+					case strings.Contains(sql, "datfrozenxid"), strings.Contains(sql, "datminmxid"):
 						return &mockRow{vals: []any{float64(0)}}
 					}
 					return &mockRow{vals: []any{"100"}}

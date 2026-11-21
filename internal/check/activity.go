@@ -123,6 +123,10 @@ GROUP BY 1, 2
 	if err := conn.QueryRow(ctx, `SELECT COALESCE(max(age(datfrozenxid)), 0)::float8 FROM pg_database`).Scan(&frozenAge); err != nil {
 		return Result{}, err
 	}
+	var mxidAge float64
+	if err := conn.QueryRow(ctx, `SELECT COALESCE(max(mxid_age(datminmxid)), 0)::float8 FROM pg_database`).Scan(&mxidAge); err != nil {
+		return Result{}, err
+	}
 	// The xmin holders read four views the other checks also read. They come
 	// from this check, not from theirs, so the one fact that names the oldest
 	// holder has a single producer and its Replace covers the whole sample.
@@ -134,7 +138,7 @@ GROUP BY 1, 2
 	if err != nil {
 		return Result{}, err
 	}
-	result := activityCheckResult(parsed, maxConnStr, c.byApplication, databaseRows, applicationRows, stateAgeRows, prepared, oldestPrepared, frozenAge)
+	result := activityCheckResult(parsed, maxConnStr, c.byApplication, databaseRows, applicationRows, stateAgeRows, prepared, oldestPrepared, frozenAge, mxidAge)
 	result.Metrics = append(result.Metrics, activityOriginMetrics(originRows)...)
 	result.Metrics = append(result.Metrics, boundedActivityMetrics("pg_connections_by_user", "usename", userRows)...)
 	result.Metrics = append(result.Metrics, boundedActivityMetrics("pg_connections_by_client", "client_addr", clientRows)...)
@@ -236,7 +240,7 @@ func buildActivityResult(rows []activityRow, maxConnStr string) Result {
 // activityCheckResult augments the legacy aggregate with optional bounded
 // views. It is kept separate so unit callers of buildActivityResult retain the
 // exact pre-phase-3 behavior.
-func activityCheckResult(rows []activityRow, maxConnStr string, byApplication bool, databaseRows, applicationRows, stateAgeRows []activityGroup, prepared, oldestPrepared, frozenAge float64) Result {
+func activityCheckResult(rows []activityRow, maxConnStr string, byApplication bool, databaseRows, applicationRows, stateAgeRows []activityGroup, prepared, oldestPrepared, frozenAge, mxidAge float64) Result {
 	result := buildActivityResult(rows, maxConnStr)
 	maxConn := 0
 	for _, r := range maxConnStr {
@@ -269,6 +273,7 @@ func activityCheckResult(rows []activityRow, maxConnStr string, byApplication bo
 		pgtype.Metric{Name: "pg_prepared_xacts", Value: prepared, Kind: pgtype.KindGauge},
 		pgtype.Metric{Name: "pg_oldest_prepared_xact_seconds", Value: oldestPrepared, Kind: pgtype.KindGauge},
 		pgtype.Metric{Name: "pg_max_datfrozenxid_age", Value: frozenAge, Kind: pgtype.KindGauge},
+		pgtype.Metric{Name: "pg_max_datminmxid_age", Value: mxidAge, Kind: pgtype.KindGauge},
 	)
 	return result
 }

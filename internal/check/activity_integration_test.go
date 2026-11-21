@@ -74,6 +74,28 @@ func TestINTACT004_ActivityMetricNamesAcrossVersions(t *testing.T) {
 	})
 }
 
+// INT-MXW-001: the read-only role reads the oldest multixact ID age on every
+// supported version, and the gauge is never negative.
+func TestINTMXW001_MultixactAgeMetric(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pool := pg.Pool(t, "app", pgtest.RoleT0)
+		conn, err := pool.Acquire(context.Background())
+		require.NoError(t, err)
+		defer conn.Release()
+		target := &registryTestTarget{conn: conn, version: pg.Version, database: "app", instanceID: uuid.New(), clusterID: 1, role: pgtype.RolePrimary, permTier: pgtype.TierReadOnly}
+		result, err := (&activityCheck{}).Scrape(context.Background(), target)
+		require.NoError(t, err)
+		found := false
+		for _, m := range result.Metrics {
+			if m.Name == "pg_max_datminmxid_age" {
+				found = true
+				require.GreaterOrEqual(t, m.Value, 0.0)
+			}
+		}
+		require.True(t, found, "pg_max_datminmxid_age")
+	})
+}
+
 // TestINTACT005_IdleInTransactionCountsAbortedSessions: a session whose
 // transaction failed and that was left idle keeps the transaction open, so it
 // is reported as 'idle in transaction (aborted)'. It is an idle-in-transaction

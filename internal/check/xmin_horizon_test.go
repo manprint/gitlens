@@ -182,7 +182,7 @@ func activityMockConn(rows func(sql string) [][]any) *mockConn {
 			switch {
 			case strings.Contains(sql, "pg_prepared_xacts"):
 				return &mockRow{vals: []any{float64(0), float64(0)}}
-			case strings.Contains(sql, "datfrozenxid"):
+			case strings.Contains(sql, "datfrozenxid"), strings.Contains(sql, "datminmxid"):
 				return &mockRow{vals: []any{float64(0)}}
 			}
 			return &mockRow{vals: []any{"100"}}
