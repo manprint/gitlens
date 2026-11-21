@@ -136,5 +136,9 @@
   "readiness.log01.logs_messages_not_english.impact": "Le righe classificate dal testo del messaggio (checkpoint, autovacuum, statement lenti, file temporanei) vanno perse: lc_messages non è in inglese.",
   "readiness.log01.logs_messages_not_english.fix": "Scrivi i messaggi del server in inglese",
   "readiness.log01.logs_timezone_unknown.impact": "Gli orari del log possono essere sfasati: l’agent non riesce a leggere log_timezone.",
-  "readiness.log01.logs_timezone_unknown.fix": "Consenti al ruolo di monitoraggio di leggere le impostazioni del server"
+  "readiness.log01.logs_timezone_unknown.fix": "Consenti al ruolo di monitoraggio di leggere le impostazioni del server",
+  "readiness.aex01.title": "I piani automatici non sono in JSON",
+  "readiness.aex01.summary": "auto_explain scrive i piani in un formato che l’agent non sa leggere: si conserva solo auto_explain.log_format = json.",
+  "readiness.aex01.impact": "Mancano i piani automatici e i loro campioni nella cronologia dei piani.",
+  "readiness.aex01.fix": "Scrivi i piani di auto_explain in JSON"
 }

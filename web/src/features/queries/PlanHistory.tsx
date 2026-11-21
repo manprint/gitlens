@@ -21,6 +21,7 @@ import {
   type PlanNodeView,
 } from '@/lib/planTree'
 
+import { AutoPlanSetup, PlanSamples } from './PlanSamples'
 import { PlanView } from './PlanView'
 
 type Plan = Schemas['Plan']
@@ -384,6 +385,18 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
       cell: (row) => <Badge variant="outline">{kindOf(row.plan)}</Badge>,
     },
     {
+      id: 'source',
+      header: t('queries.planHistory.source'),
+      sortValue: (row) => row.plan.source ?? 'command',
+      cell: (row) => (
+        <Badge variant={row.plan.source === 'auto_explain' ? 'secondary' : 'outline'}>
+          {row.plan.source === 'auto_explain'
+            ? t('queries.planHistory.sourceAuto')
+            : t('queries.planHistory.sourceCommand')}
+        </Badge>
+      ),
+    },
+    {
       id: 'shape',
       header: t('queries.planHistory.shape'),
       sortValue: (row) => row.shape,
@@ -484,9 +497,12 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
       </div>
 
       {captures.length === 0 ? (
-        <p role="status" className="text-muted-foreground text-sm">
-          {t('queries.planHistory.noHistory')}
-        </p>
+        <div className="space-y-2">
+          <p role="status" className="text-muted-foreground text-sm">
+            {t('queries.planHistory.noHistory')}
+          </p>
+          <AutoPlanSetup />
+        </div>
       ) : (
         <>
           <p className="text-sm">
@@ -529,6 +545,14 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
                 {t('queries.planHistory.noOperationsCapture')}
               </p>
             ))}
+          {selected.length === 1 && first && instanceId !== undefined && (
+            <PlanSamples
+              instanceId={instanceId}
+              queryid={String(queryid)}
+              planHash={first.plan.plan_hash}
+              {...(datname === undefined ? {} : { datname })}
+            />
+          )}
           {pair && <PlanComparison older={pair.older} newer={pair.newer} />}
         </>
       )}

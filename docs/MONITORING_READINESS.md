@@ -330,3 +330,19 @@ SELECT pg_reload_conf();
 ```
 GRANT pg_read_all_settings TO <monitoring_role>;
 ```
+
+### RDY-AEX-01 — Automatic plans are not in JSON
+
+*Info.* auto_explain writes plans in a format the agent cannot read: only `auto_explain.log_format = json` is stored. Evidence: `logs: auto_explain_format_not_json`.
+
+**What you lose:** Automatic plans and their samples in the plan history.
+
+**Fix — write auto_explain plans as JSON** (`postgres_config`)
+
+1. Connect to the server as a superuser.
+2. Run the statement below.
+
+```
+ALTER SYSTEM SET auto_explain.log_format = 'json';
+SELECT pg_reload_conf();
+```

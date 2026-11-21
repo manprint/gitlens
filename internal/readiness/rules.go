@@ -38,6 +38,7 @@ var rules = []Rule{
 	{ID: "RDY-SESS-01", Severity: SeverityInfo, Applies: appliesSess01, Build: buildSess01},
 	{ID: "RDY-SET-03", Severity: SeverityInfo, Applies: appliesSet03, Build: buildSet03},
 	{ID: "RDY-LOG-01", Severity: SeverityInfo, Applies: appliesLog01, Build: buildLog01},
+	{ID: "RDY-AEX-01", Severity: SeverityInfo, Applies: appliesAex01, Build: buildAex01},
 }
 
 var plainIdent = regexp.MustCompile(`^[a-z_][a-z0-9_$]*$`)
@@ -284,7 +285,7 @@ func relevantSkips(in Input) []CheckSkip {
 	ext01 := appliesExt01(in)
 	var out []CheckSkip
 	for _, s := range in.Skips {
-		if isDesignSkip(s.Reason) || isLogNote(s) {
+		if isDesignSkip(s.Reason) || isLogNote(s) || isAutoExplainNote(s) {
 			continue
 		}
 		if ext01 && s.Reason == "missing extension pg_stat_statements" {
@@ -587,5 +588,29 @@ func buildLog01(in Input) Item {
 		Impact:   impact,
 		Evidence: strings.Join(evidence, "; "),
 		Fixes:    fixes,
+	}
+}
+
+// RDY-AEX-01 — auto_explain writes plans the agent cannot read (plan 007 7.4).
+
+const autoExplainNote = "auto_explain_format_not_json"
+
+func isAutoExplainNote(s CheckSkip) bool {
+	return s.Check == "logs" && s.Reason == autoExplainNote
+}
+
+func appliesAex01(in Input) bool {
+	return slices.ContainsFunc(in.Skips, isAutoExplainNote)
+}
+
+func buildAex01(in Input) Item {
+	return Item{
+		Title:    in.say("aex01.title", nil),
+		Summary:  in.say("aex01.summary", nil),
+		Impact:   []string{in.say("aex01.impact", nil)},
+		Evidence: "logs: " + autoExplainNote,
+		Fixes: []Fix{{Channel: ChannelPostgresConfig, Title: in.say("aex01.fix", nil),
+			Steps:   in.sayAll("log01.step.connect", "step.run_below"),
+			Snippet: "ALTER SYSTEM SET auto_explain.log_format = 'json';\nSELECT pg_reload_conf();"}},
 	}
 }

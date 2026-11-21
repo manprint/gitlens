@@ -21,8 +21,8 @@ func plansRouter(api *API) http.Handler {
 func TestPlansAPI_OrdersNewestFirst(t *testing.T) {
 	now := time.Now().UTC()
 	p := &mockPool{queryResults: []*mockRows{{rows: [][]any{
-		{int64(2), "new", now, false, []byte(`[{"Plan":{"Node Type":"Index Scan"}}]`)},
-		{int64(1), "old", now.Add(-time.Minute), false, []byte(`[{"Plan":{"Node Type":"Seq Scan"}}]`)},
+		{int64(2), "new", now, false, []byte(`[{"Plan":{"Node Type":"Index Scan"}}]`), "command"},
+		{int64(1), "old", now.Add(-time.Minute), false, []byte(`[{"Plan":{"Node Type":"Seq Scan"}}]`), "command"},
 	}}}}
 	rec := httptest.NewRecorder()
 	plansRouter(&API{pool: p}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/plans?instance_id="+uuid.NewString()+"&queryid=7", http.NoBody))
@@ -35,8 +35,8 @@ func TestPlansAPI_OrdersNewestFirst(t *testing.T) {
 func TestPlansAPI_MarksChangedAfterFirst(t *testing.T) {
 	now := time.Now().UTC()
 	p := &mockPool{queryResults: []*mockRows{{rows: [][]any{
-		{int64(1), "first", now, false, []byte(`[]`)},
-		{int64(2), "second", now.Add(time.Minute), true, []byte(`[]`)},
+		{int64(1), "first", now, false, []byte(`[]`), "command"},
+		{int64(2), "second", now.Add(time.Minute), true, []byte(`[]`), "command"},
 	}}}}
 	rec := httptest.NewRecorder()
 	plansRouter(&API{pool: p}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/plans?queryid=7", http.NoBody))
@@ -51,8 +51,8 @@ func TestPlansAPI_MarksChangedAfterFirst(t *testing.T) {
 func TestPlansAPI_SameShapeCapturedTwiceIsNotChanged(t *testing.T) {
 	now := time.Now().UTC()
 	p := &mockPool{queryResults: []*mockRows{{rows: [][]any{
-		{int64(2), "shape", now.Add(time.Minute), true, []byte(`[]`)},
-		{int64(1), "shape", now, false, []byte(`[]`)},
+		{int64(2), "shape", now.Add(time.Minute), true, []byte(`[]`), "command"},
+		{int64(1), "shape", now, false, []byte(`[]`), "command"},
 	}}}}
 	rec := httptest.NewRecorder()
 	plansRouter(&API{pool: p}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/plans?queryid=7", http.NoBody))
@@ -68,9 +68,9 @@ func TestPlansAPI_SameShapeCapturedTwiceIsNotChanged(t *testing.T) {
 func TestPlansAPI_TotalShapesCountsHashesOnce(t *testing.T) {
 	now := time.Now().UTC()
 	p := &mockPool{queryResults: []*mockRows{{rows: [][]any{
-		{int64(3), "shape", now.Add(2 * time.Minute), true, []byte(`[]`)},
-		{int64(2), "other", now.Add(time.Minute), false, []byte(`[]`)},
-		{int64(1), "shape", now, false, []byte(`[]`)},
+		{int64(3), "shape", now.Add(2 * time.Minute), true, []byte(`[]`), "command"},
+		{int64(2), "other", now.Add(time.Minute), false, []byte(`[]`), "command"},
+		{int64(1), "shape", now, false, []byte(`[]`), "command"},
 	}}}}
 	rec := httptest.NewRecorder()
 	plansRouter(&API{pool: p}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/plans?queryid=7", http.NoBody))

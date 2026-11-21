@@ -72,6 +72,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | METHOD | Path | operationId | Summary |
 |---|---|---|---|
 | GET | `/api/v1/plans` | `getPlans` | Return plan history for a query. |
+| GET | `/api/v1/plans/samples` | `getPlanSamples` | Return the automatic plan samples of a statement, newest first. |
 | GET | `/api/v1/statements` | `getStatements` | Return top statements joined to query text. |
 | GET | `/api/v1/statements/compare` | `getStatementsCompare` | Compare top statements between period A and period B. |
 | DELETE | `/api/v1/plans/samples/parameters` | `purgePlanParameters` | Clear the stored parameters of every automatic plan sample of an instance. |

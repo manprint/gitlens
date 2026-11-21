@@ -122,3 +122,25 @@ func TestAEX013(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `{"cleared":0}`, rec.Body.String())
 }
+
+// AEX-014: the samples endpoint checks its parameters and answers an empty list
+// without storage.
+func TestAEX014(t *testing.T) {
+	a := &API{}
+	inst := uuid.NewString()
+	for _, q := range []string{
+		"", "instance_id=nope", "instance_id=" + inst + "&queryid=x",
+		"instance_id=" + inst + "&limit=0", "instance_id=" + inst + "&limit=1001",
+		"instance_id=" + inst + "&include_parameters=maybe",
+		"instance_id=" + inst + "&from=2026-11-21T10:00:00Z&to=2026-11-20T10:00:00Z",
+		"instance_id=" + inst + "&from=yesterday",
+	} {
+		rec := httptest.NewRecorder()
+		a.handlePlanSamples(rec, httptest.NewRequest(http.MethodGet, "/api/v1/plans/samples?"+q, nil))
+		require.Equal(t, http.StatusBadRequest, rec.Code, q)
+	}
+	rec := httptest.NewRecorder()
+	a.handlePlanSamples(rec, httptest.NewRequest(http.MethodGet, "/api/v1/plans/samples?instance_id="+inst+"&queryid=-77&limit=1000&include_parameters=true", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{"samples":[]}`, rec.Body.String())
+}

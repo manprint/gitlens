@@ -136,5 +136,9 @@
   "readiness.log01.logs_messages_not_english.impact": "Lines classified by their message text (checkpoints, autovacuum, slow statements, temporary files) are missed: lc_messages is not English.",
   "readiness.log01.logs_messages_not_english.fix": "Write the server messages in English",
   "readiness.log01.logs_timezone_unknown.impact": "Log times may be shifted: the agent cannot read log_timezone.",
-  "readiness.log01.logs_timezone_unknown.fix": "Let the monitoring role read the server settings"
+  "readiness.log01.logs_timezone_unknown.fix": "Let the monitoring role read the server settings",
+  "readiness.aex01.title": "Automatic plans are not in JSON",
+  "readiness.aex01.summary": "auto_explain writes plans in a format the agent cannot read: only auto_explain.log_format = json is stored.",
+  "readiness.aex01.impact": "Automatic plans and their samples in the plan history are missing.",
+  "readiness.aex01.fix": "Write auto_explain plans as JSON"
 }

@@ -219,7 +219,7 @@ export const queries: Readonly<Record<keyof typeof english, CaptionEntry>> = {
   'queries.plan-history': {
     what: 'Ogni piano richiesto per questo statement, dal più recente, con la sua forma: selezionane uno per leggerlo, due per confrontarli.',
     source:
-      'Endpoint dei piani del server sulla tabella query_plans, riempita solo dai piani richiesti sopra; i 20 più recenti per questo query id.',
+      'Endpoint dei piani del server sulla tabella query_plans, riempita dai piani richiesti sopra e dai piani di auto_explain che l’agent legge dal log; i 20 più recenti per questo query id.',
     unit: 'piani',
     window: 'Ogni richiesta conservata dal server, dalla più recente; al massimo 20 mostrati.',
     howToRead:
@@ -232,6 +232,23 @@ export const queries: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     window: 'Le 20 catture più recenti.',
     howToRead:
       'Nuova forma segna una cattura la cui forma differisce da quella precedente. Confronta un EXPLAIN con un EXPLAIN per costo e un ANALYZE con un ANALYZE per tempo.',
+  },
+  'queries.plan-samples': {
+    what: 'Le esecuzioni del piano selezionato che auto_explain ha registrato, dalla più recente.',
+    source:
+      'Endpoint dei campioni dei piani del server sulla tabella plan_samples, riempita dal lettore del log dell’agent (checks.logs).',
+    unit: 'esecuzioni; durata in ms',
+    window: 'Gli ultimi sette giorni, al massimo 200 campioni; conservati 30 giorni.',
+    howToRead:
+      'Ogni riga è un’esecuzione registrata di questo piano. Misurato significa che auto_explain.log_analyze era attivo. I parametri restano nascosti finché non li chiedi.',
+  },
+  'queries.plan-sample-rows': {
+    what: 'Una riga per esecuzione registrata: quando è avvenuta, quanto è durata, se è stata misurata, i suoi parametri.',
+    source: 'I campioni dei piani memorizzati dal server per questa forma del piano.',
+    unit: 'esecuzioni; durata in ms',
+    window: 'Gli ultimi sette giorni, al massimo 200 campioni.',
+    howToRead:
+      'Confronta le durate nel tempo per una forma. Non salvati significa che l’agent non ha inviato i parametri (checks.logs.plan_parameters spento) o che potrebbero contenere una credenziale.',
   },
   'queries.plan-comparison': {
     what: 'Le operazioni di due piani catturati affiancate, abbinate per posizione nell’albero, con ciò che è cambiato.',

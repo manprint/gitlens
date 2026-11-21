@@ -16,6 +16,8 @@ type planHistoryItem struct {
 	Analyzed   bool            `json:"analyzed"`
 	Plan       json.RawMessage `json:"plan"`
 	Changed    bool            `json:"changed"`
+	// Source is command (on demand) or auto_explain.
+	Source string `json:"source"`
 }
 
 type planHistoryResponse struct {
@@ -58,7 +60,7 @@ func (a *API) handlePlans(w http.ResponseWriter, r *http.Request) {
 		instanceID = parsed
 	}
 	datname := r.URL.Query().Get("datname")
-	rows, err := a.pool.Query(r.Context(), `SELECT plan_id, plan_hash, captured_at, analyzed, plan FROM query_plans WHERE ($1::uuid IS NULL OR instance_id=$1) AND queryid=$2 AND ($3='' OR datname=$3) ORDER BY captured_at DESC, plan_id DESC LIMIT $4`, instanceID, queryID, datname, limit)
+	rows, err := a.pool.Query(r.Context(), `SELECT plan_id, plan_hash, captured_at, analyzed, plan, source FROM query_plans WHERE ($1::uuid IS NULL OR instance_id=$1) AND queryid=$2 AND ($3='' OR datname=$3) ORDER BY captured_at DESC, plan_id DESC LIMIT $4`, instanceID, queryID, datname, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "plan history query failed", err.Error())
 		return
@@ -68,7 +70,7 @@ func (a *API) handlePlans(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item planHistoryItem
 		var rawPlan []byte
-		if err := rows.Scan(&item.PlanID, &item.PlanHash, &item.CapturedAt, &item.Analyzed, &rawPlan); err != nil {
+		if err := rows.Scan(&item.PlanID, &item.PlanHash, &item.CapturedAt, &item.Analyzed, &rawPlan, &item.Source); err != nil {
 			writeError(w, http.StatusInternalServerError, "plan history decode failed", err.Error())
 			return
 		}

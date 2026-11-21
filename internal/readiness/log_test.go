@@ -60,3 +60,27 @@ func TestPGL028LogNoteReadiness(t *testing.T) {
 	in.Skips = []CheckSkip{{Check: "logs", Reason: "logs_sql_denied"}}
 	require.Equal(t, "La lettura del log PostgreSQL è limitata", logItem(Evaluate(in)).Title)
 }
+
+// AEX-016: the auto_explain format note files RDY-AEX-01, never RDY-CHK-02 or RDY-LOG-01.
+func TestAEX016AutoExplainFormatReadiness(t *testing.T) {
+	in := healthy()
+	in.Skips = []CheckSkip{{Check: "logs", Reason: "auto_explain_format_not_json"}}
+	r := Evaluate(in)
+	require.Contains(t, ids(r), "RDY-AEX-01")
+	require.NotContains(t, ids(r), "RDY-CHK-02")
+	require.Nil(t, logItem(r))
+	var it *Item
+	for i := range r.Items {
+		if r.Items[i].ID == "RDY-AEX-01" {
+			it = &r.Items[i]
+		}
+	}
+	require.Equal(t, SeverityInfo, it.Severity)
+	require.Equal(t, "logs: auto_explain_format_not_json", it.Evidence)
+	require.Len(t, it.Fixes, 1)
+	require.Equal(t, ChannelPostgresConfig, it.Fixes[0].Channel)
+	require.Contains(t, it.Fixes[0].Snippet, "ALTER SYSTEM SET auto_explain.log_format = 'json';")
+
+	in.Locale = "it"
+	require.Contains(t, ids(Evaluate(in)), "RDY-AEX-01")
+}

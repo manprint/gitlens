@@ -940,6 +940,19 @@ export function usePlans(params: QueryParameters<'/api/v1/plans'>) {
   })
 }
 
+export function usePlanSamples(
+  params: QueryParameters<'/api/v1/plans/samples'>,
+  options: { enabled?: boolean } = {},
+) {
+  return useApiQuery({
+    policy: REFRESH.statements,
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/plans/samples', { params: { query: params }, signal })),
+    queryKey: qk.planSamples(params),
+    enabled: options.enabled ?? true,
+  })
+}
+
 // The alert list carries its truncation flag in a header, which getApi drops.
 async function fetchAlerts(params: QueryParameters<'/api/v1/alerts'>, signal: AbortSignal) {
   const { data, response } = await getApiResponse(() =>

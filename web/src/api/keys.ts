@@ -145,6 +145,8 @@ export const qk = {
     ['getAshCompare', params] as const,
   plans: (queryId: string | number, instanceId?: string, datname?: string, limit?: number) =>
     ['getPlans', queryId, instanceId, datname, limit] as const,
+  planSamples: (params: Readonly<Record<string, string | number | boolean | undefined>>) =>
+    ['getPlanSamples', params] as const,
   alerts: (
     state?: string,
     severity?: string,

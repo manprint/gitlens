@@ -1,10 +1,12 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import PlanHistory from './PlanHistory'
 import { dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table'
 
+import { refreshLocale, setServerLanguage } from '@/i18n/store'
+import { resetPreferences } from '@/lib/preferences'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
@@ -27,6 +29,7 @@ function plan(
     analyzed,
     plan: { 'Node Type': nodeType, 'Total Cost': totalCost },
     changed: false,
+    source: 'command',
   }
 }
 
@@ -39,7 +42,7 @@ function renderHistory() {
 
 // total_shapes counts distinct plan hashes, as the server does: plain and ANALYZE
 // captures of one shape share a hash.
-function plansHandler(plans: { plan_hash: string }[]) {
+function plansHandler(plans: { plan_hash: string; source?: string }[]) {
   const total_shapes = new Set(plans.map((plan) => plan.plan_hash)).size
   return http.get('*/api/v1/plans', () => HttpResponse.json({ plans, total_shapes }))
 }
@@ -57,7 +60,10 @@ describe('PlanHistory', () => {
     const { container } = renderHistory()
 
     expect(await screen.findByText(/No plan history yet/)).toBeInTheDocument()
-    expect(screen.getByText(/does not sample plans automatically/)).toBeInTheDocument()
+    expect(screen.getByText(/plans auto_explain writes to the PostgreSQL log/)).toBeInTheDocument()
+    expect(screen.getByTestId('auto-plan-setup')).toHaveTextContent(
+      'auto_explain.log_format = json',
+    )
     await expectNoA11yViolations(container)
   })
 
@@ -173,5 +179,38 @@ describe('PlanHistory comparison table controls', () => {
     expect(operations()[1]).toBe('Seq Scan 24')
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
     expect(dataRows(name)).toHaveLength(5)
+  })
+
+  describe('UI-AEX-001 source badge', () => {
+    afterEach(async () => {
+      resetPreferences()
+      await setServerLanguage(undefined)
+      await refreshLocale()
+    })
+
+    const both = () =>
+      plansHandler([
+        { ...plan(1, '2024-01-01T00:00:00Z', 'hash-cmd'), source: 'command' },
+        { ...plan(2, '2024-01-02T00:00:00Z', 'hash-auto'), source: 'auto_explain' },
+      ])
+
+    it('marks each capture Automatic or On demand', async () => {
+      vi.useRealTimers()
+      server.use(both())
+      renderHistory()
+      await waitFor(() => expect(dataRows(CAPTURES)).toHaveLength(2))
+      const rows = dataRows(CAPTURES)
+      expect(rows[0]).toHaveTextContent('Automatic')
+      expect(rows[1]).toHaveTextContent('On demand')
+    })
+
+    it('reads Automatico and Su richiesta in Italian', async () => {
+      vi.useRealTimers()
+      await setServerLanguage('it')
+      server.use(both())
+      renderHistory()
+      await waitFor(() => expect(screen.getAllByText('Automatico')).toHaveLength(1))
+      expect(screen.getByText('Su richiesta')).toBeInTheDocument()
+    })
   })
 })

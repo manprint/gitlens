@@ -2320,6 +2320,8 @@ GET    /api/v1/statements
 GET    /api/v1/ash|ash/top
 POST   /api/v1/push
 GET    /api/v1/plans
+GET    /api/v1/plans/samples
+DELETE /api/v1/plans/samples/parameters
 GET    /api/v1/settings/retention|settings/retention/preview
 PUT    /api/v1/settings/retention/{family}
 GET    /api/v1/settings/advisor-windows
@@ -2478,7 +2480,7 @@ Each sample also keeps three text dimensions: the user (`usename`), the client a
 
 The agent can read the PostgreSQL server log, keep its notable lines and ship them to the server. The console shows them under **PostgreSQL logs** on each instance (`/instances/<id>/logs`), and four alert rules fire on the severe ones. The reader is off by default.
 
-**What it reads.** Only structured logs: `jsonlog` (PostgreSQL 15 or later) or `csvlog`. Each line gets a class; ordinary lines are dropped and auto_explain plans are never shipped. The shipped classes are `auth.failed`, `autovacuum.run`, `checkpoint`, `checkpoint.frequent`, `connection.limit`, `corruption`, `disk.full`, `error.statement`, `fatal.other`, `idle_tx.timeout`, `lock.deadlock`, `lock.timeout`, `lock.wait`, `memory.out`, `panic`, `replication.conflict`, `serialization.failure`, `server.crash`, `server.recovery`, `server.start`, `slow.statement`, `statement.canceled`, `statement.timeout`, `temp_file`, `warning.other`, `wraparound.warning`.
+**What it reads.** Only structured logs: `jsonlog` (PostgreSQL 15 or later) or `csvlog`. Each line gets a class; ordinary lines are dropped and auto_explain plans go to the plan history (see [Automatic plans](#automatic-plans)). The shipped classes are `auth.failed`, `autovacuum.run`, `checkpoint`, `checkpoint.frequent`, `connection.limit`, `corruption`, `disk.full`, `error.statement`, `fatal.other`, `idle_tx.timeout`, `lock.deadlock`, `lock.timeout`, `lock.wait`, `memory.out`, `panic`, `replication.conflict`, `serialization.failure`, `server.crash`, `server.recovery`, `server.start`, `slow.statement`, `statement.canceled`, `statement.timeout`, `temp_file`, `warning.other`, `wraparound.warning`.
 
 **Server settings.**
 
@@ -2514,6 +2516,25 @@ The agent saves its position in each file, so a restart neither repeats nor skip
 **When it does not work.** The readiness report shows `RDY-LOG-01` with the agent's note and its fix (`logs_no_structured_format`, `logs_sql_denied`, `logs_file_unreadable`, `logs_messages_not_english`, `logs_timezone_unknown`); see [docs/MONITORING_READINESS.md](docs/MONITORING_READINESS.md).
 
 API: `GET /api/v1/logs?instance_id=&from=&to=&class=&severity=&database=&q=&before=&limit=` (newest first, `limit` up to 500) and `GET /api/v1/logs/classes?instance_id=&from=&to=` (lines per class).
+
+## Automatic plans
+
+With `auto_explain`, PostgreSQL writes the plan of every slow statement to its log. The log reader (`checks.logs`, see [PostgreSQL logs](#postgresql-logs)) takes these plans: the server stores each new shape once in the plan history (`source: auto_explain`, beside `command` for the plans you request) and one sample per slow execution (`plan_samples`, 30 days by default). The query detail shows the samples of a selected automatic capture.
+
+**Server settings.** Load the library for new sessions (`session_preload_libraries`, a reload) or for every backend (`shared_preload_libraries`, a restart), then:
+
+```sql
+ALTER SYSTEM SET session_preload_libraries = 'auto_explain';
+ALTER SYSTEM SET auto_explain.log_min_duration = '500ms';
+ALTER SYSTEM SET auto_explain.log_format = 'json';  -- other formats are not read: RDY-AEX-01
+SELECT pg_reload_conf();
+```
+
+`auto_explain.log_analyze = on` measures every statement, not only the slow ones, and can slow the whole server: use it only for a short investigation.
+
+**Parameters.** `checks.logs.plan_parameters: true` ships the `Query Parameters` of each plan (cut at 4096 bytes; a text that may hold a credential is never shipped). Off by default: values can hold personal data. They are shown only on request (`include_parameters=true`); `DELETE /api/v1/plans/samples/parameters?instance_id=` clears them for an instance, keeps the samples and writes an audit row.
+
+API: `GET /api/v1/plans/samples?instance_id=&queryid=&plan_hash=&database=&from=&to=&limit=&include_parameters=` (newest first, `limit` up to 1000, last 7 days by default).
 
 ## Events
 

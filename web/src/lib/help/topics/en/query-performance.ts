@@ -17,7 +17,7 @@ export const queryPerformanceTopic: HelpTopic = {
       blocks: [
         {
           kind: 'text',
-          text: '{{ui:shell.nav.queryPerformance}} answers one question: which SQL statements of this instance use the most time, calls, rows, I/O or WAL, and what their execution plans look like. The page has two levels. The query inspector ranks the statements of the instance. The query detail shows one statement with its metrics, its execution plan and its plan history. The statistics come from `pg_stat_statements`, collected by the agent and stored by the server. Plans come only from the EXPLAIN commands you request from the page.',
+          text: '{{ui:shell.nav.queryPerformance}} answers one question: which SQL statements of this instance use the most time, calls, rows, I/O or WAL, and what their execution plans look like. The page has two levels. The query inspector ranks the statements of the instance. The query detail shows one statement with its metrics, its execution plan and its plan history. The statistics come from `pg_stat_statements`, collected by the agent and stored by the server. Plans come from the EXPLAIN commands you request from the page and, with `auto_explain`, from the PostgreSQL log.',
         },
       ],
       subsections: [
@@ -73,7 +73,7 @@ export const queryPerformanceTopic: HelpTopic = {
           blocks: [
             {
               kind: 'text',
-              text: 'The agent’s `stat_statements` check writes the counters of `pg_stat_statements` to the server: one row per `queryid` and database. The server sums those counters over the selected range, ranks the statements and keeps the top 50. The share of listed time is computed in the browser. Plans are not collected automatically: the agent runs an EXPLAIN only when you request one from the query detail, and the server keeps the result in the plan history.',
+              text: 'The agent’s `stat_statements` check writes the counters of `pg_stat_statements` to the server: one row per `queryid` and database. The server sums those counters over the selected range, ranks the statements and keeps the top 50. The share of listed time is computed in the browser. The agent runs an EXPLAIN only when you request one from the query detail; with `auto_explain` it also reads the plans of slow statements from the log. The server keeps both in the plan history.',
             },
           ],
         },
@@ -506,7 +506,7 @@ export const queryPerformanceTopic: HelpTopic = {
       blocks: [
         {
           kind: 'text',
-          text: 'Plan history keeps every plan requested above for this statement, newest first, at most 20 entries. pglens does not sample plans by itself: an entry exists only when someone asked for a plan. It answers one question: has PostgreSQL changed the way it runs this statement, and where? pglens fingerprints each plan’s shape: its operations, tables, indexes and conditions, not its costs or times. A new shape appears after a new or dropped index, fresh statistics, a setting change or other parameter values.',
+          text: 'Plan history keeps every plan requested above for this statement, newest first, at most 20 entries. An entry comes from a plan someone asked for or, with `auto_explain`, from a slow execution (see Automatic plans). It answers one question: has PostgreSQL changed the way it runs this statement, and where? pglens fingerprints each plan’s shape: its operations, tables, indexes and conditions, not its costs or times. A new shape appears after a new or dropped index, fresh statistics, a setting change or other parameter values.',
         },
       ],
       subsections: [
@@ -576,6 +576,30 @@ export const queryPerformanceTopic: HelpTopic = {
                     'Start with {{ui:queries.planHistory.differs}} to find where the plans diverged: a Seq Scan that replaced an Index Scan, or a join method that changed, is the usual cause of a slower statement.',
                 },
               ],
+            },
+          ],
+        },
+        {
+          id: 'automatic-plans',
+          title: 'Automatic plans',
+          blocks: [
+            {
+              kind: 'text',
+              text: 'With `auto_explain` loaded, PostgreSQL writes the plan of every statement slower than `auto_explain.log_min_duration` to its log. The agent log reader (`checks.logs`) takes these plans and the server stores each new shape once in the plan history, with the source {{ui:queries.planHistory.sourceAuto}}; plans you request carry {{ui:queries.planHistory.sourceCommand}}. Tick an automatic capture to see {{ui:queries.planSamples.title}}: one row per slow execution with that shape, with its time and duration.',
+            },
+            {
+              kind: 'sql',
+              label: 'Load auto_explain in new sessions, JSON plans only',
+              code: "ALTER SYSTEM SET session_preload_libraries = 'auto_explain';\nALTER SYSTEM SET auto_explain.log_min_duration = '500ms';\nALTER SYSTEM SET auto_explain.log_format = 'json';\nSELECT pg_reload_conf();",
+            },
+            {
+              kind: 'note',
+              tone: 'warning',
+              text: '`auto_explain.log_analyze` measures every statement, not only the slow ones, and can slow the whole server: turn it on only for a short investigation. Without it, the samples hold plans with estimates only.',
+            },
+            {
+              kind: 'text',
+              text: 'Parameter values (`checks.logs.plan_parameters`) are off by default: they can hold personal data. When the agent ships them, {{ui:queries.planSamples.showParameters}} reveals them, and `DELETE /api/v1/plans/samples/parameters` clears them for an instance while keeping the samples. A plan without `auto_explain.log_format = json` is not read: the readiness report shows `RDY-AEX-01`.',
             },
           ],
         },

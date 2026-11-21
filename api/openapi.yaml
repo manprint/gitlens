@@ -542,7 +542,7 @@ components:
         resolution: { $ref: '#/components/schemas/Resolution' }
     Plan:
       type: object
-      required: [plan_id, plan_hash, captured_at, analyzed, plan, changed]
+      required: [plan_id, plan_hash, captured_at, analyzed, plan, changed, source]
       properties:
         plan_id: { type: integer, format: int64 }
         plan_hash: { type: string }
@@ -550,6 +550,32 @@ components:
         analyzed: { type: boolean }
         plan: { type: object, additionalProperties: true }
         changed: { type: boolean }
+        source:
+          type: string
+          enum: [command, auto_explain]
+          description: >-
+            Who stored the shape first: command (an on-demand explain) or
+            auto_explain (a plan the agent read from the PostgreSQL log).
+    PlanSample:
+      type: object
+      description: One execution that auto_explain logged.
+      required: [ts, datname, queryid, plan_hash, duration_ms, analyzed, has_parameters]
+      properties:
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        datname: { type: string }
+        queryid: { type: string, pattern: '^-?[0-9]+$' }
+        plan_hash: { type: string }
+        duration_ms: { type: number, minimum: 0 }
+        analyzed: { type: boolean }
+        has_parameters: { type: boolean }
+        parameters:
+          type: string
+          description: The Query Parameters text; returned only with include_parameters=true.
+    PlanSamplesResponse:
+      type: object
+      required: [samples]
+      properties:
+        samples: { type: array, items: { $ref: '#/components/schemas/PlanSample' } }
     PlansResponse:
       type: object
       required: [plans, total_shapes]
@@ -4121,7 +4147,41 @@ paths:
                         analyzed: false
                         plan: { Plan: { Node Type: Seq Scan } }
                         changed: false
+                        source: command
                     total_shapes: 1
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/plans/samples:
+    get:
+      tags: [statements]
+      operationId: getPlanSamples
+      summary: Return the automatic plan samples of a statement, newest first.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: queryid, in: query, required: true, schema: { type: string, pattern: '^-?[0-9]+$' } }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: plan_hash, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: false, description: Start of the range; seven days before to when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, description: End of the range; now when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 200, minimum: 1, maximum: 1000 } }
+        - { name: include_parameters, in: query, required: false, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Samples newest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanSamplesResponse' }
+              examples:
+                default:
+                  value:
+                    samples:
+                      - ts: '2026-11-21T10:00:01Z'
+                        datname: app
+                        queryid: '77'
+                        plan_hash: abc123
+                        duration_ms: 12.5
+                        analyzed: false
+                        has_parameters: false
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/plans/samples/parameters:

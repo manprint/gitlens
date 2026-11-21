@@ -219,7 +219,7 @@ export const queriesCaptions = {
   'queries.plan-history': {
     what: 'Every plan requested for this statement, newest first, with its shape: select one to read it, two to compare them.',
     source:
-      'Server plans endpoint over the query_plans table, filled only by the plans requested above; the 20 newest for this query id.',
+      'Server plans endpoint over the query_plans table, filled by the plans requested above and by auto_explain plans the agent reads from the log; the 20 newest for this query id.',
     unit: 'plans',
     window: 'Every request kept by the server, newest first, at most 20 shown.',
     howToRead:
@@ -232,6 +232,23 @@ export const queriesCaptions = {
     window: 'The 20 newest captures.',
     howToRead:
       'New shape marks a capture whose shape differs from the capture before it. Compare an EXPLAIN with an EXPLAIN by cost and an ANALYZE with an ANALYZE by time.',
+  },
+  'queries.plan-samples': {
+    what: 'The executions of the selected plan that auto_explain logged, newest first.',
+    source:
+      'Server plan samples endpoint over the plan_samples table, filled by the agent log reader (checks.logs).',
+    unit: 'executions; duration in ms',
+    window: 'The last seven days, at most 200 samples; kept 30 days.',
+    howToRead:
+      'Each row is one logged run of this plan. Measured means auto_explain.log_analyze was on. Parameters stay hidden until you ask for them.',
+  },
+  'queries.plan-sample-rows': {
+    what: 'One row per logged execution: when it ran, how long it took, whether it was measured, its parameters.',
+    source: 'The plan samples stored by the server for this plan shape.',
+    unit: 'executions; duration in ms',
+    window: 'The last seven days, at most 200 samples.',
+    howToRead:
+      'Compare durations over time for one shape. Not stored means the agent did not ship parameters (checks.logs.plan_parameters off) or they may hold a credential.',
   },
   'queries.plan-comparison': {
     what: 'The operations of two captured plans side by side, matched by their place in the tree, with what changed.',

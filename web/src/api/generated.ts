@@ -873,6 +873,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans/samples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return the automatic plan samples of a statement, newest first. */
+        get: operations["getPlanSamples"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans/samples/parameters": {
         parameters: {
             query?: never;
@@ -1819,6 +1836,26 @@ export interface components {
                 [key: string]: unknown;
             };
             changed: boolean;
+            /**
+             * @description Who stored the shape first: command (an on-demand explain) or auto_explain (a plan the agent read from the PostgreSQL log).
+             * @enum {string}
+             */
+            source: "command" | "auto_explain";
+        };
+        /** @description One execution that auto_explain logged. */
+        PlanSample: {
+            ts: components["schemas"]["Timestamp"];
+            datname: string;
+            queryid: string;
+            plan_hash: string;
+            duration_ms: number;
+            analyzed: boolean;
+            has_parameters: boolean;
+            /** @description The Query Parameters text; returned only with include_parameters=true. */
+            parameters?: string;
+        };
+        PlanSamplesResponse: {
+            samples: components["schemas"]["PlanSample"][];
         };
         PlansResponse: {
             plans: components["schemas"]["Plan"][];
@@ -4653,6 +4690,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlansResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getPlanSamples: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                queryid: string;
+                database?: string;
+                plan_hash?: string;
+                /** @description Start of the range; seven days before to when absent. */
+                from?: components["schemas"]["Timestamp"];
+                /** @description End of the range; now when absent. */
+                to?: components["schemas"]["Timestamp"];
+                limit?: number;
+                include_parameters?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Samples newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanSamplesResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

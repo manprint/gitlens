@@ -119,3 +119,6 @@ Gates: G-GO-FOCUS ./internal/server/ ./internal/store/ ok (AEX-007..009, RLP); G
 
 ## 2026-11-21 7.3/1 complete unit:7.3:1
 Gates: G-GO-FOCUS server/store/agent ok (AEX-010..013); G-GO-INT TestINTAEX002..004 ok; lint 0 issues; G-API regenerated (generated.ts, docs/api.md); vitest contract/captions/settings 272 ok; review: self-review (agent:opus) accepted; changes: agent ships parameters (cut 4096 on a UTF-8 boundary) only with checks.logs.plan_parameters; server re-checks (credential -> NULL) and stores plan_samples.parameters; NEW api_plan_samples.go DELETE /api/v1/plans/samples/parameters with command_audit row; OpenAPI path; notes: design note A26 before code; self-review: purge in one transaction, fixed error texts, requester recorded
+
+## 2026-11-21 7.4/1 complete unit:7.4:1
+Gates: G-GO-FOCUS ok (readiness, server, i18n, agent); G-GO-INT plan tests ok (INTAEX002-005, AEX015); lint 0; G-API rc=0; G-WEB-STATIC ok (2 pre-existing warnings); vitest queries+help 109 ok; i18n-check rc=0; review: self-review (agent:opus) accepted; changes: GET /api/v1/plans/samples; Plan.source; PlanSamples + AutoPlanSetup console; RDY-AEX-01; help automatic-plans EN/IT; README Automatic plans; notes: AEX014 is a unit test (validation without storage); AEX015 is integration (needs query_plans).

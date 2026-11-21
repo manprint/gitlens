@@ -17,7 +17,7 @@ export const queryPerformanceTopic: HelpTopic = {
       blocks: [
         {
           kind: 'text',
-          text: '{{ui:shell.nav.queryPerformance}} risponde a una domanda: quali statement SQL di questa istanza usano più tempo, chiamate, righe, I/O o WAL, e com’è fatto il loro piano di esecuzione. La pagina ha due livelli. L’ispettore delle query ordina gli statement dell’istanza. Il dettaglio mostra uno statement con le metriche, il piano di esecuzione e lo storico dei piani. Le statistiche vengono da `pg_stat_statements`, raccolte dall’agent e salvate dal server. I piani arrivano solo dai comandi EXPLAIN che richiedi dalla pagina.',
+          text: '{{ui:shell.nav.queryPerformance}} risponde a una domanda: quali statement SQL di questa istanza usano più tempo, chiamate, righe, I/O o WAL, e com’è fatto il loro piano di esecuzione. La pagina ha due livelli. L’ispettore delle query ordina gli statement dell’istanza. Il dettaglio mostra uno statement con le metriche, il piano di esecuzione e lo storico dei piani. Le statistiche vengono da `pg_stat_statements`, raccolte dall’agent e salvate dal server. I piani arrivano dai comandi EXPLAIN che richiedi dalla pagina e, con `auto_explain`, dal log di PostgreSQL.',
         },
       ],
       subsections: [
@@ -73,7 +73,7 @@ export const queryPerformanceTopic: HelpTopic = {
           blocks: [
             {
               kind: 'text',
-              text: 'Il check `stat_statements` dell’agent scrive sul server i contatori di `pg_stat_statements`: una riga per `queryid` e database. Il server somma questi contatori sull’intervallo selezionato, ordina gli statement e ne tiene i primi 50. La quota Share of listed time è calcolata nel browser. I piani non vengono raccolti in automatico: l’agent esegue un EXPLAIN solo quando lo richiedi dal dettaglio della query, e il server conserva il risultato nello storico dei piani.',
+              text: 'Il check `stat_statements` dell’agent scrive sul server i contatori di `pg_stat_statements`: una riga per `queryid` e database. Il server somma questi contatori sull’intervallo selezionato, ordina gli statement e ne tiene i primi 50. La quota Share of listed time è calcolata nel browser. L’agent esegue un EXPLAIN solo quando lo richiedi dal dettaglio della query; con `auto_explain` legge anche dal log i piani degli statement lenti. Il server conserva entrambi nello storico dei piani.',
             },
           ],
         },
@@ -509,7 +509,7 @@ export const queryPerformanceTopic: HelpTopic = {
       blocks: [
         {
           kind: 'text',
-          text: 'Lo storico dei piani conserva ogni piano richiesto qui sopra per questo statement, dal più recente, al massimo 20 voci. pglens non campiona i piani da solo: una voce esiste solo quando qualcuno ha chiesto un piano. Risponde a una domanda: PostgreSQL ha cambiato il modo in cui esegue questo statement, e dove? pglens calcola un’impronta della forma di ogni piano: operazioni, tabelle, indici e condizioni, non costi o tempi. Una forma nuova compare dopo un indice creato o eliminato, statistiche aggiornate, un parametro di configurazione cambiato o valori dei parametri diversi.',
+          text: 'Lo storico dei piani conserva ogni piano richiesto qui sopra per questo statement, dal più recente, al massimo 20 voci. Una voce nasce da un piano richiesto da qualcuno o, con `auto_explain`, da un’esecuzione lenta (vedi Piani automatici). Risponde a una domanda: PostgreSQL ha cambiato il modo in cui esegue questo statement, e dove? pglens calcola un’impronta della forma di ogni piano: operazioni, tabelle, indici e condizioni, non costi o tempi. Una forma nuova compare dopo un indice creato o eliminato, statistiche aggiornate, un parametro di configurazione cambiato o valori dei parametri diversi.',
         },
       ],
       subsections: [
@@ -580,6 +580,30 @@ export const queryPerformanceTopic: HelpTopic = {
                     'Parti da {{ui:queries.planHistory.differs}} per trovare dove i piani divergono: un Seq Scan al posto di un Index Scan, o un metodo di join cambiato, è la causa tipica di uno statement più lento.',
                 },
               ],
+            },
+          ],
+        },
+        {
+          id: 'automatic-plans',
+          title: 'Piani automatici',
+          blocks: [
+            {
+              kind: 'text',
+              text: 'Con `auto_explain` caricato, PostgreSQL scrive nel log il piano di ogni statement più lento di `auto_explain.log_min_duration`. Il lettore del log dell’agent (`checks.logs`) raccoglie questi piani e il server salva ogni forma nuova una sola volta nello storico dei piani, con origine {{ui:queries.planHistory.sourceAuto}}; i piani che richiedi hanno origine {{ui:queries.planHistory.sourceCommand}}. Seleziona una cattura automatica per vedere {{ui:queries.planSamples.title}}: una riga per ogni esecuzione lenta con quella forma, con ora e durata.',
+            },
+            {
+              kind: 'sql',
+              label: 'Carica auto_explain nelle nuove sessioni, piani solo in JSON',
+              code: "ALTER SYSTEM SET session_preload_libraries = 'auto_explain';\nALTER SYSTEM SET auto_explain.log_min_duration = '500ms';\nALTER SYSTEM SET auto_explain.log_format = 'json';\nSELECT pg_reload_conf();",
+            },
+            {
+              kind: 'note',
+              tone: 'warning',
+              text: '`auto_explain.log_analyze` misura ogni statement, non solo quelli lenti, e può rallentare tutto il server: attivalo solo per un’indagine breve. Senza, i campioni contengono piani con le sole stime.',
+            },
+            {
+              kind: 'text',
+              text: 'I valori dei parametri (`checks.logs.plan_parameters`) sono spenti per impostazione predefinita: possono contenere dati personali. Quando l’agent li invia, {{ui:queries.planSamples.showParameters}} li mostra, e `DELETE /api/v1/plans/samples/parameters` li cancella per un’istanza mantenendo i campioni. Un piano senza `auto_explain.log_format = json` non viene letto: il report di readiness mostra `RDY-AEX-01`.',
             },
           ],
         },

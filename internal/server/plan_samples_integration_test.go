@@ -164,3 +164,92 @@ func TestINTAEX004(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
+
+func getPlanJSON(t *testing.T, router http.Handler, url string, out any) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), out))
+}
+
+// TestAEX015: /plans reports the source of each stored plan.
+func TestAEX015(t *testing.T) {
+	router, _ := planRouter(t)
+	pool := getSharedPool(t)
+	instance := uuid.NewString()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	pushPlanFacts(t, router, instance, now, autoPlanFact(now.Add(-time.Second), `[{"Plan":{"Node Type":"Seq Scan","Relation Name":"t"}}]`))
+	_, err := pool.Exec(context.Background(), `INSERT INTO query_plans (tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, analyzed, captured_at, plan) VALUES ('default', $1, 555444335, 'app', 77, 'h2', false, $2, '[{"Plan":{"Node Type":"Result"}}]')`, instance, now)
+	require.NoError(t, err)
+
+	var out struct {
+		Plans []struct {
+			PlanHash string `json:"plan_hash"`
+			Source   string `json:"source"`
+		} `json:"plans"`
+	}
+	getPlanJSON(t, router, "/api/v1/plans?queryid=77&instance_id="+instance, &out)
+	sources := map[string]string{}
+	for _, p := range out.Plans {
+		sources[p.PlanHash] = p.Source
+	}
+	require.Equal(t, map[string]string{"h1": "auto_explain", "h2": "command"}, sources)
+}
+
+// TestINTAEX005: three samples of two plans; the list filters by plan_hash,
+// newest first, and holds parameter values only on request.
+func TestINTAEX005(t *testing.T) {
+	router, count := planRouter(t)
+	instance := uuid.NewString()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	sample := func(ts time.Time, hash string, params bool) wire.Fact {
+		f := autoPlanFact(ts, "")
+		f.Labels["plan_hash"] = hash
+		f.Key = "77:" + hash + ":" + ts.Format(time.RFC3339Nano)
+		if params {
+			f.ValueJSON = []byte(`{"parameters":"$1 = '42'"}`)
+		}
+		return f
+	}
+	pushPlanFacts(t, router, instance, now,
+		sample(now.Add(-3*time.Second), "h1", false),
+		sample(now.Add(-2*time.Second), "h1", true),
+		sample(now.Add(-time.Second), "h2", false))
+	require.Equal(t, 3, count("plan_samples", instance))
+
+	type row struct {
+		TS            time.Time `json:"ts"`
+		QueryID       string    `json:"queryid"`
+		PlanHash      string    `json:"plan_hash"`
+		HasParameters bool      `json:"has_parameters"`
+		Parameters    *string   `json:"parameters"`
+	}
+	var out struct {
+		Samples []row `json:"samples"`
+	}
+	base := "/api/v1/plans/samples?queryid=77&plan_hash=h1&instance_id=" + instance
+	getPlanJSON(t, router, base, &out)
+	require.Len(t, out.Samples, 2)
+	require.True(t, out.Samples[0].TS.After(out.Samples[1].TS), "newest first")
+	require.Equal(t, "77", out.Samples[0].QueryID)
+	require.True(t, out.Samples[0].HasParameters)
+	require.False(t, out.Samples[1].HasParameters)
+	for _, s := range out.Samples {
+		require.Equal(t, "h1", s.PlanHash)
+		require.Nil(t, s.Parameters, "no values without include_parameters")
+	}
+
+	out.Samples = nil
+	getPlanJSON(t, router, base+"&include_parameters=true", &out)
+	require.Len(t, out.Samples, 2)
+	require.NotNil(t, out.Samples[0].Parameters)
+	require.Equal(t, "$1 = '42'", *out.Samples[0].Parameters)
+
+	out.Samples = nil
+	getPlanJSON(t, router, "/api/v1/plans/samples?queryid=77&instance_id="+instance+"&limit=1", &out)
+	require.Len(t, out.Samples, 1)
+	require.Equal(t, "h2", out.Samples[0].PlanHash)
+}
