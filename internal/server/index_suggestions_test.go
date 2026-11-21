@@ -133,7 +133,7 @@ func TestIDXE004_GoldenJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &got))
 	require.Len(t, got.Suggestions, 1)
 	s := got.Suggestions[0]
-	require.Equal(t, "ref", columnsLine(s))
+	require.Equal(t, "ref", columnsLine(s.Suggestion))
 	require.InDelta(t, 40, s.WeightPct, 1e-9)
 }
 
@@ -215,8 +215,9 @@ func TestIDXE010_TruncatedInventoryIsDisclosed(t *testing.T) {
 	require.Contains(t, got.Notes[0], "limit of 1000 tables")
 }
 
-// requireNoNulls fails on a null anywhere except the two nullable fields of the
-// contract: a nil slice or map would break required arrays of the schema.
+// requireNoNulls fails on a null anywhere except the nullable fields of the
+// contract (n_distinct, est_size_bytes, validation and its cost_ratio and
+// index_size_bytes): a nil slice or map would break required arrays of the schema.
 func requireNoNulls(t *testing.T, body []byte) {
 	t.Helper()
 	var v any
@@ -225,7 +226,7 @@ func requireNoNulls(t *testing.T, body []byte) {
 	walk = func(path string, v any) {
 		switch x := v.(type) {
 		case nil:
-			require.True(t, strings.HasSuffix(path, ".n_distinct") || strings.HasSuffix(path, ".est_size_bytes"), "null at %s", path)
+			require.True(t, strings.HasSuffix(path, ".n_distinct") || strings.HasSuffix(path, ".est_size_bytes") || strings.HasSuffix(path, ".validation") || strings.HasSuffix(path, ".cost_ratio") || strings.HasSuffix(path, ".index_size_bytes"), "null at %s", path)
 		case map[string]any:
 			for k, e := range x {
 				walk(path+"."+k, e)

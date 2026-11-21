@@ -2846,6 +2846,38 @@ export interface components {
             /** @enum {string} */
             confidence: "high" | "medium" | "low";
             notes: string[];
+            /** @description Newest hypopg validation (index_check command) of the same database, table and key columns in the same order; null when none. Nothing is created on the database. */
+            validation: null | components["schemas"]["IndexValidation"];
+        };
+        IndexValidation: {
+            /** @description Statement the planner costed. */
+            queryid: string;
+            /** @description Whether the plan with the hypothetical index uses it. */
+            index_used: boolean;
+            /**
+             * Format: double
+             * @description Planner total cost without the index.
+             */
+            cost_before: number;
+            /**
+             * Format: double
+             * @description Planner total cost with the hypothetical index.
+             */
+            cost_after: number;
+            /**
+             * Format: double
+             * @description cost_after over cost_before; null when cost_before is 0.
+             */
+            cost_ratio: number | null;
+            /**
+             * Format: int64
+             * @description hypopg size estimate of the index.
+             */
+            index_size_bytes: number | null;
+            /** Format: date-time */
+            validated_at: string;
+            /** @description True when the suggestion has a descending column; hypopg validated ascending order. */
+            approximate: boolean;
         };
         WorkloadSeriesResponse: {
             /**

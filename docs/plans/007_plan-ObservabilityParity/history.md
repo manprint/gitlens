@@ -155,3 +155,6 @@ Gates: G-GO-FOCUS ./internal/command (race, shuffle) ok; lint 0; server tests ok
 
 ## 2026-11-21 10.2/1 complete unit:10.2:1
 Gates: G-GO-FOCUS ./internal/agent ok; G-GO-INT TestINTIDXV001-003, TestINTRO001 (pg15, pg18), TestINTRO003 pass, none skipped; lint 0; review: self-review (agent:opus) accepted; changes: IndexCheckExecutor (hypopg, read-only txn, reset/ROLLBACK/discard on every path), indexDDL quoting, registered in pglens-agent; pgtest.PGExt; RO audit runs index_check; notes: A34
+
+## 2026-11-21 10.3/1 complete unit:10.3:1
+Gates: G-GO-FOCUS server/store/command ok; G-GO-INT TestINTIDXV004 pass; G-API gen:api+api-docs; lint 0; tsc ok; vitest index 148 pass; review: self-review (agent:opus) accepted; changes: migration 0040 index_validations + commands kind CHECK; store.UpsertIndexValidation; persistCommandArtifact index_check case; suggestions validation field + OpenAPI IndexValidation; notes: A35

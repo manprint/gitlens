@@ -520,7 +520,7 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Outcome == "ok" {
-		if err := persistCommandArtifact(ctx, tx, tenantID, instanceID, clusterID, kind, args, req.Result, s.now()); err != nil {
+		if err := persistCommandArtifact(ctx, tx, tenantID, instanceID, clusterID, commandID, kind, args, req.Result, s.now()); err != nil {
 			writeError(w, http.StatusInternalServerError, "command artifact failed", err.Error())
 			return
 		}
@@ -536,7 +536,7 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, instanceID uuid.UUID, clusterID int64, kind command.Kind, argsJSON, result json.RawMessage, capturedAt time.Time) error {
+func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, instanceID uuid.UUID, clusterID int64, commandID uuid.UUID, kind command.Kind, argsJSON, result json.RawMessage, capturedAt time.Time) error {
 	var args command.Args
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
 		return fmt.Errorf("decode command args: %w", err)
@@ -593,6 +593,26 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		// The agent measures ordinary tables only (see PgstattupleExecutor), so the
 		// kind is always table.
 		return store.WriteBloat(ctx, tx, []store.BloatRow{{TS: capturedAt.UTC(), TenantID: tenantID, ClusterID: clusterID, InstanceID: instanceID, Datname: datname, Schemaname: args.Schema, Relname: args.Relation, ObjectKind: "table", Method: "pgstattuple", RealBytes: &payload.TableLen, ExpectedBytes: &expected, BloatBytes: &bloat, BloatRatio: &ratio}})
+	case command.KindIndexCheck:
+		var payload struct {
+			Datname        string          `json:"datname"`
+			IndexUsed      bool            `json:"index_used"`
+			CostBefore     float64         `json:"cost_before"`
+			CostAfter      float64         `json:"cost_after"`
+			IndexSizeBytes *int64          `json:"index_size_bytes"`
+			PlanAfter      json.RawMessage `json:"plan_after"`
+		}
+		if err := json.Unmarshal(result, &payload); err != nil {
+			return fmt.Errorf("decode index_check result: %w", err)
+		}
+		if args.QueryID == nil {
+			return nil
+		}
+		datname := args.Datname
+		if datname == "" {
+			datname = payload.Datname
+		}
+		return store.UpsertIndexValidation(ctx, tx, store.IndexValidationRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: datname, QueryID: *args.QueryID, Schemaname: args.IndexSchema, Relname: args.IndexRelation, Columns: args.IndexColumns, Include: args.IndexInclude, IndexUsed: payload.IndexUsed, CostBefore: payload.CostBefore, CostAfter: payload.CostAfter, IndexSizeBytes: payload.IndexSizeBytes, PlanAfter: payload.PlanAfter, ValidatedAt: capturedAt.UTC(), CommandID: commandID})
 	default:
 		return nil
 	}

@@ -53,6 +53,75 @@ type indexSuggestionData struct {
 	// InventoryTruncated marks the databases that reported as many tables as the
 	// agent's limit: tables beyond it have no table_indexes fact.
 	InventoryTruncated map[string]bool
+	// Validations are the index_check results of the instance, newest first.
+	Validations []storedValidation
+}
+
+// storedValidation is one index_validations row.
+type storedValidation struct {
+	Datname, Schema, Relname string
+	Columns, Include         []string
+	QueryID                  int64
+	IndexUsed                bool
+	CostBefore, CostAfter    float64
+	IndexSizeBytes           *int64
+	ValidatedAt              time.Time
+}
+
+// indexValidationJSON is the newest hypopg validation of a suggestion.
+// CostRatio is cost_after / cost_before, null when the cost before is 0.
+// Approximate: the suggestion has descending columns, the hypothetical index
+// was ascending.
+type indexValidationJSON struct {
+	QueryID        int64     `json:"queryid,string"`
+	IndexUsed      bool      `json:"index_used"`
+	CostBefore     float64   `json:"cost_before"`
+	CostAfter      float64   `json:"cost_after"`
+	CostRatio      *float64  `json:"cost_ratio"`
+	IndexSizeBytes *int64    `json:"index_size_bytes"`
+	ValidatedAt    time.Time `json:"validated_at"`
+	Approximate    bool      `json:"approximate"`
+}
+
+type indexSuggestionJSON struct {
+	indexadvice.Suggestion
+	Validation *indexValidationJSON `json:"validation"`
+}
+
+// suggestionValidation finds the newest validation of the suggestion's index:
+// same database, table and key columns in the same order, no include columns.
+func suggestionValidation(s indexadvice.Suggestion, validations []storedValidation) *indexValidationJSON {
+	var best *storedValidation
+	for i := range validations {
+		v := &validations[i]
+		if v.Datname != s.Database || v.Schema != s.Schema || v.Relname != s.Table || len(v.Include) > 0 || len(v.Columns) != len(s.Columns) {
+			continue
+		}
+		same := true
+		for j, c := range s.Columns {
+			if v.Columns[j] != c.Name {
+				same = false
+				break
+			}
+		}
+		if same && (best == nil || v.ValidatedAt.After(best.ValidatedAt)) {
+			best = v
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	out := &indexValidationJSON{QueryID: best.QueryID, IndexUsed: best.IndexUsed, CostBefore: best.CostBefore, CostAfter: best.CostAfter, IndexSizeBytes: best.IndexSizeBytes, ValidatedAt: best.ValidatedAt.UTC()}
+	if best.CostBefore > 0 {
+		ratio := best.CostAfter / best.CostBefore
+		out.CostRatio = &ratio
+	}
+	for _, c := range s.Columns {
+		if c.Desc {
+			out.Approximate = true
+		}
+	}
+	return out
 }
 
 // indexSuggestionStore loads the data of one instance; found is false for an
@@ -62,13 +131,13 @@ type indexSuggestionStore interface {
 }
 
 type indexSuggestionsJSON struct {
-	InstanceID    string                   `json:"instance_id"`
-	GeneratedAt   time.Time                `json:"generated_at"`
-	WindowSeconds int                      `json:"window_seconds"`
-	EstimatesNote string                   `json:"estimates_note"`
-	Coverage      indexadvice.Coverage     `json:"coverage"`
-	Suggestions   []indexadvice.Suggestion `json:"suggestions"`
-	Notes         []string                 `json:"notes"`
+	InstanceID    string                `json:"instance_id"`
+	GeneratedAt   time.Time             `json:"generated_at"`
+	WindowSeconds int                   `json:"window_seconds"`
+	EstimatesNote string                `json:"estimates_note"`
+	Coverage      indexadvice.Coverage  `json:"coverage"`
+	Suggestions   []indexSuggestionJSON `json:"suggestions"`
+	Notes         []string              `json:"notes"`
 }
 
 func (a *API) indexSuggestionStore() indexSuggestionStore {
@@ -190,9 +259,13 @@ func buildIndexSuggestions(id uuid.UUID, window time.Duration, limit int, data i
 			break
 		}
 	}
+	suggestions := make([]indexSuggestionJSON, len(out.Suggestions))
+	for i, sg := range out.Suggestions {
+		suggestions[i] = indexSuggestionJSON{Suggestion: sg, Validation: suggestionValidation(sg, data.Validations)}
+	}
 	return indexSuggestionsJSON{
 		InstanceID: id.String(), GeneratedAt: now.UTC(), WindowSeconds: int(window / time.Second),
-		EstimatesNote: indexSuggestionsNote, Coverage: out.Coverage, Suggestions: out.Suggestions, Notes: notes,
+		EstimatesNote: indexSuggestionsNote, Coverage: out.Coverage, Suggestions: suggestions, Notes: notes,
 	}
 }
 
@@ -248,6 +321,13 @@ SELECT datname, COALESCE(labels->>'schemaname', ''), COALESCE(labels->>'relname'
   FROM object_facts
  WHERE tenant_id = 'default' AND instance_id = $1 AND kind = 'table_columns' AND ($2 = '' OR datname = $2)
  ORDER BY datname, key`
+
+	indexValidationsSQL = `
+SELECT datname, schemaname, relname, columns, include, queryid, index_used, cost_before, cost_after, index_size_bytes, validated_at
+  FROM index_validations
+ WHERE tenant_id = 'default' AND instance_id = $1 AND ($2 = '' OR datname = $2)
+ ORDER BY validated_at DESC
+ LIMIT 1000`
 
 	// The newest sizes of each table in the window and its mean write rates.
 	indexSuggestionTablesSQL = `
@@ -463,6 +543,23 @@ func (s pgIndexSuggestionStore) IndexSuggestionData(ctx context.Context, id uuid
 			meta.HasWrites = true
 		}
 		data.Tables[key] = meta
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return data, false, err
+	}
+
+	rows, err = s.pool.Query(ctx, indexValidationsSQL, id, database)
+	if err != nil {
+		return data, false, err
+	}
+	for rows.Next() {
+		var v storedValidation
+		if err := rows.Scan(&v.Datname, &v.Schema, &v.Relname, &v.Columns, &v.Include, &v.QueryID, &v.IndexUsed, &v.CostBefore, &v.CostAfter, &v.IndexSizeBytes, &v.ValidatedAt); err != nil {
+			rows.Close()
+			return data, false, err
+		}
+		data.Validations = append(data.Validations, v)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {

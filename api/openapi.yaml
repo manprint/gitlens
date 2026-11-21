@@ -1452,7 +1452,7 @@ components:
           additionalProperties: { type: integer, format: int32 }
     IndexSuggestion:
       type: object
-      required: [id, database, schema, table, columns, create_statement, weight_pct, read_cost_ms_per_s, calls_rate, statements, overlapping_indexes, selectivity, est_size_bytes, write, read_write_ratio, verdict, confidence, notes]
+      required: [id, database, schema, table, columns, create_statement, weight_pct, read_cost_ms_per_s, calls_rate, statements, overlapping_indexes, selectivity, est_size_bytes, write, read_write_ratio, verdict, confidence, notes, validation]
       properties:
         id: { type: string, description: Stable identifier of the key (database, table, columns). }
         database: { type: string }
@@ -1504,6 +1504,23 @@ components:
         notes:
           type: array
           items: { type: string }
+        validation:
+          description: Newest hypopg validation (index_check command) of the same database, table and key columns in the same order; null when none. Nothing is created on the database.
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/IndexValidation'
+    IndexValidation:
+      type: object
+      required: [queryid, index_used, cost_before, cost_after, cost_ratio, index_size_bytes, validated_at, approximate]
+      properties:
+        queryid: { type: string, pattern: '^-?[0-9]+$', description: Statement the planner costed. }
+        index_used: { type: boolean, description: Whether the plan with the hypothetical index uses it. }
+        cost_before: { type: number, format: double, description: Planner total cost without the index. }
+        cost_after: { type: number, format: double, description: Planner total cost with the hypothetical index. }
+        cost_ratio: { type: [number, 'null'], format: double, description: cost_after over cost_before; null when cost_before is 0. }
+        index_size_bytes: { type: [integer, 'null'], format: int64, description: hypopg size estimate of the index. }
+        validated_at: { type: string, format: date-time }
+        approximate: { type: boolean, description: True when the suggestion has a descending column; hypopg validated ascending order. }
     WorkloadSeriesResponse:
       type: object
       required: [step_seconds, source, series]

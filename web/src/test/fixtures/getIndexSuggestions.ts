@@ -37,6 +37,16 @@ export const base = {
       verdict: 'strong' as 'strong' | 'moderate' | 'write_heavy',
       confidence: 'high' as 'high' | 'medium' | 'low',
       notes: [] as string[],
+      validation: null as null | {
+        queryid: string
+        index_used: boolean
+        cost_before: number
+        cost_after: number
+        cost_ratio: number | null
+        index_size_bytes: number | null
+        validated_at: string
+        approximate: boolean
+      },
     },
   ],
   notes: [],

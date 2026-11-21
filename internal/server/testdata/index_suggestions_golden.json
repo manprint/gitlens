@@ -47,7 +47,8 @@
       "read_write_ratio": 10.909090909090908,
       "verdict": "strong",
       "confidence": "high",
-      "notes": []
+      "notes": [],
+      "validation": null
     }
   ],
   "notes": []

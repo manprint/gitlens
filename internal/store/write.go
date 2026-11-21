@@ -531,6 +531,49 @@ func WriteQueryPlan(ctx context.Context, tx pgx.Tx, r QueryPlanRow) error {
 	return nil
 }
 
+// IndexValidationRow is one index_check result: the planner's cost of a
+// statement with and without a hypothetical index.
+type IndexValidationRow struct {
+	TenantID       string
+	InstanceID     uuid.UUID
+	ClusterID      int64
+	Datname        string
+	QueryID        int64
+	Schemaname     string
+	Relname        string
+	Columns        []string
+	Include        []string
+	IndexUsed      bool
+	CostBefore     float64
+	CostAfter      float64
+	IndexSizeBytes *int64
+	PlanAfter      json.RawMessage
+	ValidatedAt    time.Time
+	CommandID      uuid.UUID
+}
+
+// UpsertIndexValidation keeps the newest result per statement and index.
+func UpsertIndexValidation(ctx context.Context, tx pgx.Tx, r IndexValidationRow) error {
+	include := r.Include
+	if include == nil {
+		include = []string{}
+	}
+	var plan any
+	if len(r.PlanAfter) > 0 {
+		plan = r.PlanAfter
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO index_validations (tenant_id, instance_id, cluster_id, datname, queryid, schemaname, relname, columns, include, index_used, cost_before, cost_after, index_size_bytes, plan_after, validated_at, command_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+ON CONFLICT (tenant_id, instance_id, datname, queryid, schemaname, relname, columns, include) DO UPDATE SET
+  cluster_id=EXCLUDED.cluster_id, index_used=EXCLUDED.index_used, cost_before=EXCLUDED.cost_before, cost_after=EXCLUDED.cost_after,
+  index_size_bytes=EXCLUDED.index_size_bytes, plan_after=EXCLUDED.plan_after, validated_at=EXCLUDED.validated_at, command_id=EXCLUDED.command_id`,
+		r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.Schemaname, r.Relname, r.Columns, include, r.IndexUsed, r.CostBefore, r.CostAfter, r.IndexSizeBytes, plan, r.ValidatedAt, r.CommandID)
+	if err != nil {
+		return fmt.Errorf("write index validation: %w", err)
+	}
+	return nil
+}
+
 func WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) error {
 	args := make([][]any, 0, len(rows))
 	for _, r := range rows {
