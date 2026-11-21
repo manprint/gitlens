@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 20:15 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 21:49 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,8 +10,8 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD c811300ebe7bfe52ee71686ab2200f0540b09347 + tree 8be291ba4d4512a9210412db80570dfcd01755a8 · branch main · last WIP tree none
-- Last closure: unit:15.3:1
+- Base: HEAD ea95903921f94bec1fec41ef4349ae74b425d830 + tree 0056d2ae767b72c05becea5b7a230b5bd9153cf8 · branch main · last WIP tree none
+- Last closure: unit:15.F1:1
 - Next: open P15 · next eligible: P15
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
@@ -106,6 +106,7 @@ none
 - A49 (14.4): UI-CLUS-052 scans Go lines matching `Type:`/`typ:`; the MCP registry field `typ` became `kind` and content type `"text"` (internal/mcp) joined NOT_EVENT_TYPES, so the event-taxonomy guard stays strict without listing JSON Schema words.
 - A50 (15.2): the lab stack (`/home/agent/pglens-odoo-stack`, `/home/agent/odoo-backups`) does not exist in this sandbox (no directory, 0 containers). Not repaired or recreated (out of scope). The reference scenario runs instead on an ephemeral local stack from this tree: TimescaleDB store + `pglens-pgext:18` monitored PostgreSQL (single node, no HA, no Odoo), server and agent built with `go build` from the working tree and run on the host (no image build, no deploy.sh). Backup rule: nothing pre-existing is touched, the stack is created and removed by the unit. Lab-specific evidence (HA, hactl, lab restore) is a recorded deviation; the lab run stays a follow-up for the operator.
 - A51 (15.2): the reference scenario found a 3.3 defect: a resolved email kept the severity in its subject (`[pglens] WARNING …`), so an inbox could not tell fire from resolve. Agent-1 accepts the narrow fix inside 15.2 (`emailSubjectState` in `internal/alert/notify/email.go`, test TestNCH025) instead of reopening 3.3: one function, own test, no contract change beyond the subject word. Likewise the 15.1 Italian e2e fit check used the nil workbook UUID, whose 404s failed the console-error collector; it now creates and deletes a scratch workbook.
+- A52 (P15): G-GO-INT-ALL failed on two test-only defects outside any 007 sub-phase: the advisor integration schema (plan 006) lacks `findings.message` (migration 0030), so TestINTADV004–006 failed a require and leaked the leader conn, hanging `pgxpool.Close` until the 1 h timeout; TestINTWBK002 (pg15, full run only) took a stale queryid: `workbookFixture` matched the statement text in every database, and on PG < 18 the queryid hashes the table OID, which earlier tests' recreated tables and restored databases change. Agent-1 fixes both in a test-only correction unit 15.F1 (schema column, `t.Cleanup(e.Stop)` after each NewEngine; the fixture resets this database's pg_stat_statements entries and filters by dbid) instead of reopening a product sub-phase; no production code changes, so the other P15 gate evidence stands.
 
 ## 9. Blockers
 none

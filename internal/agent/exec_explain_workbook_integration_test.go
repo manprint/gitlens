@@ -23,7 +23,10 @@ func workbookFixture(t *testing.T, pg *pgtest.PG) int64 {
 	t.Helper()
 	ctx := context.Background()
 	admin := pg.Pool(t, "app", pgtest.RoleSuperuser)
+	// Earlier tests leave entries of the same text: on PG < 18 the queryid
+	// hashes the table OID, so this database's entries start empty.
 	_, err := admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+		SELECT public.pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0);
 		DROP TABLE IF EXISTS wbk_items;
 		CREATE TABLE wbk_items (id int PRIMARY KEY, v int);
 		INSERT INTO wbk_items SELECT g, g % 100 FROM generate_series(1, 50000) g;
@@ -36,7 +39,7 @@ func workbookFixture(t *testing.T, pg *pgtest.PG) int64 {
 	require.NoError(t, err)
 	require.NoError(t, app.Close(ctx))
 	var queryID int64
-	require.NoError(t, admin.QueryRow(ctx, "SELECT queryid FROM public.pg_stat_statements WHERE query = $1 LIMIT 1", workbookLookup).Scan(&queryID))
+	require.NoError(t, admin.QueryRow(ctx, "SELECT queryid FROM public.pg_stat_statements WHERE query = $1 AND dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) LIMIT 1", workbookLookup).Scan(&queryID))
 	return queryID
 }
 

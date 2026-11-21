@@ -62,7 +62,7 @@ DROP TABLE IF EXISTS findings, instances, clusters, agents CASCADE;
 CREATE TABLE agents (agent_id uuid PRIMARY KEY);
 CREATE TABLE clusters (cluster_id bigint PRIMARY KEY);
 CREATE TABLE instances (instance_id uuid PRIMARY KEY, tenant_id text NOT NULL DEFAULT 'default', cluster_id bigint NOT NULL, addr text NOT NULL, port int NOT NULL, pg_version int NOT NULL, role text NOT NULL, perm_tier text NOT NULL, last_seen timestamptz NOT NULL);
-CREATE TABLE findings (finding_id text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, scope text NOT NULL, cluster_id bigint, instance_id uuid, datname text NOT NULL DEFAULT '', object_name text NOT NULL DEFAULT '', title text NOT NULL, detail text NOT NULL, remediation text NOT NULL DEFAULT '', evidence jsonb NOT NULL DEFAULT '{}'::jsonb, degraded_reason text, first_seen timestamptz NOT NULL, last_seen timestamptz NOT NULL, resolved_at timestamptz, muted_until timestamptz, mute_reason text, PRIMARY KEY (tenant_id, finding_id));`
+CREATE TABLE findings (finding_id text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, scope text NOT NULL, cluster_id bigint, instance_id uuid, datname text NOT NULL DEFAULT '', object_name text NOT NULL DEFAULT '', title text NOT NULL, detail text NOT NULL, remediation text NOT NULL DEFAULT '', evidence jsonb NOT NULL DEFAULT '{}'::jsonb, degraded_reason text, first_seen timestamptz NOT NULL, last_seen timestamptz NOT NULL, resolved_at timestamptz, muted_until timestamptz, mute_reason text, message jsonb, PRIMARY KEY (tenant_id, finding_id));`
 
 func TestINTADV004_EngineResolvesFixedFindings(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
@@ -75,6 +75,7 @@ func TestINTADV004_EngineResolvesFixedFindings(t *testing.T) {
 		id := setupAdvisorInstance(t, pool, now)
 		problem := true
 		e := NewEngine(pool, nil, time.Minute)
+		t.Cleanup(e.Stop)
 		e.load = func(context.Context, uuid.UUID, time.Time, Windows) (*Snapshot, error) {
 			age := float64(0)
 			if problem {
@@ -108,6 +109,8 @@ func TestINTADV005_TwoEnginesProduceOneFindingSet(t *testing.T) {
 			return advisorIntegrationSnapshot(id, now, 1000), nil
 		}
 		e1, e2 := NewEngine(pool, nil, time.Minute), NewEngine(pool, nil, time.Minute)
+		t.Cleanup(e1.Stop)
+		t.Cleanup(e2.Stop)
 		e1.load, e2.load = loader, loader
 		require.NoError(t, e1.Run(ctx))
 		require.NoError(t, e2.Run(ctx))
@@ -137,6 +140,7 @@ func TestINTADV006_SameDatabaseFindingOnTwoInstancesStaysSeparate(t *testing.T) 
 		require.NoError(t, err)
 		secondRollingBack := true
 		e := NewEngine(pool, nil, time.Minute)
+		t.Cleanup(e.Stop)
 		e.load = func(_ context.Context, id uuid.UUID, _ time.Time, _ Windows) (*Snapshot, error) {
 			s := advisorIntegrationSnapshot(id, now, 0)
 			ratio := 0.5
