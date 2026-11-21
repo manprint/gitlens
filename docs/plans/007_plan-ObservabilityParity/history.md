@@ -128,3 +128,6 @@ Gates: G-GO-FULL rc=0, G-GO-INT TestINTAEX001-005 + TestAEX015 + RLP ok (agent/s
 
 ## 2026-11-21 8.1/1 complete unit:8.1:1
 Gates: G-GO-FOCUS pglog/wire/agent (race, shuffle) ok, TestAVH001-006; G-GO-INT TestINTAVH001 PASS; G-RO PASS; lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW pglog.ParseAutovacuum (R5 regexes) + 4 real fixtures; fact kind autovacuum_run (Check logs); log loop ships autovacuum_run facts (500 per scrape, pg_log_autovacuum_dropped); notes: A27; self-review: each line matched alone, header required, nil numbers left out of the value
+
+## 2026-11-21 8.2/1 complete unit:8.2:1
+Gates: G-GO-FOCUS server/store (race, shuffle) ok, TestAVH007/008; G-GO-INT TestINTAVH002, RETINT001-003, RLP, AEX ok + store integration ok; lint 0; G-API regenerated rc=0; vitest retention/settings/api 172 ok; review: self-review (agent:opus) accepted; changes: NEW migration 0039_autovacuum_runs.sql; store AutovacuumRunRow + WriteAutovacuumRuns; server autovacuumRunRow (validation, invalid_fact) wired in pipeline; retention family autovacuum_runs 90 days (API enum, console label, tests 12->13); notes: A28; self-review: no object fact written, ON CONFLICT DO NOTHING on the dedup index, NaN/Inf/negative rejected

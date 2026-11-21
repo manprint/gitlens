@@ -402,6 +402,7 @@ export const settings = {
   'settings.lib.retention.family.metricsBloat': 'Bloat estimates',
   'settings.lib.retention.family.logEvents': 'PostgreSQL log events',
   'settings.lib.retention.family.planSamples': 'Automatic plan samples',
+  'settings.lib.retention.family.autovacuumRuns': 'Autovacuum runs',
   'settings.lib.retention.family.metrics1h': 'Hourly metric averages',
   'settings.lib.retention.family.metricsStatements1h': 'Hourly query statistics',
   'settings.lib.retention.family.metricsAsh1h': 'Hourly active session history',

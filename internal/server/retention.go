@@ -49,6 +49,7 @@ var retentionFamilies = []retentionFamily{
 	{Name: "metrics_bloat", Hypertable: "metrics_bloat", DefaultDays: 90},
 	{Name: "log_events", Hypertable: "log_events", DefaultDays: 14},
 	{Name: "plan_samples", Hypertable: "plan_samples", DefaultDays: 30},
+	{Name: "autovacuum_runs", Hypertable: "autovacuum_runs", DefaultDays: 90},
 	{Name: "metrics_1h", Hypertable: "metrics_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},
 	{Name: "metrics_statements_1h", Hypertable: "metrics_statements_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},
 	{Name: "metrics_ash_1h", Hypertable: "metrics_ash_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},

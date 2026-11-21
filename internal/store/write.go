@@ -696,6 +696,47 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
 	return br.Close()
 }
 
+// AutovacuumRunRow is one autovacuum or autoanalyze run (plan 007 phase 8);
+// a nil number was not in the log line.
+type AutovacuumRunRow struct {
+	TS                                                  time.Time
+	TenantID                                            string
+	InstanceID                                          uuid.UUID
+	ClusterID                                           int64
+	Datname, Schemaname, Relname, Kind                  string
+	Aggressive, Wraparound                              bool
+	IndexScans, PagesRemoved, PagesRemain, PagesScanned *int64
+	TuplesRemoved, TuplesRemain, TuplesDeadNotRemovable *int64
+	BufferHits, BufferReads, BufferDirtied              *int64
+	WALRecords, WALFPI, WALBytes                        *int64
+	CPUUserSeconds, CPUSystemSeconds, ElapsedSeconds    *float64
+}
+
+// WriteAutovacuumRuns inserts the runs; a run already stored is kept.
+func WriteAutovacuumRuns(ctx context.Context, tx pgx.Tx, rows []AutovacuumRunRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, r := range rows {
+		batch.Queue(`INSERT INTO autovacuum_runs (ts, tenant_id, instance_id, cluster_id, datname, schemaname, relname, kind, aggressive, wraparound,
+  index_scans, pages_removed, pages_remain, pages_scanned, tuples_removed, tuples_remain, tuples_dead_not_removable,
+  buffer_hits, buffer_reads, buffer_dirtied, wal_records, wal_fpi, wal_bytes, cpu_user_seconds, cpu_system_seconds, elapsed_seconds)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) ON CONFLICT DO NOTHING`,
+			r.TS, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.Schemaname, r.Relname, r.Kind, r.Aggressive, r.Wraparound,
+			r.IndexScans, r.PagesRemoved, r.PagesRemain, r.PagesScanned, r.TuplesRemoved, r.TuplesRemain, r.TuplesDeadNotRemovable,
+			r.BufferHits, r.BufferReads, r.BufferDirtied, r.WALRecords, r.WALFPI, r.WALBytes, r.CPUUserSeconds, r.CPUSystemSeconds, r.ElapsedSeconds)
+	}
+	br := tx.SendBatch(ctx, batch)
+	for range rows {
+		if _, err := br.Exec(); err != nil {
+			_ = br.Close()
+			return fmt.Errorf("write autovacuum run: %w", err)
+		}
+	}
+	return br.Close()
+}
+
 // WriteLockSnapshots keeps only the newest tree per instance and removes trees
 // older than the fifteen-minute freshness window for each touched instance.
 func WriteLockSnapshots(ctx context.Context, tx pgx.Tx, rows []LockSnapshotRow) error {

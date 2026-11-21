@@ -3242,10 +3242,10 @@ export interface components {
             unsupported_policy?: string;
         };
         /**
-         * @description A metrics family; each maps to the hypertable of the same name. The three `_1h` families are the hourly rollups (continuous aggregates of metrics, metrics_statements and metrics_ash); log_events holds the PostgreSQL log lines the agent ships (14 days by default); plan_samples holds the executions auto_explain logged (30 days by default).
+         * @description A metrics family; each maps to the hypertable of the same name. The three `_1h` families are the hourly rollups (continuous aggregates of metrics, metrics_statements and metrics_ash); log_events holds the PostgreSQL log lines the agent ships (14 days by default); plan_samples holds the executions auto_explain logged (30 days by default); autovacuum_runs holds the autovacuum and autoanalyze runs read from the log (90 days by default).
          * @enum {string}
          */
-        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat" | "log_events" | "plan_samples" | "metrics_1h" | "metrics_statements_1h" | "metrics_ash_1h";
+        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat" | "log_events" | "plan_samples" | "autovacuum_runs" | "metrics_1h" | "metrics_statements_1h" | "metrics_ash_1h";
         RetentionPreview: {
             family: components["schemas"]["RetentionFamilyName"];
             /** Format: int32 */
