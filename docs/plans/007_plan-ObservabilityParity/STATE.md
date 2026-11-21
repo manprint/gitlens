@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 5758bf8e58b76fe00fc68997ae3fb4c128209bf1 + tree bb4e9743bbfd18adb4101aafcc3207f1a2d02e62 · branch main · last WIP tree none
-- Last closure: unit:P5:1
-- Next: open 6.1 · next eligible: 6.1
+- Base: HEAD dd9d100cfbb59d09fed368ce767b220464c6c226 + tree 5b7732da546ece557a1cd024ade71a188904ecdd · branch main · last WIP tree none
+- Last closure: unit:6.1:1
+- Next: open 6.2 · next eligible: 6.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-P5: closure: gates and review only
+none
 
 ## 6. Checkpoint
 none
@@ -91,7 +91,14 @@ none
 | · P4 closure | IN_PROGRESS | 1 | — | — |
 | 5 Rollups | DONE | 1 | 5.1–5.4 | unit:P5:1 |
 | · P5 closure | IN_PROGRESS | 1 | — | — |
-| 6 Log ingest | TODO | 1 | 6.1–6.6 | — |
+| 6 Log ingest | IN_PROGRESS | 1 | 6.1–6.6 | — |
+| · 6.1 | DONE | 1 | — | unit:6.1:1 |
+| · 6.2 | TODO | 1 | — | — |
+| · 6.3 | TODO | 1 | — | — |
+| · 6.4 | TODO | 1 | — | — |
+| · 6.5 | TODO | 1 | — | — |
+| · 6.6 | TODO | 1 | — | — |
+| · P6 closure | TODO | 1 | — | — |
 | 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |
 | 8 Autovacuum history | TODO | 1 | 8.1–8.3 | — |
 | 9 Plan insights | TODO | 1 | 9.1–9.3 | — |

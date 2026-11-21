@@ -89,3 +89,6 @@ Gates: G-WEB-STATIC tsc 0/eslint 0 errors/prettier ok; G-WEB-UNIT 232 files 2059
 
 ## 2026-11-21 P5/1 complete unit:P5:1
 Gates: G-GO-FULL 35 pkgs ok 0 FAIL; G-GO-INT server+store ok (TestINTRLP00*, TestRET*, TestINTRET*, TestWSER*); G-API no diff (web-lint gen); G-WEB-FULL 232 files/2059 tests, coverage gate and budget pass; G-I18N pass; integration lint 1 pre-existing errcheck (A18); review: self-review (agent:opus) accepted; changes: none (closure); notes: self-review: migration 0035 rollups, read rule (raw within retention, 1h beyond), bounds 31-1825, README section; accepted
+
+## 2026-11-21 6.1/1 complete unit:6.1:1
+Gates: G-GO-FOCUS ./internal/pglog/ (race, shuffle) ok; lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW internal/pglog entry/jsonlog/csvlog/reader + parse_test (PGL-001..005, 015); fixtures from postgres:18.6/15.19-alpine containers (27 records each); notes: self-review: Split keeps half records unread, CSV restarts after a broken record at the next line, cut at 262144; fixtures hold no host or user data
