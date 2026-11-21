@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { refreshLocale, setServerLanguage } from '@/i18n/store'
 
 import {
+  COMMAND_KINDS,
+  commandKindLabel,
   commandQueueFullMessage,
   describeCommandState,
   isTerminalCommandState,
@@ -65,5 +69,21 @@ describe('command lifecycle descriptions', () => {
   it('explains failed and rejected commands without an agent reason', () => {
     expect(describeCommandState('failed')).toBe('Command failed without an agent result.')
     expect(describeCommandState('rejected', null)).toBe('Command rejected by the agent.')
+  })
+})
+
+describe('command kind labels', () => {
+  afterEach(async () => {
+    await setServerLanguage(undefined)
+    await refreshLocale()
+  })
+
+  it('UI-IDXV-001 names index_check in English and Italian', async () => {
+    expect(COMMAND_KINDS).toContain('index_check')
+    expect(commandKindLabel('index_check')).toBe('Index check (hypopg)')
+    await setServerLanguage('it')
+    await refreshLocale()
+    expect(commandKindLabel('index_check')).toBe('Verifica indice (hypopg)')
+    for (const kind of COMMAND_KINDS) expect(commandKindLabel(kind)).not.toContain('shell.command')
   })
 })

@@ -4,6 +4,19 @@ import { translate } from '@/i18n/store'
 
 export type ServerCommandState = components['schemas']['CommandResponse']['state']
 export type CommandState = ServerCommandState | 'succeeded' | 'rejected'
+export type CommandKind = components['schemas']['CreateCommandRequest']['kind']
+
+export const COMMAND_KINDS: readonly CommandKind[] = [
+  'explain',
+  'cancel',
+  'terminate',
+  'pgstattuple',
+  'index_check',
+]
+
+export function commandKindLabel(kind: CommandKind): string {
+  return translate(`shell.command.kind.${kind}`)
+}
 
 const terminalStates: ReadonlySet<CommandState> = new Set([
   'done',

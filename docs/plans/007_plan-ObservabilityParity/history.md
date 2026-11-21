@@ -149,3 +149,6 @@ Gates: G-WEB-STATIC pass (tsc, eslint 2 pre-existing warnings, prettier); vitest
 
 ## 2026-11-21 P9/1 complete unit:P9:1
 Gates: G-GO-FULL rc=0; G-GO-INT rc=0 (TestINTPLI001, TestINTAEX002-005, TestINTRO001 pg15/pg18); G-API no diff; G-WEB-FULL rc=0 (237 files, 2096 tests, statements 92.54%, budget PASS); G-I18N rc=0 (9.3); review: self-review (agent:opus) accepted; changes: Phase 9 closure review; notes: Review: insight thresholds match the spec table and each has a positive and negative fixture; plan-only plans never yield jit/trigger; I-5 the stats endpoint is read-only, tenant and instance scoped; README Plan history and help plan-stats describe what is compared (plans of one statement by structure hash) and every figure.
+
+## 2026-11-21 10.1/1 complete unit:10.1:1
+Gates: G-GO-FOCUS ./internal/command (race, shuffle) ok; lint 0; server tests ok; G-API regenerated; vitest commands+i18n 36 ok; tsc ok; review: self-review (agent:opus) accepted; changes: index_check kind, 4 index args, Validate+gate T1; OpenAPI enum/fields; shell.command.kind.* labels en/it; TestIDXV001-003, UI-IDXV-001; notes: A33

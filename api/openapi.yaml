@@ -1955,6 +1955,19 @@ components:
         schema: { type: string }
         relation: { type: string }
         backend_start: { $ref: '#/components/schemas/Timestamp' }
+        index_schema: { type: string, minLength: 1, maxLength: 63, description: 'index_check only: schema of the table the hypothetical index is on.' }
+        index_relation: { type: string, minLength: 1, maxLength: 63, description: 'index_check only: table the hypothetical index is on.' }
+        index_columns:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items: { type: string, minLength: 1, maxLength: 63 }
+          description: index_check only, the key columns of the hypothetical index in order. Each is an identifier the agent quotes; never SQL.
+        index_include:
+          type: array
+          maxItems: 32
+          items: { type: string, minLength: 1, maxLength: 63 }
+          description: index_check only, the INCLUDE columns of the hypothetical index. Each is an identifier the agent quotes; never SQL.
         params:
           type: array
           maxItems: 100
@@ -1972,6 +1985,9 @@ components:
         Per-kind arguments: explain requires queryid and may include datname,
         analyze or params; cancel and terminate require pid and may include backend_start;
         pgstattuple requires schema and relation and may include datname.
+        index_check requires queryid, datname, index_schema, index_relation and
+        index_columns and may include index_include; it plans the statement with
+        and without a hypothetical hypopg index in a read-only transaction.
         backend_start is the start time of the session the caller saw at pid.
         Send it back exactly as the API reported it. When it is given and the
         session at pid started at another time, the agent refuses the command
@@ -1982,7 +1998,7 @@ components:
       type: object
       required: [kind, args]
       properties:
-        kind: { type: string, enum: [explain, cancel, terminate, pgstattuple] }
+        kind: { type: string, enum: [explain, cancel, terminate, pgstattuple, index_check] }
         args: { $ref: '#/components/schemas/CommandArgs' }
       description: A command request contains identifiers and options only; query text is never sent.
     CreateCommandResponse:
@@ -2006,7 +2022,7 @@ components:
       required: [command_id, kind, args, instance_id, cluster_id, claim_token, expires_at]
       properties:
         command_id: { type: string, format: uuid }
-        kind: { type: string, enum: [explain, cancel, terminate, pgstattuple] }
+        kind: { type: string, enum: [explain, cancel, terminate, pgstattuple, index_check] }
         args: { $ref: '#/components/schemas/CommandArgs' }
         instance_id: { $ref: '#/components/schemas/InstanceId' }
         cluster_id: { $ref: '#/components/schemas/ClusterId' }

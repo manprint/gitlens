@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/manprint/pglens/internal/pgtype"
 )
@@ -20,6 +21,9 @@ const (
 	KindCancel      Kind = "cancel"
 	KindTerminate   Kind = "terminate"
 	KindPgstattuple Kind = "pgstattuple"
+	// KindIndexCheck plans a statement with and without a hypothetical index
+	// (hypopg) inside a read-only transaction; nothing is created.
+	KindIndexCheck Kind = "index_check"
 )
 
 // MaxResultBytes bounds one result as an agent posts it, counting the whole
@@ -47,6 +51,13 @@ type Args struct {
 	// order, as text the server reads with each parameter's type; null is SQL
 	// NULL. They are bound, never spliced into the statement.
 	Params []*string `json:"params,omitempty"`
+	// IndexSchema, IndexRelation, IndexColumns and IndexInclude describe the
+	// hypothetical btree index of an index_check. They are identifiers, never
+	// expressions: the executor quotes each one.
+	IndexSchema   string   `json:"index_schema,omitempty"`
+	IndexRelation string   `json:"index_relation,omitempty"`
+	IndexColumns  []string `json:"index_columns,omitempty"`
+	IndexInclude  []string `json:"index_include,omitempty"`
 }
 
 // Limits on Params: PostgreSQL statements rarely take more, and the values
@@ -61,14 +72,18 @@ const (
 // precision when they cross the JavaScript boundary.
 func (a *Args) UnmarshalJSON(data []byte) error {
 	type wireArgs struct {
-		QueryID      json.RawMessage `json:"queryid"`
-		Datname      string          `json:"datname,omitempty"`
-		Analyze      bool            `json:"analyze,omitempty"`
-		PID          *int            `json:"pid,omitempty"`
-		Schema       string          `json:"schema,omitempty"`
-		Relation     string          `json:"relation,omitempty"`
-		BackendStart *time.Time      `json:"backend_start,omitempty"`
-		Params       []*string       `json:"params,omitempty"`
+		QueryID       json.RawMessage `json:"queryid"`
+		Datname       string          `json:"datname,omitempty"`
+		Analyze       bool            `json:"analyze,omitempty"`
+		PID           *int            `json:"pid,omitempty"`
+		Schema        string          `json:"schema,omitempty"`
+		Relation      string          `json:"relation,omitempty"`
+		BackendStart  *time.Time      `json:"backend_start,omitempty"`
+		Params        []*string       `json:"params,omitempty"`
+		IndexSchema   string          `json:"index_schema,omitempty"`
+		IndexRelation string          `json:"index_relation,omitempty"`
+		IndexColumns  []string        `json:"index_columns,omitempty"`
+		IndexInclude  []string        `json:"index_include,omitempty"`
 	}
 
 	var wire wireArgs
@@ -79,13 +94,17 @@ func (a *Args) UnmarshalJSON(data []byte) error {
 	}
 
 	*a = Args{
-		Datname:      wire.Datname,
-		Analyze:      wire.Analyze,
-		PID:          wire.PID,
-		Schema:       wire.Schema,
-		Relation:     wire.Relation,
-		BackendStart: wire.BackendStart,
-		Params:       wire.Params,
+		Datname:       wire.Datname,
+		Analyze:       wire.Analyze,
+		PID:           wire.PID,
+		Schema:        wire.Schema,
+		Relation:      wire.Relation,
+		BackendStart:  wire.BackendStart,
+		Params:        wire.Params,
+		IndexSchema:   wire.IndexSchema,
+		IndexRelation: wire.IndexRelation,
+		IndexColumns:  wire.IndexColumns,
+		IndexInclude:  wire.IndexInclude,
 	}
 	if len(wire.QueryID) == 0 || bytes.Equal(wire.QueryID, []byte("null")) {
 		return nil
@@ -122,6 +141,9 @@ func (a Args) Validate(k Kind) error {
 	}
 	if err := validateDatname(a.Datname); err != nil {
 		return err
+	}
+	if k != KindIndexCheck && a.hasIndexFields() {
+		return fmt.Errorf("%s rejects index_schema, index_relation, index_columns and index_include", k)
 	}
 
 	switch k {
@@ -161,6 +183,74 @@ func (a Args) Validate(k Kind) error {
 		if a.QueryID != nil || a.PID != nil || a.Analyze || a.BackendStart != nil || a.Params != nil {
 			return fmt.Errorf("pgstattuple rejects unrelated arguments")
 		}
+	case KindIndexCheck:
+		if a.QueryID == nil {
+			return fmt.Errorf("index_check requires queryid")
+		}
+		if a.Datname == "" {
+			return fmt.Errorf("index_check requires datname")
+		}
+		if a.PID != nil || a.Analyze || a.BackendStart != nil || a.Params != nil || a.Schema != "" || a.Relation != "" {
+			return fmt.Errorf("index_check rejects unrelated arguments")
+		}
+		return a.validateIndexFields()
+	}
+	return nil
+}
+
+// Limits on the hypothetical index of an index_check.
+const (
+	maxIndexColumns  = 32
+	maxIdentifierLen = 63
+)
+
+func (a Args) hasIndexFields() bool {
+	return a.IndexSchema != "" || a.IndexRelation != "" || a.IndexColumns != nil || a.IndexInclude != nil
+}
+
+func (a Args) validateIndexFields() error {
+	if err := validateIdentifier("index_schema", a.IndexSchema); err != nil {
+		return err
+	}
+	if err := validateIdentifier("index_relation", a.IndexRelation); err != nil {
+		return err
+	}
+	if len(a.IndexColumns) == 0 || len(a.IndexColumns) > maxIndexColumns {
+		return fmt.Errorf("index_columns takes 1 to %d columns", maxIndexColumns)
+	}
+	if len(a.IndexInclude) > maxIndexColumns {
+		return fmt.Errorf("index_include takes at most %d columns", maxIndexColumns)
+	}
+	seen := map[string]bool{}
+	for _, name := range a.IndexColumns {
+		if err := validateIdentifier("index_columns", name); err != nil {
+			return err
+		}
+	}
+	for _, name := range a.IndexInclude {
+		if err := validateIdentifier("index_include", name); err != nil {
+			return err
+		}
+	}
+	for _, name := range append(append([]string{}, a.IndexColumns...), a.IndexInclude...) {
+		if seen[name] {
+			return fmt.Errorf("index_columns and index_include list column %q twice", name)
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+// validateIdentifier accepts 1 to 63 bytes without NUL or control
+// characters; the executor quotes the name, so other characters are safe.
+func validateIdentifier(field, name string) error {
+	if name == "" || len(name) > maxIdentifierLen {
+		return fmt.Errorf("%s must be 1 to %d bytes", field, maxIdentifierLen)
+	}
+	for _, r := range name {
+		if r == 0 || unicode.IsControl(r) {
+			return fmt.Errorf("%s contains a NUL byte or a control character", field)
+		}
 	}
 	return nil
 }
@@ -185,7 +275,7 @@ func validateParams(params []*string) error {
 
 func knownKind(k Kind) bool {
 	switch k {
-	case KindExplain, KindCancel, KindTerminate, KindPgstattuple:
+	case KindExplain, KindCancel, KindTerminate, KindPgstattuple, KindIndexCheck:
 		return true
 	default:
 		return false

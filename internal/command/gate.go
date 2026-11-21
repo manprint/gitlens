@@ -23,6 +23,13 @@ func Allowed(k Kind, a Args, g Gates) (bool, string) {
 			return false, "signal gate is closed"
 		}
 		return true, ""
+	case KindIndexCheck:
+		// Planning with a hypothetical index needs what a plain EXPLAIN
+		// needs; hypopg is checked by the executor in the target database.
+		if g.Tier < pgtype.TierExplain {
+			return false, "permission tier T1 is required"
+		}
+		return true, ""
 	case KindPgstattuple:
 		// The extension is checked by the executor, in the database the
 		// relation lives in: extensions are per database, and the target's

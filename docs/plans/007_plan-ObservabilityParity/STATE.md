@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 13:48 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 13:51 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 6308d521482ada29239a261d62a12a0168424428 + tree 9adff1feff0f5708d5ffc3ad98de357e9cab5eeb · branch main · last WIP tree none
-- Last closure: unit:P9:1
-- Next: open 10.1 · next eligible: 10.1
+- Base: HEAD d8fc7aa85a7b0a307640acbf32281832a6e82dcf + tree 8e410762bee37b5fdaef8e97adde0a31a22e9018 · branch main · last WIP tree none
+- Last closure: unit:10.1:1
+- Next: open 10.2 · next eligible: 10.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-P9: STATE.md history.md
+none
 
 ## 6. Checkpoint
 none
@@ -87,6 +87,7 @@ none
 - A30 (9.1): `PlanInsight` gained a `kind` union (all 16 kinds) and optional raw `args`. The spec's `sortSpill` already existed: it keeps its wider trigger (any Disk sort or external sort method) and only gains `kind` and `args.kb`. Titles stay translated inside planTree.ts with the active locale (the existing pattern), not formatted by the caller; raw figures are in `args`. jitShare/triggerShare are node-less (nodeId null, like planOnly) and come right before `never`; the three node kinds come in the per-node loop after the existing ones.
 - A31 (9.2): the handler lives in a new `internal/server/api_plan_stats.go`; `planSampleScope` (instance_id, queryid, from/to) is shared with `/plans/samples`. `lag` is `PARTITION BY datname` so samples of two databases never count as a change; changes are newest first. `has_plan` matches instance, queryid, hash and (when given) database.
 - A32 (9.3): Plan history already had capture ticking (third tick drops the oldest) and the tree comparison (`PlanComparison` + `diffPlans`); both are reused. New `PlanStats.tsx` (statistics table + change lines) ticks a plan by hash, selecting its newest loaded capture; the checkbox is disabled when `has_plan` is false or no capture of that hash is loaded. `PlanCompare.tsx` holds only the side-by-side statistics table (`PlanStatsCompare`), shown under the existing comparison. Stats are fetched only with an instance id.
+- A33 (10.1): `Args.UnmarshalJSON` already refuses unknown keys (DisallowUnknownFields), so TestIDXV002 asserts the decode fails and leaves `Args` empty for `sql`/`statement`/`index_definition` instead of comparing to the struct without them. Command kind labels added as `shell.command.kind.*` + `commandKindLabel` in `web/src/lib/commands.ts` (no central label existed); the audit table keeps the raw kind.
 
 ## 9. Blockers
 none
@@ -113,7 +114,8 @@ none
 | · Autovacuum history per table | TODO | 1 | — | — |
 | 9 Plan insights | DONE | 1 | 9.1–9.3 | unit:P9:1 |
 | · Plan insights, statistics and comparison | TODO | 1 | — | — |
-| 10 Validated index suggestions | TODO | 1 | 10.1–10.4 | — |
+| 10 Validated index suggestions | IN_PROGRESS | 1 | 10.1–10.4 | — |
+| · Validated index suggestions | TODO | 1 | — | — |
 | 11 Query to service link | TODO | 1 | 11.1–11.4 | — |
 | 12 Per-process OS metrics | TODO | 1 | 12.1–12.4 | — |
 | 13 Tuning workbook | TODO | 1 | 13.1–13.4 | — |

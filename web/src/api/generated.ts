@@ -3167,7 +3167,7 @@ export interface components {
             /** @description The channel's error with every webhook address and its secret parts removed; absent when delivered. */
             error?: string;
         };
-        /** @description Per-kind arguments: explain requires queryid and may include datname, analyze or params; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
+        /** @description Per-kind arguments: explain requires queryid and may include datname, analyze or params; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. index_check requires queryid, datname, index_schema, index_relation and index_columns and may include index_include; it plans the statement with and without a hypothetical hypopg index in a read-only transaction. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
         CommandArgs: {
             queryid?: number | string;
             datname?: string;
@@ -3177,13 +3177,21 @@ export interface components {
             schema?: string;
             relation?: string;
             backend_start?: components["schemas"]["Timestamp"];
+            /** @description index_check only: schema of the table the hypothetical index is on. */
+            index_schema?: string;
+            /** @description index_check only: table the hypothetical index is on. */
+            index_relation?: string;
+            /** @description index_check only, the key columns of the hypothetical index in order. Each is an identifier the agent quotes; never SQL. */
+            index_columns?: string[];
+            /** @description index_check only, the INCLUDE columns of the hypothetical index. Each is an identifier the agent quotes; never SQL. */
+            index_include?: string[];
             /** @description explain only: the values of the statement's $1, $2, ... in order, as text PostgreSQL reads with each parameter's type; null is SQL NULL. The agent binds them and never splices them into the statement. Without them, a statement with placeholders is analyzed with the values of a recent execution pg_stat_activity shows, and planned plan-only with GENERIC_PLAN on PostgreSQL 16+. */
             params?: (string | null)[];
         };
         /** @description A command request contains identifiers and options only; query text is never sent. */
         CreateCommandRequest: {
             /** @enum {string} */
-            kind: "explain" | "cancel" | "terminate" | "pgstattuple";
+            kind: "explain" | "cancel" | "terminate" | "pgstattuple" | "index_check";
             args: components["schemas"]["CommandArgs"];
         };
         CreateCommandResponse: {
@@ -3205,7 +3213,7 @@ export interface components {
             /** Format: uuid */
             command_id: string;
             /** @enum {string} */
-            kind: "explain" | "cancel" | "terminate" | "pgstattuple";
+            kind: "explain" | "cancel" | "terminate" | "pgstattuple" | "index_check";
             args: components["schemas"]["CommandArgs"];
             instance_id: components["schemas"]["InstanceId"];
             cluster_id: components["schemas"]["ClusterId"];
