@@ -212,3 +212,6 @@ Gates: G-WEB-STATIC green (tsc, eslint 0 errors/2 pre-existing warnings, prettie
 
 ## 2026-11-21 13.4/1 complete unit:13.4:1
 Gates: G-WEB-STATIC on the new file; make web-coverage-gate web-budget EXIT 0 (src/api 96.9%, floor 95%); review: self-review (agent:opus) accepted; changes: web/src/api/workbooks.test.tsx: UI-WBK-010 every hook reaches its endpoint and method, UI-WBK-011 409 keeps code, UI-WBK-012 error text without envelope; notes: attempt 2: P13 G-WEB-FULL found src/api 94.1% < floor 95%
+
+## 2026-11-21 P13/1 complete unit:P13:1
+Gates: G-GO-FULL EXIT 0; G-GO-INT TestINTWBK001 (pg15, pg18), 002, 003 (pgext, stock), 004 PASS; G-RO INTRO001/002/003 PASS; G-API no diff; G-I18N EXIT 0; G-WEB-FULL: first run src/api 94.1% < 95% (13.4 attempt 2 added api/workbooks.test.tsx), rerun EXIT 0, 2133 tests, src/api 96.9%; review: self-review (agent:opus) accepted; changes: review agent-1: I-1 read-only holds (INTRO tests; workbook runs are EXPLAIN in READ ONLY transactions, settings via SET LOCAL allowlist, hints refused with */); I-3 explain path unchanged and its tests green; Plan history skips runs with settings or hints; README Tuning workbook section and help topic en/it present; notes: none
