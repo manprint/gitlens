@@ -2,8 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -83,4 +87,38 @@ func TestAEX009(t *testing.T) {
 	l["source"] = "command"
 	_, skip, _ = autoPlanFromFact(l, nil, "default", 7, uuid.New())
 	require.True(t, skip)
+}
+
+// AEX-012 (server): parameters the agent shipped are checked again; a
+// credential stores NULL and keeps the sample; a long text is cut to 4096.
+func TestAEX012(t *testing.T) {
+	inst := uuid.New()
+	p, _, reason := autoPlanFromFact(autoPlanLabels(), json.RawMessage(`{"parameters":"$1 = 'PASSWORD hunter2secret'"}`), "default", 7, inst)
+	require.Empty(t, reason)
+	require.Nil(t, p.sample.Parameters)
+	require.Equal(t, "h1", p.sample.PlanHash)
+
+	p, _, _ = autoPlanFromFact(autoPlanLabels(), json.RawMessage(`{"parameters":"$1 = '42'"}`), "default", 7, inst)
+	require.NotNil(t, p.sample.Parameters)
+	require.Equal(t, "$1 = '42'", *p.sample.Parameters)
+
+	long, _ := json.Marshal(map[string]string{"parameters": strings.Repeat("é", 3000)})
+	p, _, _ = autoPlanFromFact(autoPlanLabels(), long, "default", 7, inst)
+	require.NotNil(t, p.sample.Parameters)
+	require.LessOrEqual(t, len(*p.sample.Parameters), planParametersMaxBytes)
+	require.True(t, utf8.ValidString(*p.sample.Parameters))
+}
+
+// AEX-013: the purge needs a valid instance and answers a count; nothing is
+// written without storage.
+func TestAEX013(t *testing.T) {
+	a := &API{}
+	rec := httptest.NewRecorder()
+	a.handlePurgePlanParameters(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/plans/samples/parameters?instance_id=nope", nil))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	rec = httptest.NewRecorder()
+	a.handlePurgePlanParameters(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/plans/samples/parameters?instance_id="+uuid.NewString(), nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"cleared":0}`, rec.Body.String())
 }

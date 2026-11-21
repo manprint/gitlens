@@ -149,7 +149,7 @@ func (l *logLoop) scrape(ctx context.Context) {
 		}
 		return
 	}
-	scrape := logScrape{bytesSkipped: skipped, statementText: l.cfg.LogStatementText(), plans: &l.plans}
+	scrape := logScrape{bytesSkipped: skipped, statementText: l.cfg.LogStatementText(), planParameters: l.cfg.LogPlanParameters(), plans: &l.plans}
 	for _, c := range chunks {
 		recs, consumed := pglog.Split(format, c.Data, pglog.MaxLineBytes)
 		scrape.bytesRead += int64(consumed)

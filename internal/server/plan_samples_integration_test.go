@@ -6,8 +6,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,7 +62,10 @@ func planRouter(t *testing.T) (http.Handler, func(string, string) int) {
 	pool := getSharedPool(t)
 	truncateAll(t, pool)
 	t.Cleanup(func() { truncateAll(t, pool) })
-	router := NewRouter(UIConfig{}, nil, nil, NewAuth("test-token"), NewInventory(pool), NewPipeline(pool, nil), NewAPI(pool), NewTopologyAPI(pool), NewAshAPI(pool))
+	auth := NewAuth("test-token")
+	api := NewAPI(pool)
+	api.SetAuth(auth)
+	router := NewRouter(UIConfig{}, nil, nil, auth, NewInventory(pool), NewPipeline(pool, nil), api, NewTopologyAPI(pool), NewAshAPI(pool))
 	count := func(table, instance string) int {
 		var n int
 		require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM `+table+` WHERE instance_id = $1`, instance).Scan(&n))
@@ -111,4 +117,50 @@ func TestINTAEX003(t *testing.T) {
 	pushPlanFacts(t, router, instance, now, autoPlanFact(now.Add(-time.Second), `[{"Plan":{"Node Type":"Result","Output":["ALTER ROLE app PASSWORD 'x'"]}}]`))
 	require.Zero(t, count("query_plans", instance))
 	require.Zero(t, count("plan_samples", instance))
+}
+
+// TestINTAEX004: two samples with parameters, purge: both rows remain with
+// NULL parameters, one audit row of kind purge_plan_parameters, and neither
+// the answer, the audit row nor the server log holds a parameter value.
+func TestINTAEX004(t *testing.T) {
+	router, count := planRouter(t)
+	pool := getSharedPool(t)
+	instance := uuid.NewString()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	withParams := func(ts time.Time) wire.Fact {
+		f := autoPlanFact(ts, "")
+		f.ValueJSON = []byte(`{"parameters":"$1 = 'zz-value-9137'"}`)
+		return f
+	}
+	pushPlanFacts(t, router, instance, now, withParams(now.Add(-2*time.Second)), withParams(now.Add(-time.Second)))
+	ctx := context.Background()
+	var withValue int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM plan_samples WHERE instance_id = $1 AND parameters = '$1 = ''zz-value-9137'''`, instance).Scan(&withValue))
+	require.Equal(t, 2, withValue)
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/plans/samples/parameters?instance_id="+instance, nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{"cleared":2}`, rec.Body.String())
+
+	require.Equal(t, 2, count("plan_samples", instance))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM plan_samples WHERE instance_id = $1 AND parameters IS NOT NULL`, instance).Scan(&withValue))
+	require.Zero(t, withValue)
+	var args, who string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT args::text, requested_by FROM command_audit WHERE instance_id = $1 AND kind = 'purge_plan_parameters'`, instance).Scan(&args, &who))
+	require.JSONEq(t, `{"cleared":2}`, args)
+	require.True(t, strings.HasPrefix(who, "api-token"), who)
+	require.Contains(t, logs.String(), "parameters of 2 samples")
+	require.NotContains(t, logs.String()+rec.Body.String()+args, "zz-value-9137")
+
+	// Without a credential the purge is refused.
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/plans/samples/parameters?instance_id="+instance, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }

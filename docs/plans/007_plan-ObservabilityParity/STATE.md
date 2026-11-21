@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:11 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:17 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 5292dd5c65dd852b2029aaa011c462a880c13af8 + tree d192f2f9121cc37dcf2ac73b1732a8f17cb1b281 · branch main · last WIP tree none
-- Last closure: unit:7.2:1
-- Next: open 7.3 · next eligible: 7.3
+- Base: HEAD ec8333c816745b6c22b91beaf13ed2f0f5e57c3b + tree 4fffeaa553b39c489f3a0b475c1b14b50d4b04c5 · branch main · last WIP tree none
+- Last closure: unit:7.3:1
+- Next: open 7.4 · next eligible: 7.4
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -80,6 +80,7 @@ none
 - A23 (6.6): agent log notes (check `logs`, reason `logs_*`) leave RDY-CHK-02 and get their own info rule RDY-LOG-01 with one fix per note (an unknown note still lists, no fix); the log page help is a new chapter `logs` (group instance), so the help home lists 16 chapters.
 - A24 (7.1): TestINTAEX001 reads the log through the SQL source (shared helper `sqlLogLoop`) instead of a mounted log directory: same parser and loop, no bind mount in the sandbox. A parse error without the prefix also counts as reason `format`; only ErrPlanFormat raises the note. Phase 7's migration "0036" takes the next free number, 0038 (0036/0037 used by phase 6, A22).
 - A25 (7.2): `plan_samples` is a retention family like `log_events` (default 30, no compression), so the family enum also changes in `api/openapi.yaml`, `web/src/api/generated.ts`, `web/src/lib/retention.ts` and the settings catalogs (en/it), beyond the unit's listed files; a credential hit in a pushed plan body counts as `pglens_ingest_rejected{reason="plan_credential"}`; `truncateAll` now clears `query_plans` and `plan_samples`.
+- A26 (7.3): design note (self-approved by agent-1): parameter values travel only in the fact value; never in labels, keys, metrics, agent or server log lines, error texts (fixed texts in the purge handler) or audit rows (`args` holds only `{"cleared": n}`); the agent checks parameters for credentials only when it ships them (off: a parameter credential no longer drops the sample); the server checks again and stores NULL; the purge writes a `command_audit` row (no CHECK on `kind`). TestAEX013 is the unit part (400, no storage); the count, audit row and log checks run in TestINTAEX004.
 
 ## 9. Blockers
 none

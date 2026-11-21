@@ -191,6 +191,8 @@ type PlanSampleRow struct {
 	PlanHash   string
 	DurationMS float64
 	Analyzed   bool
+	// Parameters is the opt-in Query Parameters text; nil stores NULL.
+	Parameters *string
 }
 
 type ObjectFactRow struct {
@@ -680,9 +682,9 @@ func WritePlanSamples(ctx context.Context, tx pgx.Tx, rows []PlanSampleRow) erro
 	}
 	batch := &pgx.Batch{}
 	for _, r := range rows {
-		batch.Queue(`INSERT INTO plan_samples (ts, tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, duration_ms, analyzed)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
-			r.TS, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.PlanHash, r.DurationMS, r.Analyzed)
+		batch.Queue(`INSERT INTO plan_samples (ts, tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, duration_ms, analyzed, parameters)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
+			r.TS, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.PlanHash, r.DurationMS, r.Analyzed, r.Parameters)
 	}
 	br := tx.SendBatch(ctx, batch)
 	for range rows {

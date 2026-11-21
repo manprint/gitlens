@@ -31,6 +31,9 @@ type logScrape struct {
 	statementText bool
 	// plans remembers the plan bodies already shipped; nil starts empty.
 	plans *planMemo
+	// planParameters ships the Query Parameters of automatic plans
+	// (checks.logs.plan_parameters, off by default).
+	planParameters bool
 }
 
 // logText cuts a text to max bytes on a rune boundary and withholds any text
@@ -106,6 +109,7 @@ func gauge(name string, v float64, labels map[string]string) wire.Metric {
 func logResult(s logScrape, now time.Time) (r wire.Result, formatNotJSON bool) {
 	perClass := map[string]int{}
 	plans := newPlanScrape(s.plans, now)
+	plans.parameters = s.planParameters
 	var facts []wire.Fact
 	dropped := 0
 	for _, e := range s.entries {

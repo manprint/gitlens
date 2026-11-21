@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -16,6 +17,9 @@ const (
 	planFactKind       = "plan"
 	planSourceAuto     = "auto_explain"
 	planRejectedSecret = "plan_credential"
+	// planParametersMaxBytes matches the agent's cut; a longer text from an
+	// older or foreign agent is cut again.
+	planParametersMaxBytes = 4096
 )
 
 // autoPlan is what one auto_explain plan fact stores: always a sample, and the
@@ -49,7 +53,8 @@ func autoPlanFromFact(labels map[string]string, value json.RawMessage, tenantID 
 		return autoPlan{}, false, "invalid_fact"
 	}
 	var body struct {
-		Plan json.RawMessage `json:"plan"`
+		Plan       json.RawMessage `json:"plan"`
+		Parameters *string         `json:"parameters"`
 	}
 	if len(value) > 0 {
 		if err := json.Unmarshal(value, &body); err != nil {
@@ -61,6 +66,11 @@ func autoPlanFromFact(labels map[string]string, value json.RawMessage, tenantID 
 	p.sample = store.PlanSampleRow{
 		TS: ts, TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID,
 		Datname: labels["datname"], QueryID: queryID, PlanHash: hash, DurationMS: duration, Analyzed: analyzed,
+	}
+	// Parameters that may hold a credential store NULL; the sample is kept.
+	if body.Parameters != nil && *body.Parameters != "" && !redact.MayHoldCredential(*body.Parameters) {
+		params := cutUTF8(*body.Parameters, planParametersMaxBytes)
+		p.sample.Parameters = &params
 	}
 	if len(body.Plan) > 0 && string(body.Plan) != "null" {
 		// The agent checks first; the server checks again and drops the whole
@@ -74,4 +84,17 @@ func autoPlanFromFact(labels map[string]string, value json.RawMessage, tenantID 
 		}
 	}
 	return p, false, ""
+}
+
+// cutUTF8 returns the longest prefix of s of at most max bytes that ends on a
+// character boundary.
+func cutUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

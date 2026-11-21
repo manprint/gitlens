@@ -4124,6 +4124,37 @@ paths:
                     total_shapes: 1
         '400': { $ref: '#/components/responses/BadRequest' }
 
+  /api/v1/plans/samples/parameters:
+    delete:
+      tags: [statements]
+      operationId: purgePlanParameters
+      summary: Clear the stored parameters of every automatic plan sample of an instance.
+      description: >-
+        Sets parameters to NULL on every plan sample of the instance; the
+        samples are kept. Writes one command audit row of kind
+        purge_plan_parameters. No parameter value is returned or logged.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+      responses:
+        '200':
+          description: The number of samples whose parameters were cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cleared]
+                properties:
+                  cleared: { type: integer, format: int64, minimum: 0 }
+              examples:
+                default:
+                  value: { cleared: 2 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500':
+          description: The parameters were not cleared.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/alerts:
     get:
       tags: [alerts]

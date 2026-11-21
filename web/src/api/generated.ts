@@ -873,6 +873,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans/samples/parameters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear the stored parameters of every automatic plan sample of an instance.
+         * @description Sets parameters to NULL on every plan sample of the instance; the samples are kept. Writes one command audit row of kind purge_plan_parameters. No parameter value is returned or logged.
+         */
+        delete: operations["purgePlanParameters"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/alerts": {
         parameters: {
             query?: never;
@@ -4636,6 +4656,41 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+        };
+    };
+    purgePlanParameters: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The number of samples whose parameters were cleared. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        cleared: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description The parameters were not cleared. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getAlerts: {

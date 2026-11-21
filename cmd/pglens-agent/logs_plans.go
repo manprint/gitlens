@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/manprint/pglens/internal/agent"
 	"github.com/manprint/pglens/internal/pglog"
@@ -19,6 +20,7 @@ const (
 	planBodyMaxBytes         = 262144
 	planMemoTTL              = time.Hour
 	planMemoMax              = 5000
+	planParametersMaxBytes   = 4096
 	autoExplainFormatNotJSON = "auto_explain_format_not_json"
 )
 
@@ -67,6 +69,8 @@ type planScrape struct {
 	read          int
 	dropped       map[string]int
 	formatNotJSON bool
+	// parameters ships Query Parameters, cut to planParametersMaxBytes.
+	parameters bool
 }
 
 func newPlanScrape(memo *planMemo, now time.Time) *planScrape {
@@ -77,8 +81,9 @@ func newPlanScrape(memo *planMemo, now time.Time) *planScrape {
 }
 
 // add turns one autoexplain.plan entry into a plan fact, or counts why not.
-// A sample whose statement, plan or parameters may hold a credential is
-// dropped whole (I-4).
+// A sample whose statement or plan may hold a credential, or whose shipped
+// parameters may, is dropped whole (I-4). Parameter values never reach a
+// label, a key, a metric or a log line.
 func (ps *planScrape) add(e pglog.Entry) {
 	ps.read++
 	p, err := pglog.ParseAutoExplain(e.Message)
@@ -91,7 +96,7 @@ func (ps *planScrape) add(e pglog.Entry) {
 		ps.dropped["no_queryid"]++
 		return
 	}
-	if redact.MayHoldCredential(p.QueryText) || redact.MayHoldCredential(string(p.Plan)) || redact.MayHoldCredential(p.Parameters) {
+	if redact.MayHoldCredential(p.QueryText) || redact.MayHoldCredential(string(p.Plan)) || (ps.parameters && redact.MayHoldCredential(p.Parameters)) {
 		ps.dropped["credential"]++
 		return
 	}
@@ -105,11 +110,17 @@ func (ps *planScrape) add(e pglog.Entry) {
 		return
 	}
 	queryID := strconv.FormatInt(e.QueryID, 10)
-	value := json.RawMessage(`{}`)
+	body := map[string]any{}
 	if len(p.Plan) <= planBodyMaxBytes && ps.memo.shipBody(e.Database+"\x00"+queryID+"\x00"+hash, ps.now) {
-		if raw, err := json.Marshal(map[string]json.RawMessage{"plan": p.Plan}); err == nil {
-			value = raw
-		}
+		body["plan"] = p.Plan
+	}
+	if ps.parameters && p.Parameters != "" {
+		body["parameters"] = cutUTF8(p.Parameters, planParametersMaxBytes)
+	}
+	value, err := json.Marshal(body)
+	if err != nil {
+		ps.dropped["format"]++
+		return
 	}
 	ps.facts = append(ps.facts, wire.Fact{
 		Kind: planFactKind,
@@ -133,4 +144,17 @@ func (ps *planScrape) metrics() []wire.Metric {
 		out = append(out, gauge("pg_log_plans_dropped", float64(ps.dropped[r]), map[string]string{"reason": r}))
 	}
 	return out
+}
+
+// cutUTF8 returns the longest prefix of s of at most max bytes that ends on a
+// character boundary.
+func cutUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -152,6 +153,89 @@ func TestAEX006(t *testing.T) {
 	require.Empty(t, planFacts(r))
 	require.Equal(t, 1.0, planDropped(r, "credential"))
 	raw, err := json.Marshal(h.results)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "hunter2secret")
+}
+
+func paramsMessage(params string) string {
+	b, _ := json.Marshal(map[string]any{
+		"Query Text": "SELECT * FROM t WHERE id = $1", "Query Parameters": params,
+		"Plan": map[string]any{"Node Type": "Result"},
+	})
+	return "duration: 0.5 ms  plan:\n" + string(b)
+}
+
+func shippedParameters(t *testing.T, f wire.Fact) (string, bool) {
+	t.Helper()
+	var body map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(f.ValueJSON, &body))
+	raw, ok := body["parameters"]
+	if !ok {
+		return "", false
+	}
+	var s string
+	require.NoError(t, json.Unmarshal(raw, &s))
+	return s, true
+}
+
+// AEX-010: parameters are off by default: no parameters key even when the log
+// has them, and the value is nowhere in the result.
+func TestAEX010(t *testing.T) {
+	h := newLogHarness(t, jsonSettings, agent.CheckConfig{}, planLine(1, 0, 77, paramsMessage("$1 = '4242'")))
+	h.loop.scrape(context.Background())
+	facts := planFacts(h.results[0])
+	require.Len(t, facts, 1)
+	_, ok := shippedParameters(t, facts[0])
+	require.False(t, ok)
+	raw, err := json.Marshal(h.results)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "4242")
+}
+
+// AEX-011: with plan_parameters on, the parameters ship in the value only,
+// cut to 4096 bytes on a character boundary.
+func TestAEX011(t *testing.T) {
+	on := agent.CheckConfig{PlanParameters: boolp(true)}
+	h := newLogHarness(t, jsonSettings, on, planLine(1, 0, 77, paramsMessage("$1 = '4242'")))
+	h.loop.scrape(context.Background())
+	facts := planFacts(h.results[0])
+	require.Len(t, facts, 1)
+	got, ok := shippedParameters(t, facts[0])
+	require.True(t, ok)
+	require.Equal(t, "$1 = '4242'", got)
+	for k, v := range facts[0].Labels {
+		require.NotContains(t, v, "4242", k)
+	}
+	require.NotContains(t, facts[0].Key, "4242")
+
+	long := "$1 = '" + strings.Repeat("é", 3000) + "'"
+	h = newLogHarness(t, jsonSettings, on, planLine(1, 0, 78, paramsMessage(long)))
+	h.loop.scrape(context.Background())
+	got, ok = shippedParameters(t, planFacts(h.results[0])[0])
+	require.True(t, ok)
+	require.LessOrEqual(t, len(got), planParametersMaxBytes)
+	require.Greater(t, len(got), planParametersMaxBytes-2)
+	require.True(t, strings.HasPrefix(long, got))
+	require.True(t, utf8.ValidString(got))
+}
+
+// AEX-012: shipped parameters judged a credential drop the sample (I-4); with
+// parameters off the same line ships its sample without them.
+func TestAEX012(t *testing.T) {
+	secret := "$1 = 'secret-token-ab12cd34ef56ab12cd34ef56ab12cd34', $2 = 'PASSWORD hunter2secret'"
+	h := newLogHarness(t, jsonSettings, agent.CheckConfig{PlanParameters: boolp(true)}, planLine(1, 0, 77, paramsMessage(secret)))
+	h.loop.scrape(context.Background())
+	r := h.results[0]
+	require.Empty(t, planFacts(r))
+	require.Equal(t, 1.0, planDropped(r, "credential"))
+	raw, err := json.Marshal(h.results)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "hunter2secret")
+
+	h = newLogHarness(t, jsonSettings, agent.CheckConfig{}, planLine(1, 0, 77, paramsMessage(secret)))
+	h.loop.scrape(context.Background())
+	require.Len(t, planFacts(h.results[0]), 1)
+	raw, err = json.Marshal(h.results)
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "hunter2secret")
 }
