@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:32 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:44 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD e0b5369ab0c8b692566800577772457b52e67cf5 + tree 1ebd1a6f0a761faadb88c1383d10586021570d55 · branch main · last WIP tree none
-- Last closure: unit:1.3:1
-- Next: open P1 · next eligible: P1
+- Base: HEAD 64c7b6571e4501a5a23c90c2d98313980ace3d5d + tree b2c57349a89ce5cdd386d3ff623d2d735e64bbeb · branch main · last WIP tree none
+- Last closure: unit:P1:1
+- Next: open 2.1 · next eligible: 2.1
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-none
+P1: STATE.md, history.md
 
 ## 6. Checkpoint
 none
@@ -58,7 +58,7 @@ none
 - A2 (autonomous): plan files (untracked, written by the planning session for this request) enter the 0.1 completion commit.
 - Baseline for regression comparison (0.1): G-GO-FULL 35 packages ok, 0 FAIL, 1 SKIP; vitest 227 files / 2027 tests; G-I18N and G-RO pass. B1: `make web-lint` fails at `web-gen-api` (`git diff --exit-code -- web/src/api/generated.ts`) only because that file holds uncommitted plan-006 hunks; gen output is idempotent.
 - A4 (autonomous, 2026-11-21 07:30 UTC): plan-007 units edit files that the uncommitted plan 006 created (untracked locale catalogs, help topics, `findingCheck.ts`, …), so no unit commit could hold them without capturing plan-006 content (§6 safety stop). Options: stop and ask; leave those edits uncommitted; commit the plan-006 tree separately first. Plan 006 is complete and live (dev-20261121b), no other session writes, and the plan recommended this commit (D20). Chosen: separate commit bf38f97 `chore(006): record plan 006 I18n work …` = HEAD + baseline snapshot 1d7158a without plan 007, without `web/src/**/node_modules/`, `internal/webui/dist/index.html`, `BUGFIX_ENHANCEMENTS_20_11_2026.md` (528 paths, includes the previously staged SuggestionsPanel deletions). Local only, no push; reverse with an interactive history edit dropping bf38f97 (content stays identical in the working tree). A1 is moot from here: the index is clean.
-- A3 (autonomous): G-WEB-FULL = `make web-typecheck`; `pnpm run gen:api` then no diff against the pre-run snapshot of `web/src/api/generated.ts`; `pnpm run lint && pnpm run format:check` (web/); `make web-coverage-gate web-budget`. Applies until the plan-006 hunks of `generated.ts` are committed by the user; acceptance unchanged (gen idempotence still asserted).
+- A3 (autonomous): G-WEB-FULL substitution for B1. Retired at P1 (2026-11-21): with plan 006 committed (A4) `make web-lint` is green again, so G-WEB-FULL runs as registered.
 
 ## 9. Blockers
 none
@@ -70,10 +70,7 @@ none
 | Phase | Status | Attempt | Sub-phases | Closure ref |
 |-------|--------|---------|------------|-------------|
 | 0 Baseline and test images | DONE | 1 | 0.1–0.2 | unit:P0:1 |
-| 1 Multixact wraparound rule | IN_PROGRESS | 1 | 1.1–1.3 | — |
-| · 1.1 Agent metric pg_max_datminmxid_age | DONE | 1 | — | unit:1.1:1 |
-| · 1.2 Advisor rule, texts, alert seed | DONE | 1 | — | unit:1.2:1 |
-| · 1.3 Console texts, help, verification SQL, README | DONE | 1 | — | unit:1.3:1 |
+| 1 Multixact wraparound rule | DONE | 1 | 1.1–1.3 | unit:P1:1 |
 | 2 ASH dimensions | TODO | 1 | 2.1–2.5 | — |
 | 3 Notification channels | TODO | 1 | 3.1–3.4 | — |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |

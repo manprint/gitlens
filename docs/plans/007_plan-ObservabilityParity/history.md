@@ -23,3 +23,6 @@ Gates: G-GO-FOCUS pass (MXW-003, MXW-004, MXW-005, TestCatalogParity, seeded-rul
 
 ## 2026-11-21 1.3/1 complete unit:1.3:1
 Gates: G-WEB-STATIC pass; G-WEB-UNIT 249 pass (UI-MXW-001/002/003 discovered); G-GO-INT TestINTMXW003 pg15+pg18 pass; review: self-review (agent:opus) accepted; changes: ruleText/it rules, findingCheck multixact case, ruleThreshold, help en/it alert-rules+findings, README rules row, TestINTMXW003; notes: self-review agent:opus: SQL read-only, catalog skeleton en/it equal; B1 no longer reproduces (make web-lint green)
+
+## 2026-11-21 P1/1 complete unit:P1:1
+Gates: G-GO-FULL 35 pkgs ok; G-GO-INT TestINTMXW001/002/003 pass (pg15+pg18); G-RO pass; G-WEB-FULL pass (registered command, coverage floors + budget, entry 246.31 KiB); G-I18N pass (48); review: self-review (agent:opus) accepted; changes: none (closure); notes: self-review agent:opus: I-1 (multixact query read-only, pg_database only), I-5 (en/it keys+placeholders, TestMXW004, I18N parity); rule catalogue assertion = advisor registry + TestMXW003/004 (no separate /api/v1/findings catalogue endpoint exists); README row added in 1.3; no regression vs baseline
