@@ -50,6 +50,7 @@ export const HELP_CATALOG: readonly { id: string; group: HelpGroup; title: LangT
   { id: 'alert-rules', group: 'alerting', title: { en: 'Alert rules', it: 'Regole di alert' } },
   { id: 'silences', group: 'alerting', title: { en: 'Silences', it: 'Silenziamenti' } },
   { id: 'settings', group: 'admin', title: { en: 'Settings', it: 'Impostazioni' } },
+  { id: 'mcp', group: 'admin', title: { en: 'MCP server', it: 'Server MCP' } },
 ]
 
 /** The title of a chapter in the help language of `locale`, or undefined. */

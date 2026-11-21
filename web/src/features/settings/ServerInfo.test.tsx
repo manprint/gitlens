@@ -65,4 +65,13 @@ describe('ServerInfo', () => {
     expect(expiry).toBeInTheDocument()
     expect(expiry).toHaveAttribute('dateTime', NOW)
   })
+  it('UI-MCP-001 shows the MCP endpoint built from the page origin, with a help link', async () => {
+    await renderServerInfo()
+
+    expect(screen.getByText(`${window.location.origin}/mcp`, { exact: true })).toBeInTheDocument()
+    const help = screen
+      .getAllByRole('link')
+      .find((link) => link.getAttribute('href')?.startsWith('/help/mcp'))
+    expect(help).toHaveAttribute('href', '/help/mcp#connect')
+  })
 })

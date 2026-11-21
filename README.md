@@ -802,6 +802,8 @@ probes and monitoring.
 | `PGLENS_COMMAND_TTL` | duration | `5m` | lifetime of an on-demand command before expiry |
 | `PGLENS_LANG` | language code | `en` | default language of the console, of the server texts it shows (advisor findings, readiness) and of alert notifications; `it`, `it-IT` and `IT_it` all select Italian, a code with no catalog falls back to English. Languages: `en`, `it` (see [Adding a language](#adding-a-language)) |
 | `PGLENS_TZ` | IANA zone | `UTC` | time zone of notification times and the console's default zone (for example `Europe/Rome`); an unknown zone logs a warning and stays UTC |
+| `PGLENS_MCP_ENABLED` | bool | `false` | serves the read-only [MCP server](#mcp-server) at `POST /mcp`; any value other than empty, `true` or `false` stops the server at start |
+| `PGLENS_MCP_ALLOWED_ORIGINS` | list | unset | comma-separated browser origins (`https://host[:port]`) allowed to call `/mcp` besides the server's own; requests without `Origin` are not affected |
 | `PGLENS_ALERT_SLACK_WEBHOOK_URL` | URL | unset | enables Slack notifications (preferred name) |
 | `PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` | path | unset | reads the Slack URL; takes precedence over the inline URL |
 | `PGLENS_SLACK_WEBHOOK_URL[_FILE]` | URL/path | unset | legacy Slack aliases, still accepted |
@@ -2381,6 +2383,93 @@ DELETE /api/v1/session
 The agent-only command poll and result routes are listed for operators
 debugging the pull channel; normal users enqueue commands through the instance
 route and read them through the command status route.
+
+## MCP server
+
+pglens can expose its data to an AI assistant through the
+[Model Context Protocol](https://modelcontextprotocol.io). The server answers
+JSON-RPC messages at `POST /mcp` (Streamable HTTP, protocol versions
+`2025-11-25` and `2025-06-18`) and offers one tool per read-only REST route.
+Every tool call is served by the REST route itself, in process, so the REST
+credential, validation and limits apply unchanged. No tool writes: there is no
+tool for silences, overrides, commands or settings.
+
+It is off by default. Set `PGLENS_MCP_ENABLED=true` to serve it; while it is
+off, `/mcp` answers 404. A browser-based client on another origin must be
+listed in `PGLENS_MCP_ALLOWED_ORIGINS` (a request with any other `Origin` gets
+403); desktop and command-line clients send no `Origin` and need nothing.
+
+**Credential.** The same one as the REST API: the server's bearer token
+(`PGLENS_BOOTSTRAP_TOKEN`) sent as `Authorization: Bearer <token>`, or a console
+session cookie. Without it every message gets 401 and no tool runs.
+
+**Client configuration.** Any client that speaks Streamable HTTP and can send a
+custom header works. A generic example:
+
+```json
+{
+  "mcpServers": {
+    "pglens": {
+      "type": "http",
+      "url": "https://pglens.example.com/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+The console shows the endpoint URL of the server it runs on in Settings ›
+Audit & server.
+
+**Tools.** Start with `pglens_list_instances`: the other tools take the
+instance ids it returns. Times are RFC 3339. `TestMCP014` checks this table
+against the registry (`internal/server/mcp_tools.go`).
+
+<!-- mcp-tools:begin -->
+| Tool | Title | REST route |
+|------|-------|------------|
+| `pglens_list_instances` | Instances | `GET /api/v1/instances` |
+| `pglens_get_instance` | Instance | `GET /api/v1/instances/{id}` |
+| `pglens_list_clusters` | Clusters | `GET /api/v1/clusters` |
+| `pglens_cluster_topology` | Cluster topology | `GET /api/v1/clusters/{id}/topology` |
+| `pglens_cluster_replication` | Replication history | `GET /api/v1/clusters/{id}/replication` |
+| `pglens_list_findings` | Advisor findings | `GET /api/v1/findings` |
+| `pglens_list_alerts` | Alerts | `GET /api/v1/alerts` |
+| `pglens_list_events` | Events | `GET /api/v1/events` |
+| `pglens_activity` | Active session history | `GET /api/v1/ash` |
+| `pglens_activity_top` | Top activity | `GET /api/v1/ash/top` |
+| `pglens_activity_compare` | Activity comparison | `GET /api/v1/ash/compare` |
+| `pglens_top_statements` | Top statements | `GET /api/v1/statements` |
+| `pglens_statements_compare` | Statements comparison | `GET /api/v1/statements/compare` |
+| `pglens_locks` | Locks | `GET /api/v1/locks` |
+| `pglens_query_plans` | Query plans | `GET /api/v1/plans` |
+| `pglens_plan_samples` | Plan samples | `GET /api/v1/plans/samples` |
+| `pglens_plan_stats` | Plan statistics | `GET /api/v1/plans/stats` |
+| `pglens_logs` | Logs | `GET /api/v1/logs` |
+| `pglens_log_classes` | Log classes | `GET /api/v1/logs/classes` |
+| `pglens_autovacuum_runs` | Autovacuum runs | `GET /api/v1/autovacuum/runs` |
+| `pglens_autovacuum_summary` | Autovacuum summary | `GET /api/v1/autovacuum/summary` |
+| `pglens_instance_tables` | Tables | `GET /api/v1/instances/{id}/tables` |
+| `pglens_instance_indexes` | Indexes | `GET /api/v1/instances/{id}/indexes` |
+| `pglens_index_suggestions` | Index suggestions | `GET /api/v1/instances/{id}/index-suggestions` |
+| `pglens_instance_bloat` | Bloat | `GET /api/v1/instances/{id}/bloat` |
+| `pglens_instance_settings` | Settings | `GET /api/v1/instances/{id}/settings` |
+| `pglens_instance_readiness` | Readiness | `GET /api/v1/instances/{id}/readiness` |
+| `pglens_instance_host` | Host metrics | `GET /api/v1/instances/{id}/host` |
+| `pglens_host_processes` | Host processes | `GET /api/v1/instances/{id}/host/processes` |
+| `pglens_metrics_query` | Metric series | `GET /api/v1/metrics/query` |
+<!-- mcp-tools:end -->
+
+**Limits.** Each message is answered with one JSON response: no streaming, no
+server-sent events, no session id, no prompts or resources, no tool-list change
+notifications. A message is at most 1 MiB. A tool result over 262 144 bytes is
+not sent: the call returns an error asking for a narrower time range or a lower
+limit.
+
+**Security.** The assistant sees everything the token can read: instance names
+and addresses, statement texts, plans (with parameters when collected), PostgreSQL
+log messages, host processes and settings. Use it only with an assistant you
+would show the console to, and send the credential only over HTTPS.
 
 ## Monitoring a replicated cluster
 

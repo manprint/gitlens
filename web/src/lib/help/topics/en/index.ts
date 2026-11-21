@@ -16,6 +16,7 @@ import { eventsTopic } from './events'
 import { alertRulesTopic } from './alert-rules'
 import { silencesTopic } from './silences'
 import { settingsTopic } from './settings'
+import { mcpTopic } from './mcp'
 
 // One import per chapter (not `import.meta.glob`: Vitest's module cache keeps a stale
 // glob when a file is added). HELP-008 checks that every catalog entry is here.
@@ -37,4 +38,5 @@ export const topics: readonly HelpTopic[] = [
   alertRulesTopic,
   silencesTopic,
   settingsTopic,
+  mcpTopic,
 ]

@@ -222,6 +222,13 @@ describe('Inline Help content', () => {
         lang,
       ).toEqual(HELP_CATALOG.map((entry) => entry.id))
   })
+
+  it('UI-MCP-002 the MCP chapter exists in en and it, with the same sections', () => {
+    const sections = (lang: HelpLang) =>
+      allSections(HELP[lang].find((topic) => topic.id === 'mcp')!).map((section) => section.id)
+    expect(sections('en')).toEqual(['overview', 'enable', 'connect', 'tools', 'limits', 'security'])
+    expect(sections('it')).toEqual(sections('en'))
+  })
 })
 
 describe('Inline Help helpers', () => {

@@ -125,6 +125,9 @@ export const settings = {
   'settings.server.refsTitle': 'References',
   'settings.server.refsLabel': 'Settings references',
   'settings.server.apiReference': 'API reference',
+  'settings.server.mcpEndpoint': 'MCP endpoint',
+  'settings.server.mcpEndpointNote':
+    'Off unless the server sets PGLENS_MCP_ENABLED=true; the credential is the server token.',
   'settings.limits.rawRetention.label': 'Raw retention',
   'settings.limits.rawRetention.detail':
     'Raw data is retained for 30 days by default (bloat estimates 90 days); the Data retention tab shows and sets the live value of each group of metrics. pglens keeps no summaries: data older than its retention is deleted, not condensed into a coarser history.',

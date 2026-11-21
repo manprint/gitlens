@@ -37,6 +37,8 @@ const NOT_EVENT_TYPES: ReadonlySet<string> = new Set([
   'constraint_type',
   'data_type',
   'link',
+  // MCP tool result content type (internal/mcp).
+  'text',
   'schemaname',
   'sequence',
   'subtype',

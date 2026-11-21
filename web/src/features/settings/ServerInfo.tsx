@@ -80,6 +80,18 @@ function SessionExpiry() {
   return <Unknown reason={t('settings.server.sessionUnknown')} />
 }
 
+function McpEndpoint() {
+  const t = useT()
+  return (
+    <p className="mt-3 flex flex-wrap items-center gap-2 text-sm" data-mcp-endpoint>
+      <span className="text-muted-foreground">{t('settings.server.mcpEndpoint')}</span>
+      <code className="font-mono">{`${window.location.origin}/mcp`}</code>
+      <HelpLink anchor="mcp#connect" label={t('settings.server.mcpEndpoint')} />
+      <span className="text-muted-foreground w-full">{t('settings.server.mcpEndpointNote')}</span>
+    </p>
+  )
+}
+
 export function ServerInfo() {
   const t = useT()
   return (
@@ -176,6 +188,7 @@ export function ServerInfo() {
               {t('shell.nav.silences')}
             </Link>
           </nav>
+          <McpEndpoint />
         </Section>
       </div>
     </div>

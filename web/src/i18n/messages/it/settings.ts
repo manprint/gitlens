@@ -131,6 +131,9 @@ export const settings: Translation<typeof english> = {
   'settings.server.refsTitle': 'Riferimenti',
   'settings.server.refsLabel': 'Riferimenti delle impostazioni',
   'settings.server.apiReference': 'Riferimento API',
+  'settings.server.mcpEndpoint': 'Endpoint MCP',
+  'settings.server.mcpEndpointNote':
+    'Spento finché il server non imposta PGLENS_MCP_ENABLED=true; la credenziale è il token del server.',
   'settings.limits.rawRetention.label': 'Conservazione dei dati grezzi',
   'settings.limits.rawRetention.detail':
     'I dati grezzi si conservano per 30 giorni per impostazione predefinita (le stime di bloat per 90 giorni); la scheda Conservazione dati mostra e imposta il valore attivo di ogni gruppo di metriche. pglens non conserva riepiloghi: i dati più vecchi della loro conservazione vengono eliminati, non condensati in una storia più sintetica.',

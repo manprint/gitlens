@@ -11,7 +11,7 @@ import (
 // named, typed and enumerated exactly as in api/openapi.yaml.
 type mcpArg struct {
 	name     string
-	typ      string
+	kind     string
 	desc     string
 	enum     []string
 	required bool
@@ -28,7 +28,7 @@ var (
 	mcpStatementOrderBy = []string{"calls", "calls_rate", "total_calls", "total_exec_time", "total_exec_time_ms", "exec_time", "total_time", "total_rows", "rows", "rows_rate", "shared_blks_hit", "shared_blks_hit_rate", "shared_blks_read", "shared_blks_read_rate", "wal_bytes", "wal_bytes_rate", "temp_blks_written", "temp_blks_written_rate", "mean_exec_time", "mean_time"}
 )
 
-func mcpStr(name, desc string) mcpArg       { return mcpArg{name: name, typ: "string", desc: desc} }
+func mcpStr(name, desc string) mcpArg       { return mcpArg{name: name, kind: "string", desc: desc} }
 func mcpNeed(a mcpArg) mcpArg               { a.required = true; return a }
 func mcpChoice(a mcpArg, e []string) mcpArg { a.enum = e; return a }
 
@@ -39,7 +39,7 @@ var (
 	mcpArgPathClus   = mcpNeed(mcpStr("id", "Cluster id, from pglens_list_clusters."))
 	mcpArgFrom       = mcpStr("from", "Start of the time range, RFC 3339.")
 	mcpArgTo         = mcpStr("to", "End of the time range, RFC 3339.")
-	mcpArgLimit      = mcpArg{name: "limit", typ: "integer", desc: "Maximum number of rows returned."}
+	mcpArgLimit      = mcpArg{name: "limit", kind: "integer", desc: "Maximum number of rows returned."}
 	mcpArgDatabase   = mcpStr("database", "Database name.")
 	mcpArgQueryID    = mcpStr("queryid", "Statement queryid (signed 64-bit integer as text).")
 	mcpArgAFrom      = mcpNeed(mcpStr("a_from", "Start of the first range, RFC 3339."))
@@ -105,7 +105,7 @@ var mcpToolSpecs = []mcpToolSpec{
 	}},
 	{"pglens_plan_samples", "Plan samples", "Returns sampled plans of one statement over a time range; parameters only when asked and when collected.", "/api/v1/plans/samples", []mcpArg{
 		mcpNeed(mcpArgInstanceID), mcpNeed(mcpArgQueryID), mcpArgDatabase, mcpStr("plan_hash", "Plan hash."), mcpStr("trace_id", "Trace id."), mcpArgFrom, mcpArgTo, mcpArgLimit,
-		{name: "include_parameters", typ: "boolean", desc: "Include the bind parameters of each sample."},
+		{name: "include_parameters", kind: "boolean", desc: "Include the bind parameters of each sample."},
 	}},
 	{"pglens_plan_stats", "Plan statistics", "Returns per-plan statistics of one statement over a time range.", "/api/v1/plans/stats", []mcpArg{
 		mcpNeed(mcpArgInstanceID), mcpNeed(mcpArgQueryID), mcpArgDatabase, mcpArgFrom, mcpArgTo,
@@ -151,7 +151,7 @@ func mcpTools() []mcp.Tool {
 		required := []string{}
 		tool := mcp.Tool{Name: spec.name, Title: spec.title, Description: spec.desc, Path: spec.path}
 		for _, a := range spec.args {
-			p := map[string]any{"type": a.typ, "description": a.desc}
+			p := map[string]any{"type": a.kind, "description": a.desc}
 			if len(a.enum) > 0 {
 				p["enum"] = a.enum
 			}
