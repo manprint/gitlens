@@ -40,6 +40,56 @@ type notificationKind struct {
 	url func(AlertConfig) string
 	// build makes the channel of an address, as the alert path does.
 	build func(address string) notify.Channel
+	// validate answers why an address set from the console is refused; nil
+	// means validateWebhookURL. Its error never quotes the address.
+	validate func(address string) error
+	// host is what the API and the log show of an address instead of it
+	// (I-7); nil means the URL's host name.
+	host func(address string) string
+	// available answers why the kind cannot be set now; the error is the
+	// API's error code of a 409. nil means always available.
+	available func() error
+}
+
+// problem is why address is refused for the kind, "" when it is accepted.
+func (k notificationKind) problem(address string) string {
+	if k.validate == nil {
+		return validateWebhookURL(address)
+	}
+	if err := k.validate(address); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// shownHost is what the API shows of address, nil without one.
+func (k notificationKind) shownHost(address string) *string {
+	if k.host == nil {
+		return webhookHost(address)
+	}
+	if address == "" {
+		return nil
+	}
+	if h := k.host(address); h != "" {
+		return &h
+	}
+	return nil
+}
+
+// logHost is shownHost for a log line, "none" without one.
+func (k notificationKind) logHost(address string) string {
+	if h := k.shownHost(address); h != nil {
+		return *h
+	}
+	return "none"
+}
+
+// unavailable is why the kind cannot be set now, nil when it can.
+func (k notificationKind) unavailable() error {
+	if k.available == nil {
+		return nil
+	}
+	return k.available()
 }
 
 // notificationKinds is the whitelist of the kinds, in the order the API lists
@@ -60,6 +110,20 @@ var notificationKinds = []notificationKind{
 		url:   func(c AlertConfig) string { return c.GoogleChatURL },
 		build: func(address string) notify.Channel { return notify.NewGoogleChat(address, notificationHTTPClient) },
 	},
+	{
+		Kind:  "teams",
+		url:   func(c AlertConfig) string { return c.TeamsURL },
+		build: func(address string) notify.Channel { return notify.NewTeams(address, notificationHTTPClient) },
+	},
+}
+
+// notificationKindNames lists the kinds for an error detail.
+func notificationKindNames() string {
+	names := make([]string, len(notificationKinds))
+	for i, k := range notificationKinds {
+		names[i] = k.Kind
+	}
+	return strings.Join(names, ", ")
 }
 
 // notificationHTTPClient is the HTTP client of every notification channel, from
@@ -233,12 +297,16 @@ func (a *API) LoadNotificationChannels(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		if detail := validateWebhookURL(address); detail != "" {
+		if err := k.unavailable(); err != nil {
+			log.Printf("notifications: ignoring the address of %s stored from the console: %v", k.Kind, err)
+			continue
+		}
+		if detail := k.problem(address); detail != "" {
 			log.Printf("notifications: ignoring the URL of %s stored from the console: %s", k.Kind, detail)
 			continue
 		}
 		n.apply(k, address)
-		log.Printf("notifications: notification channel %s uses the URL stored from the console; host %s", k.Kind, hostForLog(address))
+		log.Printf("notifications: notification channel %s uses the URL stored from the console; host %s", k.Kind, k.logHost(address))
 	}
 	return a.loadNotificationLanguages(ctx)
 }
@@ -390,10 +458,10 @@ func (n *notificationChannels) row(k notificationKind) notificationChannelJSON {
 		language = &code
 	}
 	if ok {
-		return notificationChannelJSON{Kind: k.Kind, Configured: true, Source: "ui", Host: webhookHost(stored), Language: language}
+		return notificationChannelJSON{Kind: k.Kind, Configured: true, Source: "ui", Host: k.shownHost(stored), Language: language}
 	}
 	address := k.url(n.cfg)
-	return notificationChannelJSON{Kind: k.Kind, Configured: address != "", Source: "env", Host: webhookHost(address), Language: language}
+	return notificationChannelJSON{Kind: k.Kind, Configured: address != "", Source: "env", Host: k.shownHost(address), Language: language}
 }
 
 type notificationChannelJSON struct {
@@ -438,14 +506,6 @@ func webhookHost(raw string) *string {
 	return &host
 }
 
-// hostForLog is the host of an address for a log line, "none" without one.
-func hostForLog(address string) string {
-	if host := webhookHost(address); host != nil {
-		return *host
-	}
-	return "none"
-}
-
 func (a *API) handleGetNotificationChannels(w http.ResponseWriter, _ *http.Request) {
 	n := a.notificationState()
 	out := make([]notificationChannelJSON, 0, len(notificationKinds))
@@ -458,7 +518,7 @@ func (a *API) handleGetNotificationChannels(w http.ResponseWriter, _ *http.Reque
 func (a *API) handleTestNotificationChannel(w http.ResponseWriter, r *http.Request) {
 	k, ok := lookupNotificationKind(chi.URLParam(r, "kind"))
 	if !ok {
-		writeError(w, http.StatusNotFound, "unknown channel", "the channel kinds are slack, webhook and google_chat")
+		writeError(w, http.StatusNotFound, "unknown channel", "the channel kinds are "+notificationKindNames())
 		return
 	}
 	n := a.notificationState()
@@ -626,7 +686,7 @@ type notificationChannelBody struct {
 func (a *API) handleSetNotificationChannel(w http.ResponseWriter, r *http.Request) {
 	k, ok := lookupNotificationKind(chi.URLParam(r, "kind"))
 	if !ok {
-		writeError(w, http.StatusNotFound, "unknown channel", "the channel kinds are slack, webhook and google_chat")
+		writeError(w, http.StatusNotFound, "unknown channel", "the channel kinds are "+notificationKindNames())
 		return
 	}
 	var in notificationChannelBody
@@ -637,8 +697,12 @@ func (a *API) handleSetNotificationChannel(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid url", "url is required and must be a string")
 		return
 	}
+	if err := k.unavailable(); err != nil {
+		writeError(w, http.StatusConflict, err.Error(), "")
+		return
+	}
 	address := *in.URL
-	if detail := validateWebhookURL(address); detail != "" {
+	if detail := k.problem(address); detail != "" {
 		writeError(w, http.StatusBadRequest, "invalid url", detail)
 		return
 	}
@@ -663,7 +727,7 @@ func (a *API) handleSetNotificationChannel(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusServiceUnavailable, "store unavailable", n.redact(err, address).Error())
 		return
 	}
-	log.Printf("notifications: notification channel %s set from the console by %s; host %s", k.Kind, requester, hostForLog(address))
+	log.Printf("notifications: notification channel %s set from the console by %s; host %s", k.Kind, requester, k.logHost(address))
 	writeJSON(w, http.StatusOK, n.row(k))
 }
 
@@ -673,7 +737,7 @@ func (a *API) handleSetNotificationChannel(w http.ResponseWriter, r *http.Reques
 func (a *API) handleDeleteNotificationChannel(w http.ResponseWriter, r *http.Request) {
 	k, ok := lookupNotificationKind(chi.URLParam(r, "kind"))
 	if !ok {
-		writeError(w, http.StatusNotFound, "unknown channel", "the channel kinds are slack, webhook and google_chat")
+		writeError(w, http.StatusNotFound, "unknown channel", "the channel kinds are "+notificationKindNames())
 		return
 	}
 	st := a.notificationChannelStore()

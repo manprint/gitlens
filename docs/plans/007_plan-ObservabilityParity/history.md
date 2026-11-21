@@ -47,3 +47,6 @@ Gates: G-WEB-UNIT testIds + ash 8 files 64 tests; prettier; review: self-review 
 
 ## 2026-11-21 P2/2 complete unit:P2:2
 Gates: G-GO-FULL 35 ok; G-GO-INT TestINTASHD001-004 (001 on PG15 and PG18) and old ASH integration tests; G-RO; G-API no diff; G-I18N 48; G-WEB-FULL typecheck/lint/budget (attempt 1) and coverage gate 227 files/2038 tests (attempt 2); review: self-review (agent:opus) accepted; changes: none (closure); notes: attempt 1 failed on duplicate UI-ASHD test IDs, fixed by 2.5 attempt 2; review: I-1 the sampler only adds SELECT columns and G-RO is green; I-2 TestASHD003 keeps the sample total under the key cap; I-5 locale parity green; old ASH tests only had mechanical row() call rewrites, assertions unchanged; README covers 2.2 and 2.5
+
+## 2026-11-21 3.1/1 complete unit:3.1:1
+Gates: G-GO-FOCUS notify/server/cmd (race, shuffle); G-GO-INT TestINTNCH001 + NOTIINT; store migration tests incl. NCH-MIG-001; lint 0 issues; review: self-review (agent:opus) accepted; changes: notify.NewTeams (R2 Adaptive Card), Teams hosts redacted; notificationKind validate/host/available hooks with problem/shownHost/logHost/unavailable; teams kind, PGLENS_TEAMS_WEBHOOK_URL(_FILE), buildChannels; migration 0034; notes: A6, A7

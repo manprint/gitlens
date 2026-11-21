@@ -168,7 +168,8 @@ func TestNOTI006_SetValidURL(t *testing.T) {
 	require.JSONEq(t, `[
 		{"kind":"slack","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"webhook","configured":true,"source":"ui","host":"hooks.stored.example","language":null},
-		{"kind":"google_chat","configured":true,"source":"ui","host":"chat.googleapis.com","language":null}
+		{"kind":"google_chat","configured":true,"source":"ui","host":"chat.googleapis.com","language":null},
+		{"kind":"teams","configured":false,"source":"env","host":null,"language":null}
 	]`, listing.Body.String())
 
 	// The store is down: nothing changes, and the error that quotes the

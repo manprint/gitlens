@@ -16,6 +16,7 @@ func buildChannels(cfg server.AlertConfig) []notify.Channel {
 		{"slack", cfg.SlackURL},
 		{"webhook", cfg.WebhookURL},
 		{"google_chat", cfg.GoogleChatURL},
+		{"teams", cfg.TeamsURL},
 	} {
 		if kind.address != "" {
 			channels = append(channels, server.NewNotificationChannel(kind.name, kind.address))

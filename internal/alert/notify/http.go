@@ -72,7 +72,7 @@ func redactError(err error, url string) error {
 	if url != "" {
 		msg = strings.ReplaceAll(msg, url, "[redacted webhook]")
 	}
-	for _, host := range []string{"hooks.slack.com/", "chat.googleapis.com/"} {
+	for _, host := range []string{"hooks.slack.com/", "chat.googleapis.com/", "webhook.office.com/", "logic.azure.com", "api.powerplatform.com"} {
 		msg = redactHost(msg, host)
 	}
 	return fmt.Errorf("%s", msg)

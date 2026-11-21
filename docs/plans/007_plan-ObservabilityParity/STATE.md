@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:27 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:32 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD a6674d7513d14a5f19085d0665f37d504258e0a4 + tree b14b2e02304f9b29a5531d22d4b905d62e426fb8 · branch main · last WIP tree none
-- Last closure: unit:P2:2
-- Next: open 3.1 · next eligible: 3.1
+- Base: HEAD cf25cd8d24d41108b61fb9d3da9daf13bce6a1b5 + tree 06a4f9d8eed904f20017208951e6f2100fe74227 · branch main · last WIP tree none
+- Last closure: unit:3.1:1
+- Next: open 3.2 · next eligible: 3.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-P2: none (closure)
+none
 
 ## 6. Checkpoint
 none
@@ -60,6 +60,8 @@ none
 - A4 (autonomous, 2026-11-21 07:30 UTC): plan-007 units edit files that the uncommitted plan 006 created (untracked locale catalogs, help topics, `findingCheck.ts`, …), so no unit commit could hold them without capturing plan-006 content (§6 safety stop). Options: stop and ask; leave those edits uncommitted; commit the plan-006 tree separately first. Plan 006 is complete and live (dev-20261121b), no other session writes, and the plan recommended this commit (D20). Chosen: separate commit bf38f97 `chore(006): record plan 006 I18n work …` = HEAD + baseline snapshot 1d7158a without plan 007, without `web/src/**/node_modules/`, `internal/webui/dist/index.html`, `BUGFIX_ENHANCEMENTS_20_11_2026.md` (528 paths, includes the previously staged SuggestionsPanel deletions). Local only, no push; reverse with an interactive history edit dropping bf38f97 (content stays identical in the working tree). A1 is moot from here: the index is clean.
 - A3 (autonomous): G-WEB-FULL substitution for B1. Retired at P1 (2026-11-21): with plan 006 committed (A4) `make web-lint` is green again, so G-WEB-FULL runs as registered.
 - A5 (autonomous, 2026-11-21, unit 2.5): the console had no group-by control, only the wait drill path. Options: add the dimensions as drill levels; one Group by control with the wait drill path as one choice plus the three dimensions. Chosen: the control; selecting a dimension value sets its filter (chip, URL `usename=`/`client_addr=`/`application_name=`) and returns to wait event types, so the drill continues on those sessions. Dimension groups always stack (wait-group cards do not apply).
+- A6 (autonomous, 2026-11-21, unit 3.1): R2 asks for "the same localized texts as Google Chat", which has no localized fact titles. Chosen: with a detail the Teams title and facts are the detail's (already in the channel's language), its sections and footer the monospace block; without one the title is the upper-case severity and the facts are the English Cluster/Instance/Database/Severity/Time, as the chat channels' fallback. Empty facts and an empty FactSet are left out.
+- A7 (autonomous, 2026-11-21, unit 3.1): the database refused the new kinds (check constraint of 0028/0031) and the plan had no migration in phase 3. Chosen: migration 0034_notification_kinds widens both checks to the six kinds at once (test NCH-MIG-001). Existing tests that list every kind gain the new rows; tests that used `teams` or `email` as an unknown kind now use `sms`; no other assertion changed.
 
 ## 9. Blockers
 none
@@ -73,7 +75,11 @@ none
 | 0 Baseline and test images | DONE | 1 | 0.1–0.2 | unit:P0:1 |
 | 1 Multixact wraparound rule | DONE | 1 | 1.1–1.3 | unit:P1:1 |
 | 2 ASH dimensions | DONE | 2 | 2.1–2.5 | unit:P2:2 |
-| 3 Notification channels | TODO | 1 | 3.1–3.4 | — |
+| 3 Notification channels | IN_PROGRESS | 1 | 3.1–3.4 | — |
+| · 3.1 Kind hooks and the Teams channel | DONE | 1 | — | unit:3.1:1 |
+| · 3.2 PagerDuty channel | TODO | 1 | — | — |
+| · 3.3 Email channel | TODO | 1 | — | — |
+| · 3.4 OpenAPI, console, help, README | TODO | 1 | — | — |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |
 | 6 Log ingest | TODO | 1 | 6.1–6.6 | — |

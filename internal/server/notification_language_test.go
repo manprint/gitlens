@@ -75,7 +75,7 @@ func TestNOTI013_ChannelLanguage(t *testing.T) {
 		"unknown language": {"/api/v1/notification-channels/slack/language", `{"language":"xx"}`, http.StatusBadRequest},
 		"empty language":   {"/api/v1/notification-channels/slack/language", `{"language":""}`, http.StatusBadRequest},
 		"unknown field":    {"/api/v1/notification-channels/slack/language", `{"language":"it","locale":"it"}`, http.StatusBadRequest},
-		"unknown kind":     {"/api/v1/notification-channels/teams/language", `{"language":"it"}`, http.StatusNotFound},
+		"unknown kind":     {"/api/v1/notification-channels/sms/language", `{"language":"it"}`, http.StatusNotFound},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := retentionRequest(t, api, http.MethodPut, tc.path, tc.body)

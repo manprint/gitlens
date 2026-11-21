@@ -252,10 +252,32 @@ func TestMigrateNOTIMIGINT001_NotificationChannels(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT tenant_id, updated_at FROM notification_channels WHERE kind = 'google_chat'`).Scan(&tenant, &updated))
 	require.Equal(t, "default", tenant)
 	require.False(t, updated.IsZero())
-	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url, updated_by) VALUES ('email', 'https://mail.example', 'api-token')`)
-	require.Error(t, err, "only the three channel kinds")
+	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url, updated_by) VALUES ('sms', 'https://sms.example', 'api-token')`)
+	require.Error(t, err, "only the channel kinds")
 	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url) VALUES ('slack', 'https://hooks.example')`)
 	require.Error(t, err, "updated_by is required")
+}
+
+// NCH-MIG-001 (plan 007 phase 3): 0034 lets both notification tables name
+// teams, pagerduty and email, still refuses any other kind, and applies again
+// over itself.
+func TestMigrateNCHMIG001_NotificationKinds(t *testing.T) {
+	ctx, _, pool := newMigrationTestPool(t)
+	require.NoError(t, Migrate(ctx, pool))
+	data, err := migrationFS.ReadFile("migrations/0034_notification_kinds.sql")
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, string(data))
+	require.NoError(t, err, "re-apply 0034")
+	for _, kind := range []string{"teams", "pagerduty", "email"} {
+		_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url, updated_by) VALUES ($1, 'x', 'api-token')`, kind)
+		require.NoError(t, err, kind)
+		_, err = pool.Exec(ctx, `INSERT INTO notification_channel_languages (kind, language, updated_by) VALUES ($1, 'it', 'api-token')`, kind)
+		require.NoError(t, err, kind)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url, updated_by) VALUES ('sms', 'x', 'api-token')`)
+	require.Error(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO notification_channel_languages (kind, language, updated_by) VALUES ('sms', 'it', 'api-token')`)
+	require.Error(t, err)
 }
 
 // INT-MXW-002: after migration the multixact rule row exists once, and

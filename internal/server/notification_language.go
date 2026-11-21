@@ -100,7 +100,7 @@ type notificationLanguageBody struct {
 func (a *API) handleSetNotificationLanguage(w http.ResponseWriter, r *http.Request) {
 	k, ok := lookupNotificationKind(chi.URLParam(r, "kind"))
 	if !ok {
-		writeError(w, http.StatusNotFound, "unknown channel", "the channel kinds are slack, webhook and google_chat")
+		writeError(w, http.StatusNotFound, "unknown channel", "the channel kinds are "+notificationKindNames())
 		return
 	}
 	var in notificationLanguageBody

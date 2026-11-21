@@ -110,7 +110,8 @@ func TestNOTI001_EnvConfiguredChannelsShowHostOnly(t *testing.T) {
 	require.JSONEq(t, `[
 		{"kind":"slack","configured":true,"source":"env","host":"hooks.slack.com","language":null},
 		{"kind":"webhook","configured":true,"source":"env","host":"alerts.canary.example","language":null},
-		{"kind":"google_chat","configured":true,"source":"env","host":"chat.googleapis.com","language":null}
+		{"kind":"google_chat","configured":true,"source":"env","host":"chat.googleapis.com","language":null},
+		{"kind":"teams","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 
 	// The host is the host name only: no port, user information or path.
@@ -131,7 +132,8 @@ func TestNOTI002_UnconfiguredChannels(t *testing.T) {
 	require.JSONEq(t, `[
 		{"kind":"slack","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"webhook","configured":false,"source":"env","host":null,"language":null},
-		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"teams","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 
 	api := NewAPI(nil)
@@ -365,7 +367,7 @@ func TestNOTI004_NoAddressInResponsesOrLogs(t *testing.T) {
 	}
 	bodies = append(bodies, transportBodies...)
 
-	require.Len(t, bodies, 13)
+	require.Len(t, bodies, 7+2*len(notificationKinds))
 	output := logged.String()
 	require.Contains(t, output, "notifications: test of google_chat by ui-session")
 	require.Contains(t, output, "[redacted webhook]")

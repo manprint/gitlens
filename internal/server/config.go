@@ -15,6 +15,9 @@ type AlertConfig struct {
 	// GoogleChatURL is a Google Chat incoming-webhook URL; it carries its key
 	// and token in the query string, so it is a secret like the Slack URL.
 	GoogleChatURL string
+	// TeamsURL is a Microsoft Teams workflow URL; its sig parameter signs
+	// the request, so it is a secret like the Slack URL.
+	TeamsURL string
 }
 
 type UIConfig struct {
@@ -114,6 +117,14 @@ func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, 
 			return AlertConfig{}, fmt.Errorf("read Google Chat webhook file: %w", err)
 		}
 		c.GoogleChatURL = strings.TrimSpace(string(b))
+	}
+	c.TeamsURL = strings.TrimSpace(getenv("PGLENS_TEAMS_WEBHOOK_URL"))
+	if p := strings.TrimSpace(getenv("PGLENS_TEAMS_WEBHOOK_URL_FILE")); p != "" {
+		b, err := readFile(p)
+		if err != nil {
+			return AlertConfig{}, fmt.Errorf("read Teams webhook file: %w", err)
+		}
+		c.TeamsURL = strings.TrimSpace(string(b))
 	}
 	return c, nil
 }

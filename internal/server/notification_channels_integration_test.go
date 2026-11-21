@@ -4,8 +4,12 @@ package server
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -114,4 +118,43 @@ func TestNOTIINT002_ChannelLanguagePersists(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM notification_channel_languages`).Scan(&rows))
 	require.Zero(t, rows)
 	require.Equal(t, "", envAPI(t, pool, cfg).notificationState().slots["slack"].Locale())
+}
+
+// NCH-INT-001: a Teams URL stored through the API on a migrated database is
+// loaded by a fresh wiring of the server, and a firing alert reaches it as an
+// Adaptive Card.
+func TestINTNCH001_StoredTeamsChannelDelivers(t *testing.T) {
+	pool := getSharedPool(t)
+	cleanNotificationChannels(t, pool)
+	t.Cleanup(func() { cleanNotificationChannels(t, pool) })
+
+	var (
+		mu     sync.Mutex
+		bodies []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+
+	api := envAPI(t, pool, AlertConfig{})
+	rec := retentionRequest(t, api, http.MethodPut, "/api/v1/notification-channels/teams", urlBody(t, srv.URL+"/workflows/x"))
+	require.Equal(t, "ui", decodeChannelRow(t, rec).Source)
+
+	restarted := envAPI(t, pool, AlertConfig{})
+	slot := restarted.notificationState().slots["teams"]
+	require.True(t, notify.Configured(slot))
+	require.NoError(t, slot.Send(context.Background(), notify.Message{
+		DedupID: "d1", RuleID: "replication_lag", Severity: "critical", Phase: "firing",
+		Summary: "replication lag high", Cluster: "c1", Instance: "i1", At: time.Now(),
+	}))
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, bodies, 1)
+	require.Contains(t, bodies[0], `"AdaptiveCard"`)
+	require.Contains(t, bodies[0], "replication lag high")
 }

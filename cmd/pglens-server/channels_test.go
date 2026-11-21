@@ -58,9 +58,9 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 	api := server.NewAPI(nil)
 	channels := wireNotificationChannels(context.Background(), api, server.AlertConfig{WebhookURL: srv.URL + "/hook"})
 	// One slot per kind; only the webhook's holds a channel.
-	require.Len(t, channels, 3)
-	require.Equal(t, []string{"slack", "webhook", "google_chat"}, []string{channels[0].Name(), channels[1].Name(), channels[2].Name()})
-	require.Equal(t, []bool{false, true, false}, []bool{notify.Configured(channels[0]), notify.Configured(channels[1]), notify.Configured(channels[2])})
+	require.Len(t, channels, 4)
+	require.Equal(t, []string{"slack", "webhook", "google_chat", "teams"}, []string{channels[0].Name(), channels[1].Name(), channels[2].Name(), channels[3].Name()})
+	require.Equal(t, []bool{false, true, false, false}, []bool{notify.Configured(channels[0]), notify.Configured(channels[1]), notify.Configured(channels[2]), notify.Configured(channels[3])})
 
 	r := chi.NewRouter()
 	api.RegisterRoutes(r)
@@ -82,7 +82,8 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 	require.JSONEq(t, `[
 		{"kind":"slack","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"webhook","configured":true,"source":"env","host":"127.0.0.1","language":null},
-		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"teams","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 }
 
@@ -119,4 +120,9 @@ func TestNotificationChannelWiringKeepsTheEnvironmentWhenTheStoreFails(t *testin
 	for _, secret := range []string{address, "canaryStartPath0501", "canaryStartTok0502"} {
 		require.False(t, strings.Contains(logged, secret), "the log holds %q", secret)
 	}
+}
+
+// NCH-004 (wiring): the environment's Teams URL builds a teams channel.
+func TestNCH004_TeamsChannelFromTheEnvironment(t *testing.T) {
+	require.Equal(t, []string{"teams"}, channelNames(server.AlertConfig{TeamsURL: "https://teams.example/x"}))
 }
