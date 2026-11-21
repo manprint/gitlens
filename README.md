@@ -515,6 +515,28 @@ hour. An older agent only reports some index
 definitions: the response then carries a note saying an existing index may be
 suggested again.
 
+##### Validating an index suggestion
+
+An expanded suggestion has a **Validate with hypopg** button (tier T1, like
+EXPLAIN; disabled with the reason below T1). It enqueues an `index_check`
+command for the suggestion's heaviest statement with the key's schema, table
+and columns. The agent opens a read-only transaction, costs the statement
+(generic plan on PostgreSQL 16+, a recent execution sample before), creates a
+hypothetical index with `hypopg_create_index` in its own session, costs it
+again, resets hypopg and rolls back: nothing is created on the database and no
+lock is taken on the table. The result shows "Planner would use it" or
+"Planner would not use it", the planner cost before and after with their
+ratio (planner units, not milliseconds), the size hypopg estimates and the
+time of the validation; a key with a descending column is costed in ascending
+order and marked approximate. The server keeps the newest result per database,
+statement and key (`index_validations`, migration 0040) and returns it as the
+suggestion's `validation` field, so it shows again on the next visit.
+The `hypopg` extension must be installed in the database by its owner
+(`CREATE EXTENSION hypopg;`); pglens never installs it, and without it the
+command fails with `hypopg_missing` and the console says which database needs
+it. An agent older than this command answers `unknown command kind`, shown as
+the failure.
+
 The page's Search everything panel searches all that pglens collected for the
 server in the selected range (`GET /api/v1/instances/{id}/search`), grouped as Indexes,
 Tables, Columns and Queries, with at most 50 matches per group and the total

@@ -390,6 +390,39 @@ export const indexesTopic: HelpTopic = {
           ],
         },
         {
+          id: 'missing-validate',
+          title: 'Validating a suggestion with hypopg',
+          blocks: [
+            {
+              kind: 'text',
+              text: '{{ui:indexes.missing.validate.button}} asks the agent to cost the heaviest statement of the suggestion twice: as it is, and with a hypothetical index on the suggested key created by the `hypopg` extension. The hypothetical index lives only in the agent session, inside a read-only transaction that is rolled back; nothing is created on the database and no lock is taken on the table.',
+            },
+            {
+              kind: 'terms',
+              items: [
+                {
+                  term: '{{ui:indexes.lib.validation.wouldUse}}',
+                  meaning:
+                    'The plan with the hypothetical index scans it. {{ui:indexes.lib.validation.wouldNotUse}} means the planner still prefers another path: the index would cost writes without helping this statement.',
+                },
+                {
+                  term: '{{ui:indexes.missing.validate.cost}}',
+                  meaning:
+                    'Planner total cost before and after, in planner units (not milliseconds), with their ratio. A generic plan is used on PostgreSQL 16 and later, a recent execution sample before.',
+                },
+                {
+                  term: '{{ui:indexes.missing.validate.size}}',
+                  meaning: 'The size hypopg estimates for the index.',
+                },
+              ],
+            },
+            {
+              kind: 'text',
+              text: 'It needs tier T1 and the extension in the database: `CREATE EXTENSION hypopg;` (pglens never installs it). A key with a descending column is costed in ascending order, so the result is marked approximate. The last result is kept and shown again on the suggestion.',
+            },
+          ],
+        },
+        {
           id: 'missing-foreign-keys',
           title: 'Source: foreign keys',
           blocks: [

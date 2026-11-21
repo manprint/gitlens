@@ -192,3 +192,92 @@ export function compareSuggestions(
 export function statementLink(instanceId: string, queryid: string): string {
   return `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(queryid)}`
 }
+
+export type IndexValidation = NonNullable<IndexSuggestion['validation']>
+
+/** The arguments of the index_check command for a suggestion: its key and its heaviest statement. */
+export function indexCheckArgs(row: IndexSuggestion) {
+  const top = row.statements.reduce<IndexSuggestion['statements'][number] | undefined>(
+    (best, statement) =>
+      best === undefined || statement.share_pct > best.share_pct ? statement : best,
+    undefined,
+  )
+  if (top === undefined) return null
+  return {
+    queryid: top.queryid,
+    datname: row.database,
+    index_schema: row.schema,
+    index_relation: row.table,
+    index_columns: row.columns.map((column) => column.name),
+    index_include: [] as string[],
+  }
+}
+
+function numberField(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/**
+ * The validation shown after a finished index_check command, in the shape the
+ * suggestions endpoint stores. Null when the result is not an index_check result.
+ */
+export function validationFromResult(
+  result: unknown,
+  queryid: string,
+  validatedAt: string,
+  approximate: boolean,
+): IndexValidation | null {
+  if (typeof result !== 'object' || result === null) return null
+  const record = result as Record<string, unknown>
+  const before = numberField(record.cost_before)
+  const after = numberField(record.cost_after)
+  if (before === null || after === null || typeof record.index_used !== 'boolean') return null
+  return {
+    queryid,
+    index_used: record.index_used,
+    cost_before: before,
+    cost_after: after,
+    cost_ratio: before > 0 ? after / before : null,
+    index_size_bytes: numberField(record.index_size_bytes),
+    validated_at: validatedAt,
+    approximate,
+  }
+}
+
+/** Whether a key has a descending column: hypopg validates the ascending order. */
+export function validationApproximate(row: IndexSuggestion): boolean {
+  return row.columns.some((column) => column.desc)
+}
+
+export function validationVerdict(validation: IndexValidation): string {
+  return translate(
+    validation.index_used
+      ? 'indexes.lib.validation.wouldUse'
+      : 'indexes.lib.validation.wouldNotUse',
+  )
+}
+
+export function validationCostText(validation: IndexValidation): string {
+  const costs = translate('indexes.lib.validation.costs', {
+    before: formatDecimal(validation.cost_before, 1),
+    after: formatDecimal(validation.cost_after, 1),
+  })
+  return validation.cost_ratio === null
+    ? costs
+    : `${costs} ${translate('indexes.lib.validation.ratio', { ratio: formatDecimal(validation.cost_ratio, 2) })}`
+}
+
+export function validationSizeText(validation: IndexValidation): string {
+  return validation.index_size_bytes === null ? '—' : formatBytes(validation.index_size_bytes)
+}
+
+/**
+ * The text for a failed index_check: the install hint when hypopg is missing,
+ * else the agent's error.
+ */
+export function validationErrorText(error: string | null | undefined, database: string): string {
+  if (error?.startsWith('hypopg_missing:')) {
+    return translate('indexes.lib.validation.hypopgMissing', { database })
+  }
+  return error ?? ''
+}

@@ -516,6 +516,26 @@ export const indexes: Translation<typeof english> = {
     'I suggerimenti sono stime dalle statistiche degli statement; pglens non crea mai un indice.',
   'indexes.lib.suggestions.verdictRule':
     'Il verdetto è il rapporto letture/scritture della tabella: chiamate al secondo degli statement che usano la chiave diviso le modifiche di righe al secondo che devono toccare un indice (insert, delete e update non heap-only). 10 o più è Forte, 1 o più è Moderato, sotto 1 è Più scritture. Una tabella senza scritture sugli indici non è mai Più scritture: almeno Moderato.',
+  'indexes.lib.validation.wouldUse': 'Il planner lo userebbe',
+  'indexes.lib.validation.wouldNotUse': 'Il planner non lo userebbe',
+  'indexes.lib.validation.costs': '{before} → {after}',
+  'indexes.lib.validation.ratio': '(×{ratio})',
+  'indexes.lib.validation.hypopgMissing':
+    "Installa l'estensione hypopg nel database {database} per validare i suggerimenti (CREATE EXTENSION hypopg).",
+  'indexes.missing.validate.title': 'Validazione con hypopg',
+  'indexes.missing.validate.button': 'Valida con hypopg',
+  'indexes.missing.validate.intro':
+    "L'agente calcola il costo dello statement più pesante ({queryid}) con un indice ipotetico che esiste solo nella sua sessione. Sul database non viene creato nulla.",
+  'indexes.missing.validate.noStatement':
+    'Nessuno statement da valutare: il suggerimento non ne elenca.',
+  'indexes.missing.validate.pending': 'Invio del comando…',
+  'indexes.missing.validate.verdict': 'Planner',
+  'indexes.missing.validate.cost': 'Costo del planner',
+  'indexes.missing.validate.size': "Dimensione dell'indice ipotetico",
+  'indexes.missing.validate.at': 'Validato',
+  'indexes.missing.validate.statement': 'Statement',
+  'indexes.missing.validate.approximate':
+    'Approssimato: hypopg ha valutato la chiave in ordine crescente, il suggerimento ha una colonna decrescente.',
   'indexes.lib.suggestions.unknown': 'Non nota',
   'indexes.lib.suggestions.estimate': '~{size}',
   'indexes.lib.suggestions.skip.noText': 'nessun testo salvato',

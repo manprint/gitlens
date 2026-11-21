@@ -158,3 +158,6 @@ Gates: G-GO-FOCUS ./internal/agent ok; G-GO-INT TestINTIDXV001-003, TestINTRO001
 
 ## 2026-11-21 10.3/1 complete unit:10.3:1
 Gates: G-GO-FOCUS server/store/command ok; G-GO-INT TestINTIDXV004 pass; G-API gen:api+api-docs; lint 0; tsc ok; vitest index 148 pass; review: self-review (agent:opus) accepted; changes: migration 0040 index_validations + commands kind CHECK; store.UpsertIndexValidation; persistCommandArtifact index_check case; suggestions validation field + OpenAPI IndexValidation; notes: A35
+
+## 2026-11-21 10.4/1 complete unit:10.4:1
+Gates: G-WEB-STATIC tsc/eslint(2 pre-existing warnings)/prettier ok; G-WEB-UNIT vitest 238 files 2103 tests pass; review: self-review (agent:opus) accepted; changes: IndexValidationSection (Validate with hypopg, NotPermitted T1, progress, result badges, hypopg_missing text); lib helpers; en/it catalogs; help indexes#missing-validate en/it; README Validating an index suggestion; tests UI-IDXV-002..007; notes: A36; self-review agent:opus: no findings

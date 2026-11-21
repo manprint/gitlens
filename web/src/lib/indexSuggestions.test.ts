@@ -17,6 +17,11 @@ import {
   verdictLabel,
   verdictVariant,
   writesText,
+  indexCheckArgs,
+  validationCostText,
+  validationErrorText,
+  validationFromResult,
+  validationSizeText,
   type IndexSuggestion,
 } from './indexSuggestions'
 
@@ -150,5 +155,25 @@ describe('indexSuggestions', () => {
     expect(compareSuggestions(unknown, big, 'size', 'desc')).toBeGreaterThan(0)
     expect(compareSuggestions(small, big, 'weight', 'desc')).toBeGreaterThan(0)
     expect(compareSuggestions(small, big, 'verdict', 'asc')).toBe(0)
+  })
+
+  it('UI-IDXV-007 derives the index_check arguments and reads its result', () => {
+    expect(indexCheckArgs({ ...suggestion, statements: [] })).toBeNull()
+    expect(indexCheckArgs(suggestion)?.queryid).toBe('11')
+    expect(validationFromResult(null, '11', 't', false)).toBeNull()
+    expect(validationFromResult({ cost_before: 1 }, '11', 't', false)).toBeNull()
+    const zero = validationFromResult(
+      { cost_before: 0, cost_after: 0, index_used: false },
+      '11',
+      '2026-11-21T10:00:00Z',
+      true,
+    )!
+    expect(zero.cost_ratio).toBeNull()
+    expect(zero.index_size_bytes).toBeNull()
+    expect(zero.approximate).toBe(true)
+    expect(validationCostText(zero)).toBe('0.0 → 0.0')
+    expect(validationSizeText(zero)).toBe('—')
+    expect(validationErrorText('column_not_found: x', 'app')).toBe('column_not_found: x')
+    expect(validationErrorText(undefined, 'app')).toBe('')
   })
 })

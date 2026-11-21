@@ -392,6 +392,39 @@ export const indexesTopic: HelpTopic = {
           ],
         },
         {
+          id: 'missing-validate',
+          title: 'Validare un suggerimento con hypopg',
+          blocks: [
+            {
+              kind: 'text',
+              text: "{{ui:indexes.missing.validate.button}} chiede all'agente di calcolare due volte il costo dello statement più pesante del suggerimento: così com'è, e con un indice ipotetico sulla chiave suggerita creato dall'estensione `hypopg`. L'indice ipotetico vive solo nella sessione dell'agente, dentro una transazione in sola lettura annullata con rollback; sul database non viene creato nulla e sulla tabella non viene preso alcun lock.",
+            },
+            {
+              kind: 'terms',
+              items: [
+                {
+                  term: '{{ui:indexes.lib.validation.wouldUse}}',
+                  meaning:
+                    "Il piano con l'indice ipotetico lo scandisce. {{ui:indexes.lib.validation.wouldNotUse}} significa che il planner preferisce ancora un altro percorso: l'indice costerebbe scritture senza aiutare questo statement.",
+                },
+                {
+                  term: '{{ui:indexes.missing.validate.cost}}',
+                  meaning:
+                    'Costo totale del planner prima e dopo, in unità del planner (non millisecondi), con il loro rapporto. Da PostgreSQL 16 si usa un piano generico, prima un campione di esecuzione recente.',
+                },
+                {
+                  term: '{{ui:indexes.missing.validate.size}}',
+                  meaning: "La dimensione che hypopg stima per l'indice.",
+                },
+              ],
+            },
+            {
+              kind: 'text',
+              text: "Serve il tier T1 e l'estensione nel database: `CREATE EXTENSION hypopg;` (pglens non la installa mai). Una chiave con una colonna decrescente viene valutata in ordine crescente, quindi il risultato è segnato come approssimato. L'ultimo risultato viene conservato e mostrato di nuovo sul suggerimento.",
+            },
+          ],
+        },
+        {
           id: 'missing-foreign-keys',
           title: 'Fonte: foreign key',
           blocks: [

@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 14:15 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 14:31 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD b21e28798fcf9e5628495effe69a730dab488632 + tree 9a664fea40de524029e4a2777818000857b997c3 · branch main · last WIP tree none
-- Last closure: unit:10.3:1
-- Next: open 10.4 · next eligible: 10.4
+- Base: HEAD a53bd75de41eec3fe93864f2cffebcf293dbc01f + tree 44ce9a9f1f037cc011794addb20077caccf47f60 · branch main · last WIP tree none
+- Last closure: unit:10.4:1
+- Next: open P10 · next eligible: P10
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -90,6 +90,7 @@ none
 - A33 (10.1): `Args.UnmarshalJSON` already refuses unknown keys (DisallowUnknownFields), so TestIDXV002 asserts the decode fails and leaves `Args` empty for `sql`/`statement`/`index_definition` instead of comparing to the struct without them. Command kind labels added as `shell.command.kind.*` + `commandKindLabel` in `web/src/lib/commands.ts` (no central label existed); the audit table keeps the raw kind.
 - A34 (10.2): index_check finds hypopg with `check.ExtensionSchema` (same as pgstattuple) instead of `SELECT 1 FROM pg_extension`, so the hypopg functions are schema-qualified in the agent's pg_catalog-only sessions; refusal texts start with `<code>: ` (`hypopg_missing`, `statement_unavailable`, `relation_not_found`, `column_not_found`) for the console. Order inside the transaction follows the explain executor (guardPlanning, then dropExplainPrivileges); the plan helper `indexCheckPlanner` mirrors plan-only explain (GENERIC_PLAN on 16+, recent execution before) without touching `exec_explain.go`. A failed reset in an aborted transaction is retried after ROLLBACK. New `pgtest.PGExt` helper; G-RO gained INT-RO-003 (audit on pglens-pgext:18, index_check with hypopg, role T2 so the privilege drop to pg_read_all_data is exercised).
 - A35 (10.3): migration is 0040_index_validations.sql (0038/0039 already taken by earlier phases); persistCommandArtifact takes the command_id to store in index_validations; a suggestion matches a validation only with the same database, schema, table, key columns in order and no INCLUDE columns (suggestions have none); cost_ratio and index_size_bytes are nullable (cost_before 0, size unknown); index_validations has no retention entry, like query_plans.
+- A36 (10.4): the action lives in a new `web/src/features/indexes/IndexValidation.tsx` rendered at the end of the expanded suggestion (no own caption, like the statement analysis it belongs to); `web/src/api/commands.ts` needed no change (generic `useCreateCommand`); "commands off" is the instance `perm_tier` below T1, shown through `NotPermitted` as on EXPLAIN; a fresh result shows the browser time of receipt until the next load returns the stored `validated_at`; `index_include` is sent as `[]` (suggestions have no INCLUDE).
 
 ## 9. Blockers
 none

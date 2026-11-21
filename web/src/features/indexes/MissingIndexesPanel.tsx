@@ -46,6 +46,7 @@ import {
 import type { SortDirection } from '@/lib/tableControls'
 
 import { CELL_BADGE, IndexPanel, PanelNote } from './IndexPanel'
+import { IndexValidationSection } from './IndexValidation'
 
 type Finding = Schemas['Finding']
 
@@ -334,6 +335,8 @@ function SuggestionEvidence({ row, instanceId }: { row: IndexSuggestion; instanc
           ))}
         </ul>
       </div>
+
+      <IndexValidationSection instanceId={instanceId} row={row} />
     </section>
   )
 }

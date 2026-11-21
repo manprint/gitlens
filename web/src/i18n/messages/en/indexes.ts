@@ -510,6 +510,25 @@ export const indexes = {
     'Suggestions are estimates from statement statistics; pglens never creates an index.',
   'indexes.lib.suggestions.verdictRule':
     'Verdict is read/write ratio of the table: calls per second of the statements that use the key divided by the row changes per second that must touch an index (inserts, deletes, and updates that are not heap-only). 10 or more is strong, 1 or more is moderate, below 1 is write-heavy. A table that takes no index writes is never write-heavy: at least moderate.',
+  'indexes.lib.validation.wouldUse': 'Planner would use it',
+  'indexes.lib.validation.wouldNotUse': 'Planner would not use it',
+  'indexes.lib.validation.costs': '{before} → {after}',
+  'indexes.lib.validation.ratio': '(×{ratio})',
+  'indexes.lib.validation.hypopgMissing':
+    'Install the hypopg extension in database {database} to validate suggestions (CREATE EXTENSION hypopg).',
+  'indexes.missing.validate.title': 'Validation with hypopg',
+  'indexes.missing.validate.button': 'Validate with hypopg',
+  'indexes.missing.validate.intro':
+    'The agent costs the heaviest statement ({queryid}) with a hypothetical index that exists only in its own session. Nothing is created on the database.',
+  'indexes.missing.validate.noStatement': 'No statement to cost: the suggestion lists none.',
+  'indexes.missing.validate.pending': 'Sending the command…',
+  'indexes.missing.validate.verdict': 'Planner',
+  'indexes.missing.validate.cost': 'Planner cost',
+  'indexes.missing.validate.size': 'Hypothetical index size',
+  'indexes.missing.validate.at': 'Validated',
+  'indexes.missing.validate.statement': 'Statement',
+  'indexes.missing.validate.approximate':
+    'Approximate: hypopg costed the key in ascending order, the suggestion has a descending column.',
   'indexes.lib.suggestions.unknown': 'Unknown',
   'indexes.lib.suggestions.estimate': '~{size}',
   'indexes.lib.suggestions.skip.noText': 'no stored text',
