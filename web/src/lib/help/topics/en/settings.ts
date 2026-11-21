@@ -308,6 +308,10 @@ export const settingsTopic: HelpTopic = {
           text: 'The {{ui:settings.tabs.retention}} tab sets how many days of history each metrics family keeps. The table, {{ui:settings.retention.tableLabel}}, has one row per family, with {{ui:settings.retention.colNow}}, a {{ui:settings.retention.colNew}} field, {{ui:settings.retention.colPreview}} and {{ui:settings.retention.colApply}}. Deletion is not immediate: the retention policy drops whole chunks older than the retention at its daily run, up to a day after Apply.',
         },
         {
+          kind: 'text',
+          text: 'The rows come in two groups. {{ui:settings.retention.groupRaw}} holds every sample the agents send, 30 days by default (90 for bloat estimates), at most 365. {{ui:settings.retention.groupRollup}} holds the same statements, wait events and metrics condensed to one row per hour: 730 days by default, at least 31, at most 1825 (five years). Charts and tables read the rollups for a range that starts more than an hour past the raw retention, and say {{ui:shell.rollup.note}}. The rollups keep no user, client address, application or session state, so those groupings are disabled on such a range.',
+        },
+        {
           kind: 'note',
           tone: 'warning',
           text: 'Shortening the retention deletes history permanently at the next policy run. Take a backup first. A shorter retention asks for confirmation before anything is deleted.',
@@ -318,7 +322,7 @@ export const settingsTopic: HelpTopic = {
             {
               term: '{{ui:settings.retention.colFamily}}',
               meaning:
-                'The metrics group a row controls. The families are Instance and database metrics, Statement statistics, Active session history, Replication lag and slots, Table statistics, Index statistics and Bloat estimates.',
+                'The metrics group a row controls. The families are Instance and database metrics, Statement statistics, Active session history, Replication lag and slots, Table statistics, Index statistics and Bloat estimates; the hourly rollups are {{ui:settings.lib.retention.family.metrics1h}}, {{ui:settings.lib.retention.family.metricsStatements1h}} and {{ui:settings.lib.retention.family.metricsAsh1h}}.',
             },
             {
               term: '{{ui:settings.retention.colNow}}',
@@ -328,7 +332,7 @@ export const settingsTopic: HelpTopic = {
             {
               term: '{{ui:settings.retention.colNew}}',
               meaning:
-                'The whole number of days you type. The server sets the accepted range, and the longest value is 365 days. Errors say why: Enter a number of days, Enter a whole number of days, or Enter between X and Y days.',
+                'The whole number of days you type. The server sets the accepted range, and the longest value is 365 days for raw data and 1825 days for an hourly rollup. Errors say why: Enter a number of days, Enter a whole number of days, or Enter between X and Y days.',
             },
             {
               term: '{{ui:settings.retention.colPreview}}',
@@ -707,7 +711,7 @@ export const settingsTopic: HelpTopic = {
                 {
                   term: '{{ui:settings.limits.rawRetention.label}}',
                   meaning:
-                    'Raw data is kept for 30 days by default, and 90 days for bloat estimates. Data older than its retention is deleted, not condensed: pglens keeps no summaries. The live value of each metrics family is in [{{ui:settings.tabs.retention}}](/help/settings#retention).',
+                    'Raw data is kept for 30 days by default, and 90 days for bloat estimates. Older statements, wait events and metrics stay as hourly rollups, kept 730 days by default. The live value of each metrics family is in [{{ui:settings.tabs.retention}}](/help/settings#retention).',
                 },
                 {
                   term: '{{ui:settings.limits.postgresVersions.label}}',

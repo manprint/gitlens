@@ -16,6 +16,7 @@ import { stepParam } from '@/lib/chartStep'
 import type { CaptionId } from '@/lib/captions'
 import { countGaps } from '@/lib/chartTime'
 import { cacheHitRatioSeries, scaleSeries, type MetricSeriesPoint } from '@/lib/metrics'
+import { isHourlyRollup } from '@/lib/rollup'
 import { queryWindowOf, type QueryWindow } from '@/lib/timerange'
 
 import { ChartNav } from './ChartNav'
@@ -50,6 +51,8 @@ interface CardFrameProps {
   series: readonly TimeSeriesTableSeries[]
   option: EChartsOption
   annotateResets: boolean
+  /** The series came from the hourly rollups (resolution "1h"). */
+  rollup?: boolean
 }
 
 /** Error if a query failed with nothing to show, loading until all answered, empty without a value. */
@@ -75,10 +78,17 @@ function CardFrame({
   series,
   option,
   annotateResets,
+  rollup = false,
 }: CardFrameProps) {
   const t = useT()
   // The chart draws no marker: the range line names the runs, a long outage is one gap.
   const gaps = annotateResets ? Math.max(0, ...series.map((item) => countGaps(item.points))) : 0
+  const subtitle = [
+    rollup ? t('shell.rollup.note') : null,
+    gaps > 0 ? t('instance.overviewCharts.gaps', { count: gaps }) : null,
+  ]
+    .filter((part) => part !== null)
+    .join(' · ')
   return (
     <ChartCard
       captionId={captionId}
@@ -88,7 +98,7 @@ function CardFrame({
       title={title}
       {...(unitHint === undefined ? {} : { unitHint })}
       {...(wide ? { wide } : {})}
-      {...(gaps > 0 ? { subtitle: t('instance.overviewCharts.gaps', { count: gaps }) } : {})}
+      {...(subtitle === '' ? {} : { subtitle })}
       {...(failure ? { error: failure.error, onRetry: failure.retry } : {})}
     >
       <TimeSeriesChart
@@ -234,6 +244,7 @@ function WorkloadChartCard({
         stepSeconds,
       )}
       range={range}
+      rollup={isHourlyRollup(query.data?.resolution)}
       series={series}
       state={cardState([query], series)}
       stepSeconds={stepSeconds}

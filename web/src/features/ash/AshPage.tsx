@@ -28,6 +28,8 @@ import { ASH_GROUP_LABELS as GROUP_LABELS, type AshChartGroup } from '@/lib/ashG
 import { AshTopQueries } from './AshTopQueries'
 import { AshCompare } from './AshCompare'
 import { type CompareMode, readCompareMode } from '@/lib/compare'
+import { isHourlyRollup, ROLLUP_DROPPED_DIMENSIONS } from '@/lib/rollup'
+import { RollupNote } from '@/components/layout/RollupNote'
 import { Callout } from '@/components/ui/callout'
 import { cn } from '@/lib/utils'
 
@@ -123,11 +125,13 @@ const GROUP_CHOICES: readonly GroupChoice[] = ['wait', ...ASH_DIMENSIONS]
 interface GroupByControlProps {
   groupBy: DrillGroup
   onChange: (choice: GroupChoice) => void
+  /** The shown range comes from the hourly rollups, which drop the session dimensions. */
+  rollup: boolean
 }
 
 // The wait drill-down (types, events, queries) is one choice; each session
 // dimension is another.
-function GroupByControl({ groupBy, onChange }: GroupByControlProps) {
+function GroupByControl({ groupBy, onChange, rollup }: GroupByControlProps) {
   const t = useT()
   const current: GroupChoice = isAshDimension(groupBy) ? groupBy : 'wait'
   return (
@@ -137,25 +141,31 @@ function GroupByControl({ groupBy, onChange }: GroupByControlProps) {
       data-testid="ash-group-by"
       role="radiogroup"
     >
-      {GROUP_CHOICES.map((choice) => (
-        <label
-          className={cn(
-            'focus-within:ring-ring cursor-pointer rounded-md px-3 py-1 focus-within:ring-2',
-            current === choice ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground',
-          )}
-          key={choice}
-        >
-          <input
-            checked={current === choice}
-            className="sr-only"
-            name="ash-group-by"
-            onChange={() => onChange(choice)}
-            type="radio"
-            value={choice}
-          />
-          {t(choice === 'wait' ? 'ash.groupBy.wait' : GROUP_LABELS[choice])}
-        </label>
-      ))}
+      {GROUP_CHOICES.map((choice) => {
+        const dropped = rollup && choice !== 'wait' && ROLLUP_DROPPED_DIMENSIONS.includes(choice)
+        return (
+          <label
+            className={cn(
+              'focus-within:ring-ring rounded-md px-3 py-1 focus-within:ring-2',
+              dropped ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+              current === choice ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground',
+            )}
+            key={choice}
+            title={dropped ? t('shell.rollup.dropped') : undefined}
+          >
+            <input
+              checked={current === choice}
+              className="sr-only"
+              disabled={dropped}
+              name="ash-group-by"
+              onChange={() => onChange(choice)}
+              type="radio"
+              value={choice}
+            />
+            {t(choice === 'wait' ? 'ash.groupBy.wait' : GROUP_LABELS[choice])}
+          </label>
+        )
+      })}
     </div>
   )
 }
@@ -443,9 +453,14 @@ function AshChartsView({
         <InfoHint className="shrink-0" id="ash.page" label={t('ash.page.title')} />
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <GroupByControl groupBy={groupBy} onChange={chooseGroup} />
+        <GroupByControl
+          groupBy={groupBy}
+          onChange={chooseGroup}
+          rollup={isHourlyRollup(ashQuery.data.resolution)}
+        />
         <FilterChips filters={dimensionFilters} onRemove={removeFilter} />
       </div>
+      <RollupNote resolution={ashQuery.data.resolution} />
       {groupBy === DEFAULT_GROUP || isAshDimension(groupBy) ? null : (
         <DrillBreadcrumb
           groupBy={groupBy}

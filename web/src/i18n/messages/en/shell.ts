@@ -213,4 +213,6 @@ export const shell = {
   'shell.command.rejectedNoReason': 'Command rejected by the agent.',
   'shell.search.moreMatches': 'More than {count} matches — narrow the search.',
   'shell.search.matches': '{count, plural, one {# match} other {# matches}}.',
+  'shell.rollup.note': 'Hourly averages (older than raw retention)',
+  'shell.rollup.dropped': 'Not kept in hourly rollups: choose a range within the raw retention.',
 } as const

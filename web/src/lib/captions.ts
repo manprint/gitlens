@@ -114,6 +114,14 @@ export const CAPTIONS = {
     howToRead:
       'The shortest retention is one day past the family’s compression horizon and never under 3 days; the longest is 365 days.',
   },
+  'settings.retention-rollup-table': {
+    what: 'One row per hourly rollup: a metrics family condensed to one row per hour, kept for long ranges after the raw data is gone.',
+    source: 'getRetention for rows, previewRetention for the preview, setRetention to apply.',
+    unit: 'days',
+    window: 'Live policies.',
+    howToRead:
+      'A rollup keeps 730 days by default, at least 31 and at most 1825; charts read it for ranges older than the raw retention.',
+  },
   'settings.advisor-rules-table': {
     what: 'The advisor rules, one per row with category, severity, scope and minimum permission tier; a switch makes pglens run or skip each one.',
     source:

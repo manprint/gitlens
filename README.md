@@ -599,6 +599,33 @@ events, unseen query texts, resolved alerts (with their deliveries and expired
 silences) and resolved findings are fixed and are not part of this tab; see
 [docs/LIMITS.md](docs/LIMITS.md#14-history-is-deleted-by-retention-policies-and-fixed-purges).
 
+#### Retention and rollups
+
+The tab shows two groups. **Raw data** is every sample the agents send, kept
+30 days by default (90 for bloat estimates), at most 365. **Hourly rollups**
+are three TimescaleDB continuous aggregates that condense raw data to one row
+per hour and outlive it:
+
+| Rollup family | Built from | Keeps |
+|---|---|---|
+| `metrics_1h` | `metrics` | per series: average, maximum, minimum, sample count |
+| `metrics_statements_1h` | `metrics_statements` | per statement: average rates, scraped seconds |
+| `metrics_ash_1h` | `metrics_ash` | per wait event and query: samples, ticks, window seconds |
+
+A rollup keeps 730 days by default, at least 31 and at most 1825 (five years);
+its policy refreshes the last three days every 30 minutes, so the newest hour
+appears about an hour late. When a request range starts before the raw
+retention horizon plus one hour, the statements list (`/api/v1/statements`),
+Wait events (`/api/v1/ash`, `/api/v1/ash/top`) and the statements charts of the
+instance Overview (`/api/v1/instances/{id}/workload/series`) are answered
+entirely from the rollup: the response carries `"resolution": "1h"`, the step is
+at least one hour, and the console notes "Hourly averages (older than raw
+retention)". The ASH rollup keeps no user, client address, application or
+session state: on such a range the server refuses those groupings and filters
+(400) and the console disables them. Instance metric, table, index and
+replication charts and period comparison read raw data only (`metrics_1h` has
+no reader yet), so a range past the raw retention shows them empty.
+
 The Advisor rules tab lists every advisor rule with its category, severity,
 scope and minimum permission tier, and an Enabled switch per rule
 (`GET /api/v1/advisor/rules`, which reports `enabled` and `overridden` for each
@@ -2732,7 +2759,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 **Server and replication:**
 - PostgreSQL 15 to 19 only; 13 and 14 are not supported, and 19 is verified on its release candidate
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
-- Raw retention is 30 days by default (bloat estimates 90 days), settable per metrics family from 3 days (8 for bloat estimates) to 365 days in Settings → Data retention, with no rollups; compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`). Events, unseen query texts, alert history and resolved findings are purged after a fixed 90 days; see [limit 14](docs/LIMITS.md#14-history-is-deleted-by-retention-policies-and-fixed-purges)
+- Raw retention is 30 days by default (bloat estimates 90 days), settable per metrics family from 3 days (8 for bloat estimates) to 365 days in Settings → Data retention; hourly rollups of metrics, statements and ASH keep 730 days by default (31 to 1825, see [Retention and rollups](#retention-and-rollups)); compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`). Events, unseen query texts, alert history and resolved findings are purged after a fixed 90 days; see [limit 14](docs/LIMITS.md#14-history-is-deleted-by-retention-policies-and-fixed-purges)
 - **Every in-memory structure has a fixed ceiling and drops data past it** — 32 MiB per push on the wire and 256 MiB after gzip, 64 KiB of request headers, 2-minute read/write/idle timeouts, delta and topology state evicted one hour after an instance's last sample, and at most 4 096 live sessions. None of these are configurable; see [limit 13](docs/LIMITS.md#13-every-in-memory-structure-is-bounded-and-a-bound-that-trips-drops-data) for what each one trades away.
 
 **Contention:**

@@ -83,3 +83,6 @@ Gates: G-GO-FOCUS ./internal/server race+shuffle pass (TestRET*, TestRLP001-003)
 
 ## 2026-11-21 5.3/1 complete unit:5.3:1
 Gates: G-GO-FOCUS server ok (race, shuffle); TestINTRLP005 + TestWSERINT/TestINTRET/ASH/TestINTADV integration ok; lint (both tags) 0; G-API regenerated (docs/api.md unchanged); web tsc + vitest src/lib src/api 641 ok; review: self-review (agent:opus) accepted; changes: rollup_route.go (rollupFor, rawRetentionDays, routeToRollup, rollupSources), statements/ASH/workload read the rollup on old ranges, `resolution` field; notes: A15, A16.
+
+## 2026-11-21 5.4/1 complete unit:5.4:1
+Gates: G-WEB-STATIC tsc 0/eslint 0 errors/prettier ok; G-WEB-UNIT 232 files 2059 tests pass after test-ID fix; G-API no diff; review: self-review (agent:opus) accepted; changes: retention panel two groups (raw, hourly rollups) with per-row bounds; RollupNote (shell.rollup.note) on Queries list, Slowest, Wait events page+top, Overview workload card subtitle; ASH session groupings disabled with tooltip on 1h responses; help en/it retention + limits; README Retention and rollups + Known limits; notes: A17; UI-RLP-001..006

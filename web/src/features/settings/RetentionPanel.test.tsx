@@ -4,7 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
 import { assertMatchesContract } from '@/test/contract'
-import { base as families, custom as customFamilies } from '@/test/fixtures/getRetention'
+import {
+  base as families,
+  custom as customFamilies,
+  withRollups,
+} from '@/test/fixtures/getRetention'
 import { base as shortening, lengthening } from '@/test/fixtures/previewRetention'
 import { makeSetRetention } from '@/test/fixtures/setRetention'
 import { ok, sequence, status } from '@/test/msw/handlers'
@@ -15,6 +19,17 @@ import { renderWithProviders } from '@/test/render'
 import { RetentionPanel } from './RetentionPanel'
 
 const TABLE = 'Data retention by metrics family'
+const ROLLUP_TABLE = 'Hourly rollup retention by metrics family'
+
+function rollupRowOf(family: string) {
+  const table = screen.getByRole('table', { name: ROLLUP_TABLE })
+  const name = `New retention of ${family} in days`
+  const tr = within(table)
+    .getAllByRole('row')
+    .find((candidate) => within(candidate).queryByRole('textbox', { name }) !== null)
+  if (tr === undefined) throw new Error(`no rollup row for ${family}`)
+  return tr
+}
 
 async function renderPanel() {
   const view = renderWithProviders(<RetentionPanel />, { route: '/settings?tab=retention' })
@@ -239,6 +254,38 @@ describe('RetentionPanel', () => {
     expect(row('metrics').input).toHaveAttribute('aria-invalid', 'true')
     expect(row('metrics').preview).toBeDisabled()
     expect(within(row('metrics').tr).getByText('Enter between 3 and 365 days.')).toBeInTheDocument()
+  })
+
+  it('UI-RLP-001 raw families and hourly rollups are two groups, each row with its own bounds', async () => {
+    assertMatchesContract('getRetention', 200, withRollups)
+    server.use(ok('getRetention', withRollups))
+    await renderPanel()
+
+    expect(screen.getByRole('heading', { name: 'Raw data' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Hourly rollups' })).toBeInTheDocument()
+    const raw = screen.getByRole('table', { name: TABLE })
+    const rollups = screen.getByRole('table', { name: ROLLUP_TABLE })
+    expect(
+      within(raw).queryByRole('textbox', { name: 'New retention of metrics_1h in days' }),
+    ).toBeNull()
+    expect(within(raw).getAllByText('3–365 days')).toHaveLength(6)
+    expect(within(raw).queryByText('31–1825 days')).toBeNull()
+    const rollupRow = rollupRowOf('metrics_statements_1h')
+    expect(within(rollupRow).getByText('31–1825 days')).toBeInTheDocument()
+    expect(within(rollups).getAllByRole('textbox')).toHaveLength(3)
+  })
+
+  it('UI-RLP-002 a rollup refuses 1826 days before any request', async () => {
+    server.use(ok('getRetention', withRollups))
+    await renderPanel()
+    const input = within(rollupRowOf('metrics_ash_1h')).getByRole('textbox')
+    fireEvent.change(input, { target: { value: '1826' } })
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(
+      within(rollupRowOf('metrics_ash_1h')).getByText('Enter between 31 and 1825 days.'),
+    ).toBeInTheDocument()
+    fireEvent.change(input, { target: { value: '1825' } })
+    expect(input).not.toHaveAttribute('aria-invalid', 'true')
   })
 
   it('RET-UI-006 a refused apply (409) reads the listing again and asks for a new preview', async () => {

@@ -71,6 +71,20 @@ export const base: RetentionFamily[] = [
   },
 ]
 
+/** base plus the three hourly rollups of migration 0035: 730 days, 31 to 1825. */
+export const withRollups: RetentionFamily[] = [
+  ...base,
+  ...(['metrics_1h', 'metrics_statements_1h', 'metrics_ash_1h'] as const).map((family) => ({
+    family,
+    hypertable: family,
+    rollup: true,
+    days: 730,
+    source: 'default' as const,
+    min_days: 31,
+    max_days: 1825 as const,
+  })),
+]
+
 /** metrics_ash shortened to 14 days and metrics_tables without a policy. */
 export const custom: RetentionFamily[] = base.map((row) => {
   if (row.family === 'metrics_ash') return { ...row, days: 14, source: 'custom' }

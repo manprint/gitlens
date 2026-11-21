@@ -310,6 +310,10 @@ export const settingsTopic: HelpTopic = {
           text: 'Il tab {{ui:settings.tabs.retention}} imposta quanti giorni di storico conserva ogni famiglia di metriche. La tabella, {{ui:settings.retention.tableLabel}}, ha una riga per famiglia, con {{ui:settings.retention.colNow}}, il campo {{ui:settings.retention.colNew}}, {{ui:settings.retention.colPreview}} e {{ui:settings.retention.colApply}}. La cancellazione non è immediata: la policy di retention elimina i chunk interi più vecchi della retention alla sua esecuzione giornaliera, fino a un giorno dopo Apply.',
         },
         {
+          kind: 'text',
+          text: 'Le righe sono in due gruppi. {{ui:settings.retention.groupRaw}} contiene ogni campione inviato dagli agent, 30 giorni per impostazione predefinita (90 per le bloat estimates), al massimo 365. {{ui:settings.retention.groupRollup}} contiene gli stessi statement, wait event e metriche condensati in una riga per ora: 730 giorni per impostazione predefinita, almeno 31, al massimo 1825 (cinque anni). Grafici e tabelle leggono i rollup per un intervallo che inizia più di un’ora oltre la retention dei dati grezzi, e lo segnalano con {{ui:shell.rollup.note}}. I rollup non conservano utente, indirizzo client, applicazione né stato della sessione, quindi questi raggruppamenti sono disattivati su un intervallo simile.',
+        },
+        {
           kind: 'note',
           tone: 'warning',
           text: 'Accorciare la retention elimina lo storico in modo permanente alla prossima esecuzione della policy. Fai prima un backup. Una retention più corta chiede conferma prima che venga cancellato qualsiasi dato.',
@@ -320,7 +324,7 @@ export const settingsTopic: HelpTopic = {
             {
               term: '{{ui:settings.retention.colFamily}}',
               meaning:
-                'Il gruppo di metriche controllato dalla riga. Le famiglie sono Instance and database metrics, Statement statistics, Active session history, Replication lag and slots, Table statistics, Index statistics e Bloat estimates.',
+                'Il gruppo di metriche controllato dalla riga. Le famiglie sono Instance and database metrics, Statement statistics, Active session history, Replication lag and slots, Table statistics, Index statistics e Bloat estimates; i rollup orari sono {{ui:settings.lib.retention.family.metrics1h}}, {{ui:settings.lib.retention.family.metricsStatements1h}} e {{ui:settings.lib.retention.family.metricsAsh1h}}.',
             },
             {
               term: '{{ui:settings.retention.colNow}}',
@@ -330,7 +334,7 @@ export const settingsTopic: HelpTopic = {
             {
               term: '{{ui:settings.retention.colNew}}',
               meaning:
-                'Il numero intero di giorni digitato. Il server stabilisce l’intervallo accettato, e il valore massimo è 365 giorni. Gli errori spiegano il motivo: Enter a number of days, Enter a whole number of days oppure Enter between X and Y days.',
+                'Il numero intero di giorni digitato. Il server stabilisce l’intervallo accettato, e il valore massimo è 365 giorni per i dati grezzi e 1825 giorni per un rollup orario. Gli errori spiegano il motivo: Enter a number of days, Enter a whole number of days oppure Enter between X and Y days.',
             },
             {
               term: '{{ui:settings.retention.colPreview}}',
@@ -710,7 +714,7 @@ export const settingsTopic: HelpTopic = {
                 {
                   term: '{{ui:settings.limits.rawRetention.label}}',
                   meaning:
-                    'I dati grezzi sono conservati per 30 giorni per impostazione predefinita, e 90 giorni per le bloat estimates. I dati più vecchi della retention vengono eliminati, non condensati: pglens non conserva riassunti. Il valore attuale di ogni famiglia di metriche è in [{{ui:settings.tabs.retention}}](/help/settings#retention).',
+                    'I dati grezzi sono conservati per 30 giorni per impostazione predefinita, e 90 giorni per le bloat estimates. Statement, wait event e metriche più vecchi restano come rollup orari, conservati 730 giorni per impostazione predefinita. Il valore attuale di ogni famiglia di metriche è in [{{ui:settings.tabs.retention}}](/help/settings#retention).',
                 },
                 {
                   term: '{{ui:settings.limits.postgresVersions.label}}',

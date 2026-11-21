@@ -180,6 +180,9 @@ export const settings: Translation<typeof english> = {
   'settings.retention.endpoint': 'conservazione dei dati',
   'settings.retention.loading': 'Caricamento della conservazione dei dati…',
   'settings.retention.tableLabel': 'Conservazione dei dati per famiglia di metriche',
+  'settings.retention.rollupTableLabel': 'Conservazione dei rollup orari per famiglia di metriche',
+  'settings.retention.groupRaw': 'Dati grezzi',
+  'settings.retention.groupRollup': 'Rollup orari',
   'settings.retention.empty': 'Nessuna famiglia di metriche è stata segnalata.',
   'settings.retention.help.days':
     'Quanti giorni di storia conserva ogni famiglia di metriche. La storia più vecchia viene eliminata dalla regola; un valore più alto ne conserva di più.',

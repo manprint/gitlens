@@ -217,4 +217,7 @@ export const shell: Translation<typeof english> = {
   'shell.command.rejectedNoReason': 'Comando rifiutato dall’agent.',
   'shell.search.moreMatches': 'Più di {count} corrispondenze: restringi la ricerca.',
   'shell.search.matches': '{count, plural, one {# corrispondenza} other {# corrispondenze}}.',
+  'shell.rollup.note': 'Medie orarie (oltre la retention dei dati grezzi)',
+  'shell.rollup.dropped':
+    'Non conservato nei rollup orari: scegli un intervallo entro la retention dei dati grezzi.',
 }

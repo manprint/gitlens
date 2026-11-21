@@ -26,6 +26,7 @@ import {
   previewSummary,
   retentionErrorMessage,
   retentionFamilyLabel,
+  splitRetentionGroups,
   validateRetentionDays,
   type RetentionFamily,
   type RetentionFamilyName,
@@ -328,6 +329,10 @@ export function RetentionPanel() {
   )
   const confirmId = `${baseId}-confirm`
   const columns = useMemo(() => retentionColumns(t), [t])
+  const [rawFamilies, rollupFamilies] = useMemo(
+    () => splitRetentionGroups(retentionQuery.data ?? []),
+    [retentionQuery.data],
+  )
 
   const stateOf = (row: RetentionFamily) => rows[row.family] ?? initialState(row)
   const update = (row: RetentionFamily, patch: Partial<RowState>) =>
@@ -429,15 +434,32 @@ export function RetentionPanel() {
           </p>
         ) : (
           <RetentionContext.Provider value={actions}>
-            <DataTable
-              ariaLabel={t('settings.retention.tableLabel')}
-              captionId="settings.retention-table"
-              columns={columns}
-              data={retentionQuery.data}
-              emptyState={<p>{t('settings.retention.empty')}</p>}
-              getRowId={(row) => row.family}
-              scope="families"
-            />
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">{t('settings.retention.groupRaw')}</h3>
+              <DataTable
+                ariaLabel={t('settings.retention.tableLabel')}
+                captionId="settings.retention-table"
+                columns={columns}
+                data={rawFamilies}
+                emptyState={<p>{t('settings.retention.empty')}</p>}
+                getRowId={(row) => row.family}
+                scope="families"
+              />
+            </div>
+            {rollupFamilies.length > 0 ? (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold">{t('settings.retention.groupRollup')}</h3>
+                <DataTable
+                  ariaLabel={t('settings.retention.rollupTableLabel')}
+                  captionId="settings.retention-rollup-table"
+                  columns={columns}
+                  data={rollupFamilies}
+                  emptyState={<p>{t('settings.retention.empty')}</p>}
+                  getRowId={(row) => row.family}
+                  scope="families"
+                />
+              </div>
+            ) : null}
           </RetentionContext.Provider>
         )}
       </div>

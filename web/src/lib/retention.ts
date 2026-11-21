@@ -52,6 +52,13 @@ export function validateRetentionDays(text: string, min: number, max: number): D
   return { ok: true, value: days }
 }
 
+/** The families split into the raw-data group and the hourly-rollup group, order kept. */
+export function splitRetentionGroups(
+  families: readonly RetentionFamily[],
+): [RetentionFamily[], RetentionFamily[]] {
+  return [families.filter((f) => !f.rollup), families.filter((f) => f.rollup)]
+}
+
 /**
  * Whether `days` keeps less history than the live retention. A family without
  * a retention policy keeps everything, so any retention shortens it.

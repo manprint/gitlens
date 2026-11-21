@@ -10,6 +10,7 @@ import { InfoHint } from '@/components/layout/InfoHint'
 import { HelpLink } from '@/components/layout/HelpLink'
 import { ModeToggle } from '@/components/layout/ModeToggle'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { RollupNote } from '@/components/layout/RollupNote'
 import { SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
 import { SqlText } from '@/components/layout/SqlText'
@@ -72,6 +73,8 @@ interface StatementApiResponse {
   truncated: boolean
   /** Sent with `q` only: more statements match than the limit returned (D20). */
   has_more?: boolean
+  /** "1h" when the range was answered from the hourly rollups. */
+  resolution?: string
 }
 
 function readSort(value: string | null): StatementSort {
@@ -444,6 +447,7 @@ function StatementListView({
           <FreshnessBadge dataUpdatedAt={statementsQuery.dataUpdatedAt} policy="statements" />
         }
       />
+      <RollupNote resolution={response?.resolution} />
       <Section
         id="statement-list"
         title={t('queries.list.statementsTitle')}

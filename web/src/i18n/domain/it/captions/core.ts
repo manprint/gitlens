@@ -107,6 +107,15 @@ export const core: Readonly<
     howToRead:
       'La retention più breve è un giorno oltre l’orizzonte di compressione della famiglia e mai sotto i 3 giorni; la più lunga è 365 giorni.',
   },
+  'settings.retention-rollup-table': {
+    what: 'Una riga per rollup orario: una famiglia di metriche condensata in una riga per ora, conservata per gli intervalli lunghi quando i dati grezzi non ci sono più.',
+    source:
+      'getRetention per le righe, previewRetention per l’anteprima, setRetention per applicare.',
+    unit: 'giorni',
+    window: 'Policy attive.',
+    howToRead:
+      'Un rollup conserva 730 giorni per impostazione predefinita, almeno 31 e al massimo 1825; i grafici lo leggono per gli intervalli più vecchi della retention dei dati grezzi.',
+  },
   'settings.advisor-rules-table': {
     what: 'Le regole dell’advisor, una per riga con categoria, gravità, ambito e livello minimo di permessi; un interruttore fa eseguire o saltare ciascuna regola.',
     source:

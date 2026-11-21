@@ -11,6 +11,7 @@ import { InfoHint } from '@/components/layout/InfoHint'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { RollupNote } from '@/components/layout/RollupNote'
 import { HighlightedText, SearchBox } from '@/components/layout/SearchBox'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -85,6 +86,8 @@ interface StatementsPayload {
   truncated: boolean
   /** Sent with `q` only: more statements match than the limit returned (D20). */
   has_more?: boolean
+  /** "1h" when the range was answered from the hourly rollups. */
+  resolution?: string
 }
 
 interface SlowRow {
@@ -403,6 +406,7 @@ function InstanceStatements({
   return (
     <div className="space-y-6 min-[1600px]:space-y-4">
       {rows.length === 0 ? standaloneBar : null}
+      <RollupNote resolution={response?.resolution} />
       {response?.disabled ? (
         <div
           className="border-warning/40 bg-warning/10 rounded-lg border px-4 py-3 text-sm"

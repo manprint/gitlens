@@ -7,6 +7,7 @@ import type { AshDimensionFilters, AshTopQuery } from '@/lib/ash'
 import { topQueries } from '@/lib/ash'
 import type { QueryWindow } from '@/lib/timerange'
 import { HelpLink } from '@/components/layout/HelpLink'
+import { RollupNote } from '@/components/layout/RollupNote'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 
@@ -120,6 +121,7 @@ export function AshTopQueries({
       <p className="text-muted-foreground mb-3 text-sm">
         {`${scopeDescription(t, waitEventType, waitEvent)} ${t('ash.top.note')}`}
       </p>
+      <RollupNote resolution={query.data.resolution} />
       {entries.length > 0 ? (
         <ol className="grid gap-3" aria-label={t('ash.top.listLabel')}>
           {entries.map((entry) => (

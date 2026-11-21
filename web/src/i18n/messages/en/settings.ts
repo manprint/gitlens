@@ -174,6 +174,9 @@ export const settings = {
   'settings.retention.endpoint': 'data retention',
   'settings.retention.loading': 'Loading data retention…',
   'settings.retention.tableLabel': 'Data retention by metrics family',
+  'settings.retention.rollupTableLabel': 'Hourly rollup retention by metrics family',
+  'settings.retention.groupRaw': 'Raw data',
+  'settings.retention.groupRollup': 'Hourly rollups',
   'settings.retention.empty': 'No metrics family was reported.',
   'settings.retention.help.days':
     'How many days of history each metrics family keeps. History older than this is deleted by the policy; a longer value keeps more.',
