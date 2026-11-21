@@ -137,3 +137,6 @@ Gates: G-GO-FOCUS server/readiness/wire/i18n/agent PASS; INT TestINTAVH002/003 P
 
 ## 2026-11-21 P8/1 complete unit:P8:1
 Gates: G-GO-FULL rc=0; G-GO-INT rc=0 (agent, server, store, cmd/pglens-agent; TestINTAVH001-003, TestINTRO001 pg15/pg18; only opt-in TestINTFIRSTRUN001 skipped); G-WEB-FULL rc=0 (237 files, 2083 tests, statements 92.52%, budget PASS); G-API no diff; G-I18N pass; review: self-review (agent:opus) accepted; changes: Phase 8 closure review; notes: Review: order_by whitelist only (no SQL injection), instance_id tenant filter on every query, nullable numbers kept as null, old agents without logs_enabled leave RDY-AV-01 silent, runs fetched only when a summary row is expanded.
+
+## 2026-11-21 9.1/1 complete unit:9.1:1
+Gates: G-WEB-STATIC pass (tsc, eslint 2 pre-existing warnings, prettier); vitest planTree 29, queries+i18n 152 pass; review: self-review (agent:opus) accepted; changes: planTree.ts: PlanInsightKind, args, lossyBitmap, workersShort, joinFilterDiscards, jitShare, triggerShare; en/it messages; UI-PLI-001..008; notes: Review: thresholds per spec table; plan-only never yields jit/trigger (UI-PLI-004); no existing test changed. Decision A30.

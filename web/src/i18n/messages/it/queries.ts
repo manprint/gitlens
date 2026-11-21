@@ -295,6 +295,26 @@ export const queries: Translation<typeof english> = {
   'queries.plan.insight.seqLoopTitle': '{node} viene eseguito {count} volte',
   'queries.plan.insight.seqLoopDetail':
     'Un sequential scan sul lato interno di un Nested Loop legge l’intera tabella una volta per ogni riga esterna. Un indice sulle colonne del join, o un hash join, lo evita.',
+  'queries.plan.insight.lossyBitmapTitle':
+    'Il bitmap scan è diventato lossy su {lossy} di {total} blocchi heap; work_mem è troppo piccolo per la bitmap',
+  'queries.plan.insight.lossyBitmapDetail':
+    'Una bitmap lossy tiene pagine intere invece delle righe, quindi ogni riga viene ricontrollata. Alza work_mem per questo statement.',
+  'queries.plan.insight.workersShortTitle':
+    'Solo {launched} worker paralleli su {planned} sono partiti',
+  'queries.plan.insight.workersShortDetail':
+    'Il pool dei worker paralleli era occupato (max_parallel_workers, max_worker_processes). La query è girata con meno processi di quelli pianificati.',
+  'queries.plan.insight.joinFilterDiscardsTitle':
+    'Il join filter ha scartato {removed} righe per tenerne {kept}',
+  'queries.plan.insight.joinFilterDiscardsDetail':
+    'Il join costruisce coppie di righe e poi ne butta la maggior parte. Una condizione di join che il planner può usare (un’uguaglianza su colonne indicizzate) evita di costruirle.',
+  'queries.plan.insight.jitShareTitle':
+    'La compilazione JIT ha richiesto {ms} ({pct} dell’esecuzione)',
+  'queries.plan.insight.jitShareDetail':
+    'Per query brevi JIT costa più di quanto fa risparmiare. Alza jit_above_cost o disattiva jit per questo carico.',
+  'queries.plan.insight.triggerShareTitle':
+    'I trigger hanno richiesto {ms} ({pct} dell’esecuzione); il più lento: {name}',
+  'queries.plan.insight.triggerShareDetail':
+    'Il tempo dei trigger non fa parte di nessun nodo del piano. Controlla cosa fa per riga il trigger più lento, compresi i controlli di foreign key.',
   'queries.plan.insight.neverTitle':
     '{n, plural, one {# operazione non è mai stata eseguita} other {# operazioni non sono mai state eseguite}}',
   'queries.plan.insight.neverDetail':

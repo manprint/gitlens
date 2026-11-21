@@ -290,6 +290,24 @@ export const queries = {
   'queries.plan.insight.seqLoopTitle': '{node} runs {count} times',
   'queries.plan.insight.seqLoopDetail':
     'A sequential scan on the inner side of a Nested Loop reads the whole table once per outer row. An index on the join columns, or a hash join, avoids it.',
+  'queries.plan.insight.lossyBitmapTitle':
+    'Bitmap scan went lossy on {lossy} of {total} heap blocks; work_mem is too small for the bitmap',
+  'queries.plan.insight.lossyBitmapDetail':
+    'A lossy bitmap keeps whole pages instead of rows, so every row on them is rechecked. Raise work_mem for this statement.',
+  'queries.plan.insight.workersShortTitle': 'Only {launched} of {planned} parallel workers started',
+  'queries.plan.insight.workersShortDetail':
+    'The pool of parallel workers was busy (max_parallel_workers, max_worker_processes). The query ran with fewer processes than planned.',
+  'queries.plan.insight.joinFilterDiscardsTitle':
+    'Join filter discarded {removed} rows to keep {kept}',
+  'queries.plan.insight.joinFilterDiscardsDetail':
+    'The join builds row pairs and then throws most away. A join condition the planner can use (an equality on indexed columns) avoids building them.',
+  'queries.plan.insight.jitShareTitle': 'JIT compilation took {ms} ({pct} of execution)',
+  'queries.plan.insight.jitShareDetail':
+    'For short queries JIT costs more than it saves. Raise jit_above_cost or turn jit off for this workload.',
+  'queries.plan.insight.triggerShareTitle':
+    'Triggers took {ms} ({pct} of execution); slowest: {name}',
+  'queries.plan.insight.triggerShareDetail':
+    'Trigger time is not part of any plan node. Check what the slowest trigger does per row, including foreign key checks.',
   'queries.plan.insight.neverTitle':
     '{n, plural, one {# operation was} other {# operations were}} never executed',
   'queries.plan.insight.neverDetail':

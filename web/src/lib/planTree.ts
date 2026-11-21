@@ -80,9 +80,30 @@ export interface PlanNodeView {
 
 export type InsightSeverity = 'high' | 'medium' | 'info'
 
+export type PlanInsightKind =
+  | 'slowest'
+  | 'estimate'
+  | 'discards'
+  | 'sortSpill'
+  | 'hashBatches'
+  | 'hashAggSpill'
+  | 'heapFetches'
+  | 'seqLoop'
+  | 'lossyBitmap'
+  | 'workersShort'
+  | 'joinFilterDiscards'
+  | 'jitShare'
+  | 'triggerShare'
+  | 'never'
+  | 'planOnly'
+  | 'generic'
+
 export interface PlanInsight {
+  kind: PlanInsightKind
   severity: InsightSeverity
   nodeId: string | null
+  /** Raw figures behind the title: kB, ms, shares 0..1, counts. */
+  args?: Record<string, number | string>
   title: string
   detail: string
 }
@@ -422,6 +443,7 @@ function insightsOf(
       plan.nodes.length > 1
     ) {
       insights.push({
+        kind: 'slowest',
         severity: (slowest.timeShare ?? 0) >= 0.6 ? 'high' : 'medium',
         nodeId: slowest.id,
         title: translate('queries.plan.insight.slowestTitle', {
@@ -445,6 +467,7 @@ function insightsOf(
     for (const node of misestimated) {
       const under = (node.estimateFactor ?? 1) > 1
       insights.push({
+        kind: 'estimate',
         severity: spread(node.estimateFactor) >= 100 ? 'high' : 'medium',
         nodeId: node.id,
         title: translate('queries.plan.insight.estimateTitle', {
@@ -466,6 +489,7 @@ function insightsOf(
     const kept = node.actualRows ?? node.estimatedRows ?? 0
     if (node.title.includes('Seq Scan') && removed >= 1000 && removed / (removed + kept) >= 0.9) {
       insights.push({
+        kind: 'discards',
         severity: 'medium',
         nodeId: node.id,
         title: translate('queries.plan.insight.discardsTitle', {
@@ -484,6 +508,8 @@ function insightsOf(
       /external/i.test(str(node.raw['Sort Method']) ?? '')
     ) {
       insights.push({
+        kind: 'sortSpill',
+        ...(sortSpace === null ? {} : { args: { kb: sortSpace } }),
         severity: 'medium',
         nodeId: node.id,
         title:
@@ -499,6 +525,7 @@ function insightsOf(
     const batches = num(node.raw['Hash Batches'])
     if (batches !== null && batches > 1) {
       insights.push({
+        kind: 'hashBatches',
         severity: 'medium',
         nodeId: node.id,
         title: translate('queries.plan.insight.hashBatchesTitle', {
@@ -510,6 +537,7 @@ function insightsOf(
     const disk = num(node.raw['Disk Usage'])
     if (node.title.includes('HashAggregate') && disk !== null && disk > 0) {
       insights.push({
+        kind: 'hashAggSpill',
         severity: 'medium',
         nodeId: node.id,
         title: translate('queries.plan.insight.hashAggSpillTitle', {
@@ -526,6 +554,7 @@ function insightsOf(
       fetches * (node.loops ?? 1) >= 1000
     ) {
       insights.push({
+        kind: 'heapFetches',
         severity: 'info',
         nodeId: node.id,
         title: translate('queries.plan.insight.heapFetchesTitle', {
@@ -537,6 +566,7 @@ function insightsOf(
     }
     if ((node.loops ?? 0) >= 1000 && node.title.includes('Seq Scan')) {
       insights.push({
+        kind: 'seqLoop',
         severity: 'high',
         nodeId: node.id,
         title: translate('queries.plan.insight.seqLoopTitle', {
@@ -546,10 +576,108 @@ function insightsOf(
         detail: translate('queries.plan.insight.seqLoopDetail'),
       })
     }
+    const type = str(node.raw['Node Type'])
+    const lossy = num(node.raw['Lossy Heap Blocks'])
+    if (type === 'Bitmap Heap Scan' && lossy !== null && lossy > 0) {
+      const exact = num(node.raw['Exact Heap Blocks']) ?? 0
+      insights.push({
+        kind: 'lossyBitmap',
+        severity: 'medium',
+        nodeId: node.id,
+        args: { lossy, exact },
+        title: translate('queries.plan.insight.lossyBitmapTitle', {
+          lossy: formatCount(lossy),
+          total: formatCount(lossy + exact),
+        }),
+        detail: translate('queries.plan.insight.lossyBitmapDetail'),
+      })
+    }
+    const planned = num(node.raw['Workers Planned'])
+    const launched = num(node.raw['Workers Launched'])
+    if (
+      (type === 'Gather' || type === 'Gather Merge') &&
+      planned !== null &&
+      launched !== null &&
+      launched < planned
+    ) {
+      insights.push({
+        kind: 'workersShort',
+        severity: 'medium',
+        nodeId: node.id,
+        args: { launched, planned },
+        title: translate('queries.plan.insight.workersShortTitle', {
+          launched: formatCount(launched),
+          planned: formatCount(planned),
+        }),
+        detail: translate('queries.plan.insight.workersShortDetail'),
+      })
+    }
+    const joinRemoved = num(node.raw['Rows Removed by Join Filter'])
+    if (
+      (type === 'Nested Loop' || type === 'Hash Join' || type === 'Merge Join') &&
+      joinRemoved !== null
+    ) {
+      const loops = node.loops ?? 1
+      const removedTotal = joinRemoved * loops
+      const keptTotal = node.actualRows ?? 0
+      if (removedTotal >= 10000 && removedTotal >= 10 * keptTotal) {
+        insights.push({
+          kind: 'joinFilterDiscards',
+          severity: 'medium',
+          nodeId: node.id,
+          args: { removed: removedTotal, kept: keptTotal },
+          title: translate('queries.plan.insight.joinFilterDiscardsTitle', {
+            removed: formatCount(removedTotal),
+            kept: formatCount(keptTotal),
+          }),
+          detail: translate('queries.plan.insight.joinFilterDiscardsDetail'),
+        })
+      }
+    }
+  }
+  const execMs = plan.analyzed ? plan.executionMs : null
+  if (execMs !== null && execMs > 0) {
+    const jit =
+      isRecord(plan.root.JIT) && isRecord(plan.root.JIT.Timing)
+        ? num(plan.root.JIT.Timing.Total)
+        : null
+    if (jit !== null && jit >= 50 && jit / execMs >= 0.2) {
+      insights.push({
+        kind: 'jitShare',
+        severity: 'medium',
+        nodeId: null,
+        args: { ms: jit, pct: jit / execMs },
+        title: translate('queries.plan.insight.jitShareTitle', {
+          ms: formatMilliseconds(jit),
+          pct: percent(jit / execMs),
+        }),
+        detail: translate('queries.plan.insight.jitShareDetail'),
+      })
+    }
+    const timed = plan.triggers.filter((trigger) => trigger.ms !== null)
+    const triggerMs = timed.reduce((sum, trigger) => sum + (trigger.ms ?? 0), 0)
+    if (timed.length > 0 && triggerMs / execMs >= 0.2) {
+      const slowestTrigger = timed.reduce((top, trigger) =>
+        (trigger.ms ?? 0) > (top.ms ?? 0) ? trigger : top,
+      )
+      insights.push({
+        kind: 'triggerShare',
+        severity: 'medium',
+        nodeId: null,
+        args: { ms: triggerMs, pct: triggerMs / execMs, name: slowestTrigger.name },
+        title: translate('queries.plan.insight.triggerShareTitle', {
+          ms: formatMilliseconds(triggerMs),
+          pct: percent(triggerMs / execMs),
+          name: slowestTrigger.name,
+        }),
+        detail: translate('queries.plan.insight.triggerShareDetail'),
+      })
+    }
   }
   const never = plan.nodes.filter((node) => node.neverExecuted).length
   if (never > 0) {
     insights.push({
+      kind: 'never',
       severity: 'info',
       nodeId: null,
       title: translate('queries.plan.insight.neverTitle', { n: never }),
@@ -558,6 +686,7 @@ function insightsOf(
   }
   if (!plan.analyzed) {
     insights.push({
+      kind: 'planOnly',
       severity: 'info',
       nodeId: null,
       title: translate('queries.plan.insight.planOnlyTitle'),
@@ -566,6 +695,7 @@ function insightsOf(
   }
   if (valuesFrom === 'generic') {
     insights.push({
+      kind: 'generic',
       severity: 'info',
       nodeId: null,
       title: translate('queries.plan.insight.genericTitle'),
