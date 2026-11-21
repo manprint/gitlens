@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:24 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:27 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 6f984b348f7f85aa22acdf6675da9b1e02caab69 + tree 93bc421f45f3cc0ece9efcdd5a3f66a4e48f5ace · branch main · last WIP tree none
-- Last closure: unit:1.1:1
-- Next: open 1.2 · next eligible: 1.2
+- Base: HEAD 1746f81e22c02fe68dfe818f2e16d32ffaf83ddc + tree 7701dc0c9d14eb19f74f193ba1d8994967bd5983 · branch main · last WIP tree none
+- Last closure: unit:1.2:1
+- Next: open 1.3 · next eligible: 1.3
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -57,6 +57,7 @@ none
 - A1 (autonomous, 2026-11-21): the index holds staged deletions not owned by this plan (`web/src/features/indexes/SuggestionsPanel{,.test}.tsx`). Options: stop as blocker; unstage them; commit through a temporary index. Chosen: every plan-007 commit is built in a temporary index seeded from HEAD with only the unit's owned patch (base tree..closure tree), then the real index is reset for those paths only; the foreign staged entries stay untouched. Shared dirty files: each owned file is rebuilt as HEAD plus the unit's base→closure hunks projected line-wise (helper `pevc.py`); a hunk touching foreign lines stops the commit as a conflict. Risk: none to foreign work; reverse by `git reset --soft` of the plan commits. No hooks exist, so hooks are not bypassed (`GIT_INDEX_FILE=… git commit` runs them anyway).
 - A2 (autonomous): plan files (untracked, written by the planning session for this request) enter the 0.1 completion commit.
 - Baseline for regression comparison (0.1): G-GO-FULL 35 packages ok, 0 FAIL, 1 SKIP; vitest 227 files / 2027 tests; G-I18N and G-RO pass. B1: `make web-lint` fails at `web-gen-api` (`git diff --exit-code -- web/src/api/generated.ts`) only because that file holds uncommitted plan-006 hunks; gen output is idempotent.
+- A4 (autonomous, 2026-11-21 07:30 UTC): plan-007 units edit files that the uncommitted plan 006 created (untracked locale catalogs, help topics, `findingCheck.ts`, …), so no unit commit could hold them without capturing plan-006 content (§6 safety stop). Options: stop and ask; leave those edits uncommitted; commit the plan-006 tree separately first. Plan 006 is complete and live (dev-20261121b), no other session writes, and the plan recommended this commit (D20). Chosen: separate commit bf38f97 `chore(006): record plan 006 I18n work …` = HEAD + baseline snapshot 1d7158a without plan 007, without `web/src/**/node_modules/`, `internal/webui/dist/index.html`, `BUGFIX_ENHANCEMENTS_20_11_2026.md` (528 paths, includes the previously staged SuggestionsPanel deletions). Local only, no push; reverse with an interactive history edit dropping bf38f97 (content stays identical in the working tree). A1 is moot from here: the index is clean.
 - A3 (autonomous): G-WEB-FULL = `make web-typecheck`; `pnpm run gen:api` then no diff against the pre-run snapshot of `web/src/api/generated.ts`; `pnpm run lint && pnpm run format:check` (web/); `make web-coverage-gate web-budget`. Applies until the plan-006 hunks of `generated.ts` are committed by the user; acceptance unchanged (gen idempotence still asserted).
 
 ## 9. Blockers
@@ -71,7 +72,7 @@ none
 | 0 Baseline and test images | DONE | 1 | 0.1–0.2 | unit:P0:1 |
 | 1 Multixact wraparound rule | IN_PROGRESS | 1 | 1.1–1.3 | — |
 | · 1.1 Agent metric pg_max_datminmxid_age | DONE | 1 | — | unit:1.1:1 |
-| · 1.2 Advisor rule, texts, alert seed | TODO | 1 | — | — |
+| · 1.2 Advisor rule, texts, alert seed | DONE | 1 | — | unit:1.2:1 |
 | · 1.3 Console texts, help, verification SQL, README | TODO | 1 | — | — |
 | 2 ASH dimensions | TODO | 1 | 2.1–2.5 | — |
 | 3 Notification channels | TODO | 1 | 3.1–3.4 | — |

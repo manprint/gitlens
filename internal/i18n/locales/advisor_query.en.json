@@ -30,5 +30,8 @@
   "advisor.txn.high_rollback_ratio.remediation": "Investigate transaction failures and retry behavior",
   "advisor.txn.wraparound_risk.title": "Transaction ID wraparound risk",
   "advisor.txn.wraparound_risk.detail": "{metric} is {observed}, above {threshold}",
-  "advisor.txn.wraparound_risk.remediation": "Run maintenance immediately and resolve vacuum starvation"
+  "advisor.txn.wraparound_risk.remediation": "Run maintenance immediately and resolve vacuum starvation",
+  "advisor.txn.multixact_wraparound_risk.title": "Multixact ID wraparound risk",
+  "advisor.txn.multixact_wraparound_risk.detail": "The oldest multixact ID in a database is {observed} multixacts old ({metric}, above {threshold}). PostgreSQL stops creating multixacts near 2 billion.",
+  "advisor.txn.multixact_wraparound_risk.remediation": "Run VACUUM (FREEZE) on the tables with the oldest relminmxid, and check what blocks autovacuum (long transactions, prepared transactions, replication slots)."
 }

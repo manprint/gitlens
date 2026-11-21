@@ -190,6 +190,10 @@ func TestMigrations_SeededRuleMetricsAreProduced(t *testing.T) {
 	more, err := migrationFS.ReadFile("migrations/0029_redundancy_rule.sql")
 	require.NoError(t, err)
 	data = append(data, more...)
+	// 0032 seeds txn.multixact_wraparound_risk (plan 007, 1.2).
+	more, err = migrationFS.ReadFile("migrations/0032_multixact_rule.sql")
+	require.NoError(t, err)
+	data = append(data, more...)
 	seed := regexp.MustCompile(`\('([a-z0-9_.]+)',\s*'(?:critical|warning|info)',\s*'(?:instance|cluster|database)',\s*'([a-z0-9_]+)'`)
 	rows := seed.FindAllStringSubmatch(string(data), -1)
 	require.NotEmpty(t, rows, "no seeded rules found: the parser no longer matches the migration")
@@ -287,4 +291,15 @@ func TestHAV64MigrationSeedsRedundancyRule(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "internal", "alert", "source_sql.go"))
 	require.NoError(t, err)
 	require.Contains(t, string(body), "replica.redundancy_reduced")
+}
+
+// MXW-005: migration 0032 seeds the multixact wraparound rule and keeps an
+// operator's edit.
+func TestMXW005_MultixactRuleMigration(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0032_multixact_rule.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	require.Contains(t, sql, "'txn.multixact_wraparound_risk'")
+	require.Contains(t, sql, "'pg_max_datminmxid_age'")
+	require.Contains(t, sql, "ON CONFLICT DO NOTHING")
 }

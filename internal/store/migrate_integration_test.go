@@ -257,3 +257,22 @@ func TestMigrateNOTIMIGINT001_NotificationChannels(t *testing.T) {
 	_, err = pool.Exec(ctx, `INSERT INTO notification_channels (kind, url) VALUES ('slack', 'https://hooks.example')`)
 	require.Error(t, err, "updated_by is required")
 }
+
+// INT-MXW-002: after migration the multixact rule row exists once, and
+// applying 0032 again changes nothing.
+func TestINTMXW002_MultixactRuleSeededOnce(t *testing.T) {
+	ctx, _, pool := newMigrationTestPool(t)
+	require.NoError(t, Migrate(ctx, pool))
+	data, err := migrationFS.ReadFile("migrations/0032_multixact_rule.sql")
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, string(data))
+	require.NoError(t, err, "re-apply 0032")
+	require.NoError(t, Migrate(ctx, pool))
+	var n int
+	var metric string
+	var threshold float64
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*), min(metric), min(threshold) FROM alert_rules WHERE rule_id = 'txn.multixact_wraparound_risk'`).Scan(&n, &metric, &threshold))
+	require.Equal(t, 1, n)
+	require.Equal(t, "pg_max_datminmxid_age", metric)
+	require.Equal(t, 1e9, threshold)
+}

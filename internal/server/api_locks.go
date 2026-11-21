@@ -155,7 +155,7 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 		         'pg_connections_by_database','pg_connections_by_application','pg_backends',
 		         'pg_connections_by_origin','pg_connections_by_user','pg_connections_by_client',
 		         'pg_max_xact_age_seconds','pg_max_idle_in_transaction_seconds','pg_max_state_age_seconds',
-		         'pg_prepared_xacts','pg_oldest_prepared_xact_seconds','pg_max_datfrozenxid_age',
+		         'pg_prepared_xacts','pg_oldest_prepared_xact_seconds','pg_max_datfrozenxid_age','pg_max_datminmxid_age',
 		         'pg_xmin_horizon_age_xids'))
 		    OR (ts >= now() - interval '90 seconds' AND metric = 'pg_deadlocks_total'))
 		ORDER BY ts DESC`, id)

@@ -1,6 +1,7 @@
 package advisor
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/manprint/pglens/internal/pgtype"
@@ -173,4 +174,28 @@ func TestRule_query_temp_bytes_high_EvidenceCarriesTempFiles(t *testing.T) {
 	got = r.Evaluate(s)
 	require.Len(t, got, 1)
 	require.NotContains(t, got[0].Evidence, "pg_temp_files_total")
+}
+
+// MXW-003: the multixact wraparound rule fires just above one billion and
+// stays quiet at or below it.
+func TestMXW003_MultixactRuleThreshold(t *testing.T) {
+	r := ruleByID(t, "txn.multixact_wraparound_risk")
+	require.Equal(t, SeverityCritical, r.Severity())
+	assertRuleContract(t, r, metricSnapshot("pg_max_datminmxid_age", 1_000_000_001))
+	require.Empty(t, r.Evaluate(metricSnapshot("pg_max_datminmxid_age", 999_999_999)))
+}
+
+// MXW-004: the finding reads in English and Italian and both carry the age.
+func TestMXW004_MultixactFindingTextInEveryLocale(t *testing.T) {
+	f := ruleByID(t, "txn.multixact_wraparound_risk").Evaluate(metricSnapshot("pg_max_datminmxid_age", 1_234_567_890))
+	require.Len(t, f, 1)
+	require.Equal(t, "Multixact ID wraparound risk", f[0].Title)
+	for _, lang := range []string{"en", "it"} {
+		title, detail, remediation := f[0].Message.Render(lang)
+		require.NotEmpty(t, title, lang)
+		require.NotEmpty(t, remediation, lang)
+		digits := strings.NewReplacer(",", "", ".", "", " ", "", " ", "", " ", "").Replace(detail)
+		require.Contains(t, digits, "1234567890", lang+": "+detail)
+		require.NotContains(t, title+detail+remediation, "{", lang)
+	}
 }

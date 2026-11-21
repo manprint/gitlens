@@ -14,3 +14,9 @@ Gates: baseline recorded (0.1), image check (0.2) pass; review: self-review (age
 
 ## 2026-11-21 1.1/1 complete unit:1.1:1
 Gates: G-GO-FOCUS pass (MXW-001, MXW-002); G-GO-INT pass (INT-MXW-001 pg15+pg18); G-RO pass; review: self-review (agent:opus) accepted; changes: internal/check/activity.go, activity_test.go, activity_integration_test.go, xmin_horizon_test.go (mock matches datminmxid); notes: second query (not a combined column), same error path as datfrozenxid
+
+## 2026-11-21 decision A4
+Plan-006 working tree committed separately as bf38f97 (528 paths) because plan-007 units edit files plan 006 created and never committed; see STATE §8 A4.
+
+## 2026-11-21 1.2/1 complete unit:1.2:1
+Gates: G-GO-FOCUS pass (MXW-003, MXW-004, MXW-005, TestCatalogParity, seeded-rule test); package tests advisor/server/i18n/store/alert ok; G-GO-INT pass (INT-MXW-002); review: self-review (agent:opus) accepted; changes: internal/advisor/rules_query.go(+test), internal/i18n/locales/{advisor_query,en,it}*.json, internal/server/api_locks.go, internal/store/migrations/0032_multixact_rule.sql, internal/store/migrate{,_integration}_test.go; notes: migration 0032 (D19); notification texts rule.txn.multixact_wraparound_risk.* added (describer title/problem/actions); describe_evidence.go unchanged: its frozen-table evidence orders by relfrozenxid, metrics_tables has no relminmxid; api_locks.go lists the new metric for the activity view

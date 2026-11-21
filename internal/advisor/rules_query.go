@@ -217,6 +217,7 @@ func init() {
 			return out
 		}},
 		metricRule("txn.wraparound_risk", SeverityCritical, "pg_max_datfrozenxid_age", wraparoundAge),
+		metricRule("txn.multixact_wraparound_risk", SeverityCritical, "pg_max_datminmxid_age", wraparoundAge),
 	}
 	for _, r := range rules {
 		Register(r)
