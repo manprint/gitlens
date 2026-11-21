@@ -3284,7 +3284,7 @@ export interface components {
             /** @description The channel's error with every webhook address and its secret parts removed; absent when delivered. */
             error?: string;
         };
-        /** @description Per-kind arguments: explain requires queryid and may include datname, analyze or params; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. index_check requires queryid, datname, index_schema, index_relation and index_columns and may include index_include; it plans the statement with and without a hypothetical hypopg index in a read-only transaction. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
+        /** @description Per-kind arguments: explain requires queryid and may include datname, analyze, params, settings or hints; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. index_check requires queryid, datname, index_schema, index_relation and index_columns and may include index_include; it plans the statement with and without a hypothetical hypopg index in a read-only transaction. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
         CommandArgs: {
             queryid?: number | string;
             datname?: string;
@@ -3304,7 +3304,18 @@ export interface components {
             index_include?: string[];
             /** @description explain only: the values of the statement's $1, $2, ... in order, as text PostgreSQL reads with each parameter's type; null is SQL NULL. The agent binds them and never splices them into the statement. Without them, a statement with placeholders is analyzed with the values of a recent execution pg_stat_activity shows, and planned plan-only with GENERIC_PLAN on PostgreSQL 16+. */
             params?: (string | null)[];
+            /** @description explain only: planner settings of a tuning-workbook variant. The agent applies each with set_config local to the read-only transaction, in name order, before planning. Values: on/off for the enable_* settings and jit; work_mem (64 to 262144) and effective_cache_size (8 to 1073741824) as whole kB, digits only; the cost settings as a decimal (up to 4 digits and 6 decimals); hash_mem_multiplier the same, 1 to 1000; join_collapse_limit and from_collapse_limit 1 to 100; max_parallel_workers_per_gather 0 to 8; plan_cache_mode auto, force_generic_plan or force_custom_plan. */
+            settings?: {
+                [key: string]: string;
+            };
+            /** @description explain only: pg_hint_plan hints, placed by the agent in a /*+ ... *\/ comment immediately before the statement. Letters, digits, space and _ , ( ) # + - . " only; a Set hint is refused (use settings). Needs pg_hint_plan preloaded on the server. */
+            hints?: string;
         };
+        /**
+         * @description A planner setting a tuning-workbook variant may change.
+         * @enum {string}
+         */
+        WorkbookSettingName: "enable_seqscan" | "enable_indexscan" | "enable_indexonlyscan" | "enable_bitmapscan" | "enable_tidscan" | "enable_nestloop" | "enable_hashjoin" | "enable_mergejoin" | "enable_hashagg" | "enable_sort" | "enable_incremental_sort" | "enable_material" | "enable_memoize" | "enable_gathermerge" | "enable_parallel_append" | "enable_parallel_hash" | "enable_partition_pruning" | "enable_partitionwise_join" | "enable_partitionwise_aggregate" | "jit" | "work_mem" | "effective_cache_size" | "random_page_cost" | "seq_page_cost" | "cpu_tuple_cost" | "cpu_index_tuple_cost" | "cpu_operator_cost" | "hash_mem_multiplier" | "join_collapse_limit" | "from_collapse_limit" | "max_parallel_workers_per_gather" | "plan_cache_mode";
         /** @description A command request contains identifiers and options only; query text is never sent. */
         CreateCommandRequest: {
             /** @enum {string} */

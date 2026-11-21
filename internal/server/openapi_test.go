@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/manprint/pglens/internal/alert"
+	"github.com/manprint/pglens/internal/command"
 	"github.com/manprint/pglens/internal/server"
 	"github.com/manprint/pglens/internal/wire"
 	"go.yaml.in/yaml/v3"
@@ -605,5 +606,21 @@ func TestOpenAPIPushExampleIsAcceptedByIngest(t *testing.T) {
 	agentID, err := uuid.Parse(env.AgentID)
 	if err != nil || agentID == uuid.Nil {
 		t.Fatalf("example agent_id %q is not a UUID the server accepts: %v", env.AgentID, err)
+	}
+}
+
+func TestWBK014_OpenAPISettingNamesMatchTheTable(t *testing.T) {
+	doc := loadOpenAPIDocument(t)
+	schema := doc["components"].(map[string]any)["schemas"].(map[string]any)["WorkbookSettingName"].(map[string]any)
+	var got []string
+	for _, v := range schema["enum"].([]any) {
+		got = append(got, v.(string))
+	}
+	var want []string
+	for _, s := range command.WorkbookSettings {
+		want = append(want, s.Name)
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("WorkbookSettingName enum %v, want %v", got, want)
 	}
 }

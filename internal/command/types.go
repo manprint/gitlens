@@ -58,6 +58,13 @@ type Args struct {
 	IndexRelation string   `json:"index_relation,omitempty"`
 	IndexColumns  []string `json:"index_columns,omitempty"`
 	IndexInclude  []string `json:"index_include,omitempty"`
+	// Settings and Hints turn an explain into a tuning-workbook variant:
+	// planner settings the agent applies with set_config local to the
+	// read-only transaction, and pg_hint_plan hints it places in a comment
+	// before the statement. Both are checked against fixed rules (workbook.go);
+	// neither can carry SQL.
+	Settings map[string]string `json:"settings,omitempty"`
+	Hints    string            `json:"hints,omitempty"`
 }
 
 // Limits on Params: PostgreSQL statements rarely take more, and the values
@@ -72,18 +79,20 @@ const (
 // precision when they cross the JavaScript boundary.
 func (a *Args) UnmarshalJSON(data []byte) error {
 	type wireArgs struct {
-		QueryID       json.RawMessage `json:"queryid"`
-		Datname       string          `json:"datname,omitempty"`
-		Analyze       bool            `json:"analyze,omitempty"`
-		PID           *int            `json:"pid,omitempty"`
-		Schema        string          `json:"schema,omitempty"`
-		Relation      string          `json:"relation,omitempty"`
-		BackendStart  *time.Time      `json:"backend_start,omitempty"`
-		Params        []*string       `json:"params,omitempty"`
-		IndexSchema   string          `json:"index_schema,omitempty"`
-		IndexRelation string          `json:"index_relation,omitempty"`
-		IndexColumns  []string        `json:"index_columns,omitempty"`
-		IndexInclude  []string        `json:"index_include,omitempty"`
+		QueryID       json.RawMessage   `json:"queryid"`
+		Datname       string            `json:"datname,omitempty"`
+		Analyze       bool              `json:"analyze,omitempty"`
+		PID           *int              `json:"pid,omitempty"`
+		Schema        string            `json:"schema,omitempty"`
+		Relation      string            `json:"relation,omitempty"`
+		BackendStart  *time.Time        `json:"backend_start,omitempty"`
+		Params        []*string         `json:"params,omitempty"`
+		IndexSchema   string            `json:"index_schema,omitempty"`
+		IndexRelation string            `json:"index_relation,omitempty"`
+		IndexColumns  []string          `json:"index_columns,omitempty"`
+		IndexInclude  []string          `json:"index_include,omitempty"`
+		Settings      map[string]string `json:"settings,omitempty"`
+		Hints         string            `json:"hints,omitempty"`
 	}
 
 	var wire wireArgs
@@ -105,6 +114,8 @@ func (a *Args) UnmarshalJSON(data []byte) error {
 		IndexRelation: wire.IndexRelation,
 		IndexColumns:  wire.IndexColumns,
 		IndexInclude:  wire.IndexInclude,
+		Settings:      wire.Settings,
+		Hints:         wire.Hints,
 	}
 	if len(wire.QueryID) == 0 || bytes.Equal(wire.QueryID, []byte("null")) {
 		return nil
@@ -145,6 +156,9 @@ func (a Args) Validate(k Kind) error {
 	if k != KindIndexCheck && a.hasIndexFields() {
 		return fmt.Errorf("%s rejects index_schema, index_relation, index_columns and index_include", k)
 	}
+	if k != KindExplain && (a.Settings != nil || a.Hints != "") {
+		return fmt.Errorf("%s rejects settings and hints", k)
+	}
 
 	switch k {
 	case KindExplain:
@@ -161,6 +175,12 @@ func (a Args) Validate(k Kind) error {
 			return fmt.Errorf("explain rejects backend_start")
 		}
 		if err := validateParams(a.Params); err != nil {
+			return err
+		}
+		if err := ValidateSettings(a.Settings); err != nil {
+			return err
+		}
+		if err := ValidateHints(a.Hints); err != nil {
 			return err
 		}
 	case KindCancel, KindTerminate:

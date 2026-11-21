@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 16:13 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 16:16 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD db08a184555b883803bd135feb50f4be4df516d6 + tree d2462eb50d059100b4f4fb66b43a602a398e461a · branch main · last WIP tree none
-- Last closure: unit:P12:1
-- Next: open 13.1 · next eligible: 13.1
+- Base: HEAD 1ef70b2477bad1fce05cb4efca7278e38a00e25e + tree 4bcd9f2475cf317d2dbe531cfffa926d1e73e87e · branch main · last WIP tree none
+- Last closure: unit:13.1:1
+- Next: open 13.2 · next eligible: 13.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-P12: none
+none
 
 ## 6. Checkpoint
 none
@@ -97,6 +97,7 @@ none
 - A40 (12.2): the two process queries live on `agent.Manager` (`BackendPID`, `ProcessSessions`, `internal/agent/processes.go`) so `TestINTRO001` runs them; `host.Collector.ProcessName` added. The postmaster pid is cached and asked again after any `/proc` failure (a pooled connection gives no "new connection" signal; every backend has the same parent). Guard: the backend and its parent must be named `postgres`/`postmaster` in the agent's `/proc`, else the target is skipped (kind `namespace`, logged once per hour) so a server in another PID namespace never reports unrelated host processes. `TestINTPROC001` pgtest cases skip (`container processes not visible in /proc`: each container has its own PID namespace); its `host-pid` case (A42) runs for real.
 - A41 (12.3): `/host/processes/top` averages each group over every sample time in range (absent = 0), `max_rss_bytes` is the largest single process; I/O average null when no process of the group had counters. metrics_processes joins the retention whitelist (7 d, floor 3, no compression); `limit` > 200 is a 400, not capped.
 - A42 (P12 review → 12.2 attempt 2, tests only): `TestINTPROC001/host-pid` starts PostgreSQL 18 with `PidMode=host`, whose processes are in the test's `/proc`, and must not skip; it also asserts the phase rule "no command line or path in any fact" (label keys and value keys whitelisted, no label starting with `/`). `moby/moby/api` becomes a direct test dependency.
+- A43 (13.1): TestWBK002 asks that a body with keys `sql`/`statement` decode to the same Args as without them; Args already decodes with DisallowUnknownFields (TestArgsUnmarshalJSONRejectsUnknownFields), so such a body is refused instead. Stricter than the plan and the same I-3 guarantee (no SQL text can reach the agent); the test asserts the error. Added TestWBK014 (OpenAPI WorkbookSettingName enum equals command.WorkbookSettings).
 
 ## 9. Blockers
 none

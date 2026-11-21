@@ -197,3 +197,6 @@ Gates: TestINTPROC001 host-pid PASS (pg15/pg18 pgtest cases skip, documented); l
 
 ## 2026-11-21 P12/1 complete unit:P12:1
 Gates: G-GO-FULL 0 issues; G-GO-INT TestINTPROC001 (host-pid PASS, pgtest cases skip documented) + TestINTPROC002 PASS; G-RO INTRO001 pg15/pg18 + INTRO003 PASS; G-API no diff; G-WEB-FULL EXIT 0 (2 pre-existing eslint warnings); G-I18N PASS; full vitest 241 files; review: self-review (agent:opus) accepted; changes: none (closure); notes: Review agent-1 (opus): /proc stat parsing from last ')' with spaces/parens tested (PROC001); pid reuse via start ticks; I-1 holds: process queries on agent.Manager covered by TestINTRO001; no command line/path shipped, asserted in TestINTPROC001/host-pid; skip record corrected (A40, A42); README Per-process metrics + help host-processes. Accepted.
+
+## 2026-11-21 13.1/1 complete unit:13.1:1
+Gates: G-GO-FOCUS ./internal/command/ PASS; TestWBK014+TestOpenAPI* PASS; G-API regenerated (generated.ts), api-docs no diff; lint 0; tsc/prettier ok; review: self-review (agent:opus) accepted; changes: Args.Settings/Hints (omitempty), explain-only; workbook.go WorkbookSettings (32), ValidateSetting/ValidateSettings/SettingValue/ValidateHints; OpenAPI CommandArgs.settings/hints + WorkbookSettingName enum; notes: A43; review agent-1 (self): no SQL path, hints charset excludes * / ; ' newline
