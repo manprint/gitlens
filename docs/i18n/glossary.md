@@ -4,7 +4,7 @@ Una sola traduzione per termine, in tutte le aree. Chi traduce un'area legge que
 
 ## Restano in inglese
 
-vacuum, autovacuum, analyze, WAL, checkpoint, deadlock, ctid, xmin, xid, LSN, TOAST, bloat, HOT, agent (componente pglens: "l’agent", "dell’agent"), `pg_*` (viste, funzioni, estensioni), nomi dei setting (`work_mem`, `track_activity_query_size`, …), SQL, identificatori, queryid, backend, wait event, Wait events, lag, slot, standby, failover, switchover, Readiness, Alert (invariabile), pglens, TimescaleDB, PostgreSQL, Full HD, UTC.
+vacuum, autovacuum, analyze, WAL, checkpoint, deadlock, ctid, xmin, xid, LSN, TOAST, bloat, HOT, agent (componente pglens: "l’agent", "dell’agent"), `pg_*` (viste, funzioni, estensioni), nomi dei setting (`work_mem`, `track_activity_query_size`, …), SQL, identificatori, queryid, backend, wait event, Wait events, lag, slot, standby, failover, switchover, Readiness, Alert (invariabile), pglens, TimescaleDB, PostgreSQL, Full HD, UTC, nomi delle classi di log (`lock.deadlock`, …), MCP.
 
 ## Traduzioni
 
@@ -72,6 +72,12 @@ vacuum, autovacuum, analyze, WAL, checkpoint, deadlock, ctid, xmin, xid, LSN, TO
 | retry | riprova |
 | down / up | non raggiungibile / attivo |
 | severity: critical, warning, info | critico, avviso, info |
+| Service (sqlcommenter tag) | Servizio |
+| Endpoint | Endpoint |
+| Processes | Processi |
+| Autovacuum runs | Esecuzioni di autovacuum |
+| Tuning workbook | Quaderno di tuning |
+| MCP server | Server MCP |
 
 ## Stile
 

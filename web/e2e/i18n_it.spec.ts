@@ -6,7 +6,16 @@ import { FULLHD_VIEWPORTS, fullHdRoute } from './fullhd_routes'
 import { collectConsoleErrors, liveTimeout } from './visual_helpers'
 
 const LANGUAGE = /^(Language|Lingua)$/
-const FIT_PATHS = ['/', '/indexes?tab=indexes', '/instances/:instanceId/ash', '/alerts/rules']
+// The last three are the routes plan 007 added (logs, workbook, retention).
+const FIT_PATHS = [
+  '/',
+  '/indexes?tab=indexes',
+  '/instances/:instanceId/ash',
+  '/alerts/rules',
+  '/instances/:instanceId/logs',
+  '/instances/:instanceId/queries/:queryid/workbooks/:workbookId',
+  '/settings?tab=retention',
+]
 
 async function chooseLanguage(page: Page, code: string): Promise<void> {
   await page.goto('/settings?tab=preferences')
