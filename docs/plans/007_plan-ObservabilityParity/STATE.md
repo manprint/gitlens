@@ -11,8 +11,8 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
 - Base: HEAD b728cb73793b479d4511e57fab1c82f7a71a34af + tree 1d7158a81017f5d5429515bcfd80e14a468384f6 · branch main · last WIP tree none
-- Last closure: unit:0.2:1
-- Next: open P0 · next eligible: P0
+- Last closure: unit:P0:1
+- Next: open 1.1 · next eligible: 1.1
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -51,21 +51,13 @@ none
 none
 
 ## 7. Open-phase evidence
-Baseline (0.1, HEAD b728cb7, 404 dirty paths: web 293, internal 89, cmd 9, docs 4, other 9; 76 untracked):
-| Gate | Result | Count |
-|------|--------|-------|
-| G-GO-FULL | pass | fmt-check, golangci-lint 0 issues, vet ×3; `make test` 35 packages ok, 2773 PASS lines (with subtests), 0 FAIL, 1 SKIP |
-| G-WEB-FULL | pass with baseline deviation B1 | typecheck ok; lint + format:check ok; coverage gate all floors OK, vitest 227 files / 2027 tests; bundle budget PASS (entry 246.31 KiB) |
-| G-I18N | pass | 4 Go packages ok; vitest 5 files / 48 tests |
-| G-RO | pass | TestINTRO001_AgentOnlyReads PASS (PG 15 and 18 via pgtest) |
-- B1 (baseline, environmental): `make web-lint` runs `web-gen-api`, whose `git diff --exit-code -- web/src/api/generated.ts` fails while that file holds the uncommitted plan-006 hunks. `pnpm run gen:api` output equals the baseline snapshot (idempotent), so the check itself is green in substance. Rule for this run (A3): G-WEB-FULL = `make web-typecheck`, `pnpm run gen:api` with `git diff --quiet <unit base tree or snapshot> -- web/src/api/generated.ts` replaced by the G-API second-run no-diff check, `pnpm run lint && pnpm run format:check` (web/), `make web-coverage-gate web-budget`.
-
-- 0.2 S4: `pglens-pgext:18` built (440 MB); `hypopg.so` and `pg_hint_plan.so` present, no `/pg_hint_plan.FAILED`; live check: `CREATE EXTENSION hypopg` → 1.4.5, `LOAD 'pg_hint_plan'` ok. WBK-INT-003 runs (not skipped).
+none
 
 ## 8. Revisions and decisions still needed
-- A1 (autonomous, 2026-11-21): the index holds staged deletions not owned by this plan (`web/src/features/indexes/SuggestionsPanel{,.test}.tsx`). Options: stop as blocker; unstage them; commit through a temporary index. Chosen: every plan-007 commit is built in a temporary index seeded from HEAD with only the unit's owned patch (base tree..closure tree), then the real index is reset for those paths only; the foreign staged entries stay untouched. Risk: none to foreign work; reverse by `git reset --soft` of the plan commits. No hooks exist, so hooks are not bypassed (`GIT_INDEX_FILE=… git commit` runs them anyway).
+- A1 (autonomous, 2026-11-21): the index holds staged deletions not owned by this plan (`web/src/features/indexes/SuggestionsPanel{,.test}.tsx`). Options: stop as blocker; unstage them; commit through a temporary index. Chosen: every plan-007 commit is built in a temporary index seeded from HEAD with only the unit's owned patch (base tree..closure tree), then the real index is reset for those paths only; the foreign staged entries stay untouched. Shared dirty files: each owned file is rebuilt as HEAD plus the unit's base→closure hunks projected line-wise (helper `pevc.py`); a hunk touching foreign lines stops the commit as a conflict. Risk: none to foreign work; reverse by `git reset --soft` of the plan commits. No hooks exist, so hooks are not bypassed (`GIT_INDEX_FILE=… git commit` runs them anyway).
 - A2 (autonomous): plan files (untracked, written by the planning session for this request) enter the 0.1 completion commit.
-- A3 (autonomous): G-WEB-FULL runs with the B1 substitution of §7 until the plan-006 hunks of `generated.ts` are committed by the user; acceptance unchanged (gen idempotence still asserted).
+- Baseline for regression comparison (0.1): G-GO-FULL 35 packages ok, 0 FAIL, 1 SKIP; vitest 227 files / 2027 tests; G-I18N and G-RO pass. B1: `make web-lint` fails at `web-gen-api` (`git diff --exit-code -- web/src/api/generated.ts`) only because that file holds uncommitted plan-006 hunks; gen output is idempotent.
+- A3 (autonomous): G-WEB-FULL = `make web-typecheck`; `pnpm run gen:api` then no diff against the pre-run snapshot of `web/src/api/generated.ts`; `pnpm run lint && pnpm run format:check` (web/); `make web-coverage-gate web-budget`. Applies until the plan-006 hunks of `generated.ts` are committed by the user; acceptance unchanged (gen idempotence still asserted).
 
 ## 9. Blockers
 none
@@ -76,9 +68,7 @@ none
 ## 11. Board
 | Phase | Status | Attempt | Sub-phases | Closure ref |
 |-------|--------|---------|------------|-------------|
-| 0 Baseline and test images | IN_PROGRESS | 1 | 0.1–0.2 | — |
-| · 0.1 Baseline gates recorded | DONE | 1 | — | unit:0.1:1 |
-| · 0.2 Test image hypopg and pg_hint_plan | DONE | 1 | — | unit:0.2:1 |
+| 0 Baseline and test images | DONE | 1 | 0.1–0.2 | unit:P0:1 |
 | 1 Multixact wraparound rule | TODO | 1 | 1.1–1.3 | — |
 | 2 ASH dimensions | TODO | 1 | 2.1–2.5 | — |
 | 3 Notification channels | TODO | 1 | 3.1–3.4 | — |
