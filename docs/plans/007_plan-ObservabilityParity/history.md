@@ -107,3 +107,6 @@ Gates: G-GO-FOCUS server/store ok; INT-PGL-004 ok; RETINT001-003, RLP ok; store 
 
 ## 2026-11-21 6.6/1 complete unit:6.6:1
 Gates: G-GO-FOCUS (readiness, server, i18n, store, pglog, alert, agent, deploy), golangci-lint 0 issues, G-GO-INT TestINTPGL001-005 PASS, G-RO PASS, G-API no diff, G-WEB-STATIC (tsc, eslint 0 errors, prettier), vitest full 2072 (2 route inventories fixed, rerun green); review: self-review (agent:opus) accepted; changes: migration 0037 log.* alert rules; describer quotes log lines; /api/v1/logs + classes; console Logs page; RDY-LOG-01 readiness rule; help chapter logs en/it; README PostgreSQL logs; notes: A23
+
+## 2026-11-21 P6/1 complete unit:P6:1
+Gates: G-GO-FULL rc=0, G-GO-INT TestINTPGL001-005 PASS, G-RO TestINTRO001 PASS, G-API no diff, G-WEB-FULL rc=0 (2072 tests, coverage gate, budget), G-I18N rc=0; review: self-review (agent:opus) accepted; changes: none (closure); notes: review: integration (INTPGL001-005), I-1 G-RO, I-4 TestPGL020, I-9 TestPGL014/015, position rules A19 (pglog source tests), default config off TestPGL016 + startLogs guard; README PostgreSQL logs and MONITORING_READINESS RDY-LOG-01 checked

@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:47 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:59 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -11,8 +11,8 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
 - Base: HEAD 9df747293847551697d7e3083f1da37a38c9f338 + tree c6f08b221aab21629f899f81753316568a5fd07d · branch main · last WIP tree none
-- Last closure: unit:6.6:1
-- Next: open P6 · next eligible: P6
+- Last closure: unit:P6:1
+- Next: open 7.1 · next eligible: 7.1
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -96,13 +96,7 @@ none
 | · P4 closure | IN_PROGRESS | 1 | — | — |
 | 5 Rollups | DONE | 1 | 5.1–5.4 | unit:P5:1 |
 | · P5 closure | IN_PROGRESS | 1 | — | — |
-| 6 Log ingest | IN_PROGRESS | 1 | 6.1–6.6 | — |
-| · 6.1 | DONE | 1 | — | unit:6.1:1 |
-| · 6.2 | DONE | 1 | — | unit:6.2:1 |
-| · 6.3 | DONE | 1 | — | unit:6.3:1 |
-| · 6.4 | DONE | 1 | — | unit:6.4:1 |
-| · 6.5 | DONE | 1 | — | unit:6.5:1 |
-| · 6.6 | DONE | 1 | — | unit:6.6:1 |
+| 6 Log ingest | DONE | 1 | 6.1–6.6 | unit:P6:1 |
 | · P6 closure | TODO | 1 | — | — |
 | 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |
 | 8 Autovacuum history | TODO | 1 | 8.1–8.3 | — |
