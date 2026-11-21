@@ -44,3 +44,6 @@ Gates: G-WEB-STATIC (make web-typecheck web-lint), G-WEB-UNIT (features/ash, lib
 
 ## 2026-11-21 2.5/2 complete unit:2.5:2
 Gates: G-WEB-UNIT testIds + ash 8 files 64 tests; prettier; review: self-review (agent:opus) accepted; changes: two test titles lose their UI-ASHD ID so each ID owns one title; notes: attempt 2 after P2 G-WEB-FULL failure
+
+## 2026-11-21 P2/2 complete unit:P2:2
+Gates: G-GO-FULL 35 ok; G-GO-INT TestINTASHD001-004 (001 on PG15 and PG18) and old ASH integration tests; G-RO; G-API no diff; G-I18N 48; G-WEB-FULL typecheck/lint/budget (attempt 1) and coverage gate 227 files/2038 tests (attempt 2); review: self-review (agent:opus) accepted; changes: none (closure); notes: attempt 1 failed on duplicate UI-ASHD test IDs, fixed by 2.5 attempt 2; review: I-1 the sampler only adds SELECT columns and G-RO is green; I-2 TestASHD003 keeps the sample total under the key cap; I-5 locale parity green; old ASH tests only had mechanical row() call rewrites, assertions unchanged; README covers 2.2 and 2.5
