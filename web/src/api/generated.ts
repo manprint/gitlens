@@ -1561,6 +1561,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer one Model Context Protocol message (read-only tools).
+         * @description JSON-RPC 2.0 over MCP Streamable HTTP, one message per POST, no stream and no session. Present only when PGLENS_MCP_ENABLED=true. Every tool is one GET of this API served with the caller's credential. See README "MCP server". Other methods answer 405 with Allow POST.
+         */
+        post: operations["mcpMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -6850,6 +6870,78 @@ export interface operations {
             };
             /** @description Command storage is unavailable. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    mcpMessage: {
+        parameters: {
+            query?: never;
+            header?: {
+                "MCP-Protocol-Version"?: "2025-11-25" | "2025-06-18";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The JSON-RPC response to a request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "jsonrpc": "2.0",
+                     *       "id": 1,
+                     *       "result": {
+                     *         "content": [
+                     *           {
+                     *             "type": "text",
+                     *             "text": "{\"instances\":[]}"
+                     *           }
+                     *         ],
+                     *         "structuredContent": {
+                     *           "instances": []
+                     *         },
+                     *         "isError": false
+                     *       }
+                     *     }
+                     */
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description A notification was accepted; no body. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The Origin header is neither the server's own nor listed in PGLENS_MCP_ALLOWED_ORIGINS. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            /** @description Content-Type is not application/json. */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };

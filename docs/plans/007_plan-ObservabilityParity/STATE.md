@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 17:23 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 17:29 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 26234de8fc3c2c2d7eb2981a08c6c50049eae260 + tree 661ad1bbc5c728388bf9be8b38234db90c972ef2 · branch main · last WIP tree none
-- Last closure: unit:14.2:1
-- Next: open 14.3 · next eligible: 14.3
+- Base: HEAD 54270a8f2a7b480abd8a0dd843068225fbcadd51 + tree b5114d9d3fbb1dad9b0ed9d5555cc1d4edd7062d · branch main · last WIP tree none
+- Last closure: unit:14.3:1
+- Next: open 14.4 · next eligible: 14.4
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -102,6 +102,7 @@ none
 - A45 (13.3): migration is `0043_workbooks.sql` (0041/0042 taken; locator drift); column `"analyze"` quoted (reserved word); workbook routes live on `CommandService` via `registerWorkbookRoutes` (no http.go change) with an injected store and the shared `insertCommand`; TestWBK007/012 drive the handlers over an in-memory store and the SQL limits/reset are proven in TestINTWBK004 (plus an expiry subtest); a run that loses the MarkPending race returns 409 and its queued command finds no variant.
 - A46 (13.4, agent-1): the workbook route uses `:instanceId` (spec wrote `:id`) like every other instance route; `PlanComparison` of PlanHistory (the 9.3 comparison) is exported and takes `ComparedPlan` plus optional headings so `VariantCompare` reuses it unchanged for captures; extra files `WorkbookLauncher.tsx` (query detail entry) and `errors.ts` (shared error texts, keeps the page a lazy chunk); FULLHD_ROUTES lists the page as `fit` (FHD-ROUTES-004 forbids `pendingUnit`) and `routeUrl` maps `:workbookId` to the nil UUID (error state on a fresh stack); lib tests UI-WBK-007/008/009 (unique IDs) also pin `WORKBOOK_SETTINGS` to the OpenAPI `WorkbookSettingName` enum.
 - A47 (14.2, agent-1 tool list review): arguments copied from api/openapi.yaml as the phase requires, which corrects three table hints: pglens_list_findings filters by `state` (no `status`), pglens_query_plans takes `datname` (no `database`), pglens_instance_host takes only `id` (the route has no `from`/`to`). Every OpenAPI path/query parameter of a route is an argument (TestMCP007 checks both directions); `queryid` (oneOf integer|string) is typed string. 30 tools, all GET; no write or credential route.
+- A48 (14.3): /mcp is outside /api/, so RequireCredential exempts it; the handler calls the extracted credentialAccepted (same token/session rules, same 401/503). The cross-origin write guard bypasses only POST /mcp (AddInsecureBypassPattern) so listed origins reach the MCP Origin rule; every other route keeps the guard (TestMCP011). The in-process GET clears chi's route context, else the router routes it as the outer POST (found by TestINTMCP001; TestMCP009 guards it). pglens has one bearer token plus UI sessions, so TestMCP010's refused inner call is a REST refusal (400) returned verbatim with isError. Debug log via slog.Debug (no server debug level; silent by default). MCPConfig rides in UIConfig.MCP; version from main.
 
 ## 9. Blockers
 none

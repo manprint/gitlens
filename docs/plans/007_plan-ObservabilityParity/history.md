@@ -221,3 +221,6 @@ Gates: G-GO-FOCUS ./internal/mcp/ (race, shuffle) PASS, coverage 94.7%; FuzzHand
 
 ## 2026-11-21 14.2/1 complete unit:14.2:1
 Gates: G-GO-FOCUS ./internal/server/ (race, shuffle) PASS; TestMCP006/007/008 PASS; mutation (tool on /api/v1/commands with an undeclared argument) fails 3 checks; golangci-lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW internal/server/mcp_tools.go (mcpToolSpecs, mcpTools: 30 read-only tools, JSON Schema per tool with enums from OpenAPI), mcp_tools_test.go; notes: A47: argument names follow openapi.yaml (findings state, plans datname, host id only)
+
+## 2026-11-21 14.3/1 complete unit:14.3:1
+Gates: G-GO-FOCUS ./internal/server/ ./cmd/pglens-server/ (race, shuffle) PASS; TestMCP009-013 PASS; TestINTMCP001 PASS (G-GO-INT); mutation without the chi context reset fails TestMCP009; golangci-lint 0 issues; G-API regenerated; review: self-review (agent:opus) accepted; changes: NEW internal/server/mcp_http.go (mcpHandler, mcpCaller, memoryResponse, ownOrigin), mcp_http_test.go, mcp_http_integration_test.go; config.go MCPConfig + LoadMCPConfig; session.go credentialAccepted extracted; http.go POST /mcp + cross-origin bypass; main.go env; openapi.yaml /mcp + tag mcp; openapi_test.go builds the router with MCP on; generated.ts, docs/api.md; notes: A48

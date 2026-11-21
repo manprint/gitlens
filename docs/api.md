@@ -172,3 +172,9 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | PUT | `/api/v1/settings/advisor-windows` | `setAdvisorWindows` | Set or reset advisor observation windows. |
 | PUT | `/api/v1/settings/retention/{family}` | `setRetention` | Set the data retention of a metrics family. |
 | DELETE | `/api/v1/notification-channels/{kind}` | `deleteNotificationChannel` | Remove the webhook address stored from the console. |
+
+## mcp
+
+| METHOD | Path | operationId | Summary |
+|---|---|---|---|
+| POST | `/mcp` | `mcpMessage` | Answer one Model Context Protocol message (read-only tools). |

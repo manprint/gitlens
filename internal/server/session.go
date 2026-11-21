@@ -166,32 +166,35 @@ func (s *SessionStore) Len() int {
 func RequireCredential(cfg UIConfig, auth *Auth, store *SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if sessionRequestExempt(r) {
+			if sessionRequestExempt(r) || credentialAccepted(cfg, auth, store, w, r) {
 				next.ServeHTTP(w, r)
-				return
 			}
-			if auth != nil && auth.Validate(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			// A browser session is only ever obtainable when a password is
-			// configured, so "UI on, no password" stays the distinct,
-			// actionable 503 rather than a generic 401.
-			if cfg.Enabled && cfg.Password == "" {
-				writeError(w, http.StatusServiceUnavailable, "ui_password_not_configured", "configure PGLENS_UI_PASSWORD or PGLENS_UI_PASSWORD_FILE")
-				return
-			}
-			if store != nil {
-				if cookie, err := r.Cookie(sessionCookieName); err == nil {
-					if _, ok := store.Validate(cookie.Value); ok {
-						next.ServeHTTP(w, r)
-						return
-					}
-				}
-			}
-			writeError(w, http.StatusUnauthorized, "unauthorized", "sign in or present an agent token")
 		})
 	}
+}
+
+// credentialAccepted reports whether r carries the agent bearer token or a
+// valid UI session cookie; when not, it writes the refusal (503 or 401).
+func credentialAccepted(cfg UIConfig, auth *Auth, store *SessionStore, w http.ResponseWriter, r *http.Request) bool {
+	if auth != nil && auth.Validate(r) {
+		return true
+	}
+	// A browser session is only ever obtainable when a password is
+	// configured, so "UI on, no password" stays the distinct,
+	// actionable 503 rather than a generic 401.
+	if cfg.Enabled && cfg.Password == "" {
+		writeError(w, http.StatusServiceUnavailable, "ui_password_not_configured", "configure PGLENS_UI_PASSWORD or PGLENS_UI_PASSWORD_FILE")
+		return false
+	}
+	if store != nil {
+		if cookie, err := r.Cookie(sessionCookieName); err == nil {
+			if _, ok := store.Validate(cookie.Value); ok {
+				return true
+			}
+		}
+	}
+	writeError(w, http.StatusUnauthorized, "unauthorized", "sign in or present an agent token")
+	return false
 }
 
 func sessionRequestExempt(r *http.Request) bool {

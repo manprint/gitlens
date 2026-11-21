@@ -111,6 +111,14 @@ func run() int {
 	if err != nil {
 		log.Fatalf("UI configuration: %v", err)
 	}
+	uiCfg.MCP, err = server.LoadMCPConfig(nil)
+	if err != nil {
+		log.Fatalf("MCP configuration: %v", err)
+	}
+	uiCfg.MCP.Version = version
+	if uiCfg.MCP.Enabled {
+		log.Println("PGLENS_MCP_ENABLED=true; read-only MCP endpoint at POST /mcp")
+	}
 	switch {
 	case !uiCfg.Enabled:
 		log.Println("PGLENS_UI_ENABLED=false; UI disabled")

@@ -24,6 +24,7 @@ tags:
   - name: infrastructure
   - name: session
   - name: settings
+  - name: mcp
 
 security:
   - uiSession: []
@@ -6051,6 +6052,50 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '503':
           description: Command storage is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /mcp:
+    post:
+      tags: [mcp]
+      operationId: mcpMessage
+      summary: Answer one Model Context Protocol message (read-only tools).
+      description: >-
+        JSON-RPC 2.0 over MCP Streamable HTTP, one message per POST, no stream and no session.
+        Present only when PGLENS_MCP_ENABLED=true. Every tool is one GET of this API served with
+        the caller's credential. See README "MCP server". Other methods answer 405 with Allow POST.
+      parameters:
+        - name: MCP-Protocol-Version
+          in: header
+          required: false
+          schema: { type: string, enum: ['2025-11-25', '2025-06-18'] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: One JSON-RPC 2.0 request or notification. }
+            examples:
+              default:
+                value: { jsonrpc: '2.0', id: 1, method: tools/call, params: { name: pglens_list_instances, arguments: {} } }
+      responses:
+        '200':
+          description: The JSON-RPC response to a request.
+          content:
+            application/json:
+              schema: { type: object, description: One JSON-RPC 2.0 response. }
+              example: { jsonrpc: '2.0', id: 1, result: { content: [{ type: text, text: '{"instances":[]}' }], structuredContent: { instances: [] }, isError: false } }
+        '202': { description: A notification was accepted; no body. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: The Origin header is neither the server's own nor listed in PGLENS_MCP_ALLOWED_ORIGINS.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415':
+          description: Content-Type is not application/json.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

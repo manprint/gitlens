@@ -154,7 +154,7 @@ func TestOpenAPIOperationIdsAreUnique(t *testing.T) {
 
 func TestOpenAPICoversEveryRoute(t *testing.T) {
 	router := server.NewRouter(
-		server.UIConfig{},
+		server.UIConfig{MCP: server.MCPConfig{Enabled: true}},
 		nil,
 		nil,
 		server.NewAuth("t"),
@@ -168,6 +168,10 @@ func TestOpenAPICoversEveryRoute(t *testing.T) {
 
 	registered := make(map[string]struct{})
 	err := chi.Walk(router.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		// /mcp answers every method itself; only POST is an operation.
+		if route == "/mcp" && method != http.MethodPost {
+			return nil
+		}
 		normalized := canonicalizeRegisteredRoute(method, route)
 		if _, exempt := openapiExemptRoutes[method+" "+normalized]; !exempt {
 			registered[method+" "+normalized] = struct{}{}

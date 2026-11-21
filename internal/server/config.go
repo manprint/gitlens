@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/mail"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -42,6 +43,53 @@ type UIConfig struct {
 	// TraceURLTemplate (PGLENS_TRACE_URL_TEMPLATE) links a trace id to the
 	// tracing tool: an http(s) URL holding {trace_id}; empty turns links off.
 	TraceURLTemplate string
+	// MCP is the Model Context Protocol endpoint (LoadMCPConfig).
+	MCP MCPConfig
+}
+
+// MCPConfig turns on POST /mcp. Enabled is PGLENS_MCP_ENABLED (default
+// false); AllowedOrigins (PGLENS_MCP_ALLOWED_ORIGINS) are the browser origins
+// accepted besides the server's own; Version is the server version reported
+// in the initialize answer.
+type MCPConfig struct {
+	Enabled        bool
+	AllowedOrigins []string
+	Version        string
+}
+
+// LoadMCPConfig reads PGLENS_MCP_ENABLED (true or false) and
+// PGLENS_MCP_ALLOWED_ORIGINS (comma-separated scheme://host[:port], scheme
+// http or https, no path). Any other value is a start-up error.
+func LoadMCPConfig(getenv func(string) string) (MCPConfig, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	var config MCPConfig
+	switch raw := strings.TrimSpace(getenv("PGLENS_MCP_ENABLED")); raw {
+	case "", "false":
+	case "true":
+		config.Enabled = true
+	default:
+		return MCPConfig{}, fmt.Errorf("invalid PGLENS_MCP_ENABLED %q: accepted values are true, false", raw)
+	}
+	for _, raw := range strings.Split(getenv("PGLENS_MCP_ALLOWED_ORIGINS"), ",") {
+		origin := strings.TrimSpace(raw)
+		if origin == "" {
+			continue
+		}
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Hostname() == "" ||
+			u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.HasSuffix(origin, "?") || strings.HasSuffix(origin, "#") {
+			return MCPConfig{}, fmt.Errorf("invalid PGLENS_MCP_ALLOWED_ORIGINS entry %q: want scheme://host[:port] with scheme http or https and no path", origin)
+		}
+		if port := u.Port(); port != "" {
+			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+				return MCPConfig{}, fmt.Errorf("invalid PGLENS_MCP_ALLOWED_ORIGINS entry %q: bad port", origin)
+			}
+		}
+		config.AllowedOrigins = append(config.AllowedOrigins, u.Scheme+"://"+strings.ToLower(u.Host))
+	}
+	return config, nil
 }
 
 func (c UIConfig) String() string {

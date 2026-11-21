@@ -27,7 +27,7 @@ func NewRouter(uiCfg UIConfig, assets fs.FS, store *SessionStore, auth *Auth, in
 	// site, or from a sibling subdomain that SameSite=Strict does not cover,
 	// is refused before it can ride on the session cookie. Agents and tools
 	// send neither header, so they pass.
-	r.Use(refuseCrossOriginWrites())
+	r.Use(refuseCrossOriginWrites(uiCfg.MCP.Enabled))
 	// The credential gate is always installed; uiCfg.Enabled only governs the
 	// static assets below. See RequireCredential's own comment.
 	r.Use(RequireCredential(uiCfg, auth, store))
@@ -54,6 +54,11 @@ func NewRouter(uiCfg UIConfig, assets fs.FS, store *SessionStore, auth *Auth, in
 	ashAPI.RegisterRoutes(r)
 	if len(alertAPIs) > 0 && alertAPIs[0] != nil {
 		alertAPIs[0].RegisterRoutes(r)
+	}
+	if uiCfg.MCP.Enabled {
+		// The handler checks the credential and the Origin itself; tool calls
+		// go back through r, the finished router.
+		r.Handle("/mcp", mcpHandler(uiCfg, auth, store, r))
 	}
 	if uiCfg.Enabled && assets != nil {
 		spa := SPAHandler(assets)
@@ -89,9 +94,13 @@ func securityHeaders(csp string) func(http.Handler) http.Handler {
 // coming from another origin. The standard library reads Sec-Fetch-Site and,
 // when that is absent, compares Origin with Host. A reverse proxy that rewrites
 // Host therefore does not affect browsers that send Sec-Fetch-Site; a browser
-// that sends only Origin needs the proxy to keep Host.
-func refuseCrossOriginWrites() func(http.Handler) http.Handler {
+// that sends only Origin needs the proxy to keep Host. POST /mcp, when
+// enabled, is left to its own Origin rule (PGLENS_MCP_ALLOWED_ORIGINS).
+func refuseCrossOriginWrites(mcpEnabled bool) func(http.Handler) http.Handler {
 	protection := http.NewCrossOriginProtection()
+	if mcpEnabled {
+		protection.AddInsecureBypassPattern("POST /mcp")
+	}
 	protection.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "cross_origin", "a write from another origin is refused")
 	}))
