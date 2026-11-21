@@ -71,3 +71,6 @@ Gates: G-GO-FOCUS TestCMP004-005 + server package race+shuffle pass; G-GO-INT Te
 
 ## 2026-11-21 4.3/1 complete unit:4.3:1
 Gates: G-WEB-STATIC (tsc, eslint 0 errors, prettier); G-WEB-UNIT 231 files 2052 tests; help+i18n 48; review: self-review (agent:opus) accepted; changes: compare.ts (presets, formatRatio, values), useStatementsCompare/useAshCompare, ModeToggle, ComparePeriodPicker, QueryCompare, AshCompare, mode=compare on both pages, en/it texts, captions, help sections compare-periods, README Comparing two periods; notes: A12; self-review: hooks unconditional, no polling, B floored to the minute
+
+## 2026-11-21 P4/1 complete unit:P4:1
+Gates: G-GO-FULL 35 pkgs ok, lint 0; G-GO-INT TestINTCMP001/002 pass, integration lint 0; G-API no diff; G-I18N 48; G-WEB-FULL typecheck/lint/coverage 231 files/2052 tests/budget rc=0; go.mod unchanged; review: self-review (agent:opus) accepted; changes: none (closure); notes: compare sums identical to handleStatements (grouping only, A10); windows [from,to); per-second normalisation; I-5 GET, 10 s timeout, limit <= 200, <= 31 days; docs: README "Comparing two periods", OpenAPI, help en/it compare-periods
