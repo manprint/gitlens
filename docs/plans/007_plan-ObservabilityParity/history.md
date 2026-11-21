@@ -140,3 +140,6 @@ Gates: G-GO-FULL rc=0; G-GO-INT rc=0 (agent, server, store, cmd/pglens-agent; Te
 
 ## 2026-11-21 9.1/1 complete unit:9.1:1
 Gates: G-WEB-STATIC pass (tsc, eslint 2 pre-existing warnings, prettier); vitest planTree 29, queries+i18n 152 pass; review: self-review (agent:opus) accepted; changes: planTree.ts: PlanInsightKind, args, lossyBitmap, workersShort, joinFilterDiscards, jitShare, triggerShare; en/it messages; UI-PLI-001..008; notes: Review: thresholds per spec table; plan-only never yields jit/trigger (UI-PLI-004); no existing test changed. Decision A30.
+
+## 2026-11-21 9.2/1 complete unit:9.2:1
+Gates: G-GO-FOCUS ./internal/server pass; TestINTPLI001 + TestINTAEX* + TestAEX015 pass; lint 0; G-API regenerated (docs/api.md, generated.ts); review: self-review (agent:opus) accepted; changes: GET /api/v1/plans/stats (api_plan_stats.go), planSampleScope helper, OpenAPI PlanStat/PlanChange/PlanStats + path, TestPLI001/002, TestINTPLI001; notes: Review: tenant + instance filters on both queries and in EXISTS; database bound as parameter; changes capped 100 via constant; pool nil gives empty lists. Decision A31.

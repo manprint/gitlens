@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 13:23 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 13:25 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD a3783ccd68348828c5bf217ee21115f68d8e762c + tree 88ae84b0b2287a5c8cdb4c56e8b4e9aad586763f · branch main · last WIP tree none
-- Last closure: unit:9.1:1
-- Next: open 9.2 · next eligible: 9.2
+- Base: HEAD 75e39f00d33c591bea6a69c9adbc1c86b8c80315 + tree 8c3ce4d41d9eaa941943a08909cb439f93b53547 · branch main · last WIP tree none
+- Last closure: unit:9.2:1
+- Next: open 9.3 · next eligible: 9.3
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -85,6 +85,7 @@ none
 - A28 (8.2, 2026-11-21): the autovacuum_runs migration is `0039_autovacuum_runs.sql`, not 0037 as planned: 0037 (log alerts, phase 6) and 0038 (plan samples, 7.2) were taken. Content as D19. Retention family `autovacuum_runs` (90 days, no compression) goes after plan_samples; API enum and console label (en "Autovacuum runs", it "Esecuzioni di autovacuum") follow.
 - A29 (8.3, agent-1): the autovacuum summary aggregates in SQL (GROUP BY table); TestAVH010 checks the mapping and order of mock rows and TestINTAVH003 the sums on TimescaleDB. The "table history" of the console is the expandable detail of a summary row in Relations › Autovacuum activity (RelationsSection has no per-table history view; DeadRowsPanel belongs to Index analysis), fetching `/autovacuum/runs` filtered by database, schema and relation. RDY-AV-01 needs `wire.AgentFlags.LogsEnabled` (absent = rule silent, so old agents never trigger it).
 - A30 (9.1): `PlanInsight` gained a `kind` union (all 16 kinds) and optional raw `args`. The spec's `sortSpill` already existed: it keeps its wider trigger (any Disk sort or external sort method) and only gains `kind` and `args.kb`. Titles stay translated inside planTree.ts with the active locale (the existing pattern), not formatted by the caller; raw figures are in `args`. jitShare/triggerShare are node-less (nodeId null, like planOnly) and come right before `never`; the three node kinds come in the per-node loop after the existing ones.
+- A31 (9.2): the handler lives in a new `internal/server/api_plan_stats.go`; `planSampleScope` (instance_id, queryid, from/to) is shared with `/plans/samples`. `lag` is `PARTITION BY datname` so samples of two databases never count as a change; changes are newest first. `has_plan` matches instance, queryid, hash and (when given) database.
 
 ## 9. Blockers
 none

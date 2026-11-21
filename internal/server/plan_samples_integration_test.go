@@ -253,3 +253,45 @@ func TestINTAEX005(t *testing.T) {
 	require.Len(t, out.Samples, 1)
 	require.Equal(t, "h2", out.Samples[0].PlanHash)
 }
+
+// TestINTPLI001: 20 samples of plan A at 10 ms then 20 of plan B at 100 ms
+// give two plans with their averages, p95 100 for B and one change A to B.
+func TestINTPLI001(t *testing.T) {
+	router, count := planRouter(t)
+	pool := getSharedPool(t)
+	instance := uuid.NewString()
+	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	var facts []wire.Fact
+	for i := 0; i < 40; i++ {
+		ts := start.Add(time.Duration(i) * time.Second)
+		f := autoPlanFact(ts, "")
+		hash, ms := "hA", "10"
+		if i >= 20 {
+			hash, ms = "hB", "100"
+		}
+		f.Labels["plan_hash"] = hash
+		f.Labels["duration_ms"] = ms
+		f.Key = "77:" + hash + ":" + ts.Format(time.RFC3339Nano)
+		facts = append(facts, f)
+	}
+	pushPlanFacts(t, router, instance, time.Now().UTC(), facts...)
+	require.Equal(t, 40, count("plan_samples", instance))
+	_, err := pool.Exec(context.Background(), `INSERT INTO query_plans (tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, analyzed, captured_at, plan) VALUES ('default', $1, 555444335, 'app', 77, 'hB', false, now(), '[{"Plan":{"Node Type":"Result"}}]')`, instance)
+	require.NoError(t, err)
+
+	var out planStatsResponse
+	getPlanJSON(t, router, "/api/v1/plans/stats?queryid=77&database=app&instance_id="+instance, &out)
+	require.Len(t, out.Plans, 2)
+	b, a := out.Plans[0], out.Plans[1]
+	require.Equal(t, "hB", b.PlanHash, "newest-seen plan first")
+	require.Equal(t, int64(20), b.Samples)
+	require.InDelta(t, 100, b.AvgMS, 1e-9)
+	require.InDelta(t, 100, b.P95MS, 1e-9)
+	require.True(t, b.HasPlan)
+	require.Equal(t, "hA", a.PlanHash)
+	require.InDelta(t, 10, a.AvgMS, 1e-9)
+	require.False(t, a.HasPlan)
+	require.True(t, a.LastTS.Before(b.FirstTS))
+	require.Len(t, out.Changes, 1)
+	require.Equal(t, planChangeJSON{TS: start.Add(20 * time.Second), FromPlanHash: "hA", ToPlanHash: "hB"}, planChangeJSON{TS: out.Changes[0].TS.UTC(), FromPlanHash: out.Changes[0].FromPlanHash, ToPlanHash: out.Changes[0].ToPlanHash})
+}

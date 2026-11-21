@@ -75,6 +75,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/autovacuum/summary` | `getAutovacuumSummary` | Return the autovacuum runs of an instance summed per table, most autovacuum time first. |
 | GET | `/api/v1/plans` | `getPlans` | Return plan history for a query. |
 | GET | `/api/v1/plans/samples` | `getPlanSamples` | Return the automatic plan samples of a statement, newest first. |
+| GET | `/api/v1/plans/stats` | `getPlanStats` | Return per-plan duration statistics of a statement and the times its plan changed. |
 | GET | `/api/v1/statements` | `getStatements` | Return top statements joined to query text. |
 | GET | `/api/v1/statements/compare` | `getStatementsCompare` | Compare top statements between period A and period B. |
 | DELETE | `/api/v1/plans/samples/parameters` | `purgePlanParameters` | Clear the stored parameters of every automatic plan sample of an instance. |

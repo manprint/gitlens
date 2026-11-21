@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -42,7 +43,42 @@ const purgePlanParametersKind = "purge_plan_parameters"
 
 func (a *API) registerPlanSampleRoutes(r chi.Router) {
 	r.Get("/api/v1/plans/samples", a.handlePlanSamples)
+	r.Get("/api/v1/plans/stats", a.handlePlanStats)
 	r.Delete("/api/v1/plans/samples/parameters", a.handlePurgePlanParameters)
+}
+
+// planSampleScope reads instance_id, queryid (both required) and the from/to
+// window shared by the plan sample endpoints; it writes the 400 itself.
+func planSampleScope(w http.ResponseWriter, q url.Values) (uuid.UUID, int64, time.Time, time.Time, bool) {
+	instanceID, err := uuid.Parse(q.Get("instance_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid instance_id", "query param instance_id must be a UUID")
+		return uuid.Nil, 0, time.Time{}, time.Time{}, false
+	}
+	queryID, err := strconv.ParseInt(q.Get("queryid"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid queryid", "query param queryid must be an integer")
+		return uuid.Nil, 0, time.Time{}, time.Time{}, false
+	}
+	to := time.Now().UTC()
+	if s := q.Get("to"); s != "" {
+		if to, err = parseTimeParam(s); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid to", err.Error())
+			return uuid.Nil, 0, time.Time{}, time.Time{}, false
+		}
+	}
+	from := to.Add(-defaultPlanSamplesRange)
+	if s := q.Get("from"); s != "" {
+		if from, err = parseTimeParam(s); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid from", err.Error())
+			return uuid.Nil, 0, time.Time{}, time.Time{}, false
+		}
+	}
+	if !from.Before(to) {
+		writeError(w, http.StatusBadRequest, "invalid range", "from must be before to")
+		return uuid.Nil, 0, time.Time{}, time.Time{}, false
+	}
+	return instanceID, queryID, from, to, true
 }
 
 // handlePlanSamples lists the automatic plan samples of one statement of an
@@ -50,34 +86,11 @@ func (a *API) registerPlanSampleRoutes(r chi.Router) {
 // days before to.
 func (a *API) handlePlanSamples(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	instanceID, err := uuid.Parse(q.Get("instance_id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid instance_id", "query param instance_id must be a UUID")
+	instanceID, queryID, from, to, ok := planSampleScope(w, q)
+	if !ok {
 		return
 	}
-	queryID, err := strconv.ParseInt(q.Get("queryid"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid queryid", "query param queryid must be an integer")
-		return
-	}
-	to := time.Now().UTC()
-	if s := q.Get("to"); s != "" {
-		if to, err = parseTimeParam(s); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid to", err.Error())
-			return
-		}
-	}
-	from := to.Add(-defaultPlanSamplesRange)
-	if s := q.Get("from"); s != "" {
-		if from, err = parseTimeParam(s); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid from", err.Error())
-			return
-		}
-	}
-	if !from.Before(to) {
-		writeError(w, http.StatusBadRequest, "invalid range", "from must be before to")
-		return
-	}
+	var err error
 	limit := defaultPlanSamplesLimit
 	if s := q.Get("limit"); s != "" {
 		v, err := strconv.Atoi(s)

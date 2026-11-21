@@ -927,6 +927,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return per-plan duration statistics of a statement and the times its plan changed. */
+        get: operations["getPlanStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans/samples/parameters": {
         parameters: {
             query?: never;
@@ -1893,6 +1910,35 @@ export interface components {
         };
         PlanSamplesResponse: {
             samples: components["schemas"]["PlanSample"][];
+        };
+        /** @description Duration statistics of one plan of a statement over the window, from its automatic plan samples. */
+        PlanStat: {
+            plan_hash: string;
+            /** Format: int64 */
+            samples: number;
+            avg_ms: number;
+            /** @description percentile_cont(0.95) of duration_ms. */
+            p95_ms: number;
+            min_ms: number;
+            max_ms: number;
+            first_ts: components["schemas"]["Timestamp"];
+            last_ts: components["schemas"]["Timestamp"];
+            /** Format: int64 */
+            analyzed_samples: number;
+            /** @description A stored plan body with this hash exists. */
+            has_plan: boolean;
+        };
+        /** @description A sample whose plan differs from the previous sample of the statement in the same database. */
+        PlanChange: {
+            ts: components["schemas"]["Timestamp"];
+            from_plan_hash: string;
+            to_plan_hash: string;
+        };
+        PlanStats: {
+            /** @description Newest-seen plan first. */
+            plans: components["schemas"]["PlanStat"][];
+            /** @description Newest first */
+            changes: components["schemas"]["PlanChange"][];
         };
         /** @description One autovacuum or autoanalyze run the agent read from the PostgreSQL log. A number the log line did not carry is null. */
         AutovacuumRun: {
@@ -4882,6 +4928,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanSamplesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getPlanStats: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                queryid: string;
+                database?: string;
+                /** @description Start of the range; seven days before to when absent. */
+                from?: components["schemas"]["Timestamp"];
+                /** @description End of the range; now when absent. */
+                to?: components["schemas"]["Timestamp"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Statistics per plan and plan changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanStats"];
                 };
             };
             400: components["responses"]["BadRequest"];

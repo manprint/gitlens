@@ -576,6 +576,35 @@ components:
       required: [samples]
       properties:
         samples: { type: array, items: { $ref: '#/components/schemas/PlanSample' } }
+    PlanStat:
+      type: object
+      description: Duration statistics of one plan of a statement over the window, from its automatic plan samples.
+      required: [plan_hash, samples, avg_ms, p95_ms, min_ms, max_ms, first_ts, last_ts, analyzed_samples, has_plan]
+      properties:
+        plan_hash: { type: string }
+        samples: { type: integer, format: int64, minimum: 1 }
+        avg_ms: { type: number, minimum: 0 }
+        p95_ms: { type: number, minimum: 0, description: 'percentile_cont(0.95) of duration_ms.' }
+        min_ms: { type: number, minimum: 0 }
+        max_ms: { type: number, minimum: 0 }
+        first_ts: { $ref: '#/components/schemas/Timestamp' }
+        last_ts: { $ref: '#/components/schemas/Timestamp' }
+        analyzed_samples: { type: integer, format: int64, minimum: 0 }
+        has_plan: { type: boolean, description: A stored plan body with this hash exists. }
+    PlanChange:
+      type: object
+      description: A sample whose plan differs from the previous sample of the statement in the same database.
+      required: [ts, from_plan_hash, to_plan_hash]
+      properties:
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        from_plan_hash: { type: string }
+        to_plan_hash: { type: string }
+    PlanStats:
+      type: object
+      required: [plans, changes]
+      properties:
+        plans: { type: array, description: Newest-seen plan first., items: { $ref: '#/components/schemas/PlanStat' } }
+        changes: { type: array, description: Newest first, at most 100., maxItems: 100, items: { $ref: '#/components/schemas/PlanChange' } }
     AutovacuumRun:
       type: object
       description: >-
@@ -4320,6 +4349,43 @@ paths:
                         duration_ms: 12.5
                         analyzed: false
                         has_parameters: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/plans/stats:
+    get:
+      tags: [statements]
+      operationId: getPlanStats
+      summary: Return per-plan duration statistics of a statement and the times its plan changed.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: queryid, in: query, required: true, schema: { type: string, pattern: '^-?[0-9]+$' } }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: false, description: Start of the range; seven days before to when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, description: End of the range; now when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
+      responses:
+        '200':
+          description: Statistics per plan and plan changes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanStats' }
+              examples:
+                default:
+                  value:
+                    plans:
+                      - plan_hash: hB
+                        samples: 20
+                        avg_ms: 100
+                        p95_ms: 100
+                        min_ms: 98
+                        max_ms: 103
+                        first_ts: '2026-11-21T10:00:20Z'
+                        last_ts: '2026-11-21T10:00:39Z'
+                        analyzed_samples: 0
+                        has_plan: true
+                    changes:
+                      - ts: '2026-11-21T10:00:20Z'
+                        from_plan_hash: hA
+                        to_plan_hash: hB
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/plans/samples/parameters:
