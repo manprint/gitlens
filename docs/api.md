@@ -73,6 +73,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | METHOD | Path | operationId | Summary |
 |---|---|---|---|
 | GET | `/api/v1/ash` | `getAsh` | Return activity samples grouped by the requested dimensions. |
+| GET | `/api/v1/ash/compare` | `getAshCompare` | Compare average active sessions per group between period A and period B. |
 | GET | `/api/v1/ash/top` | `getAshTop` | Return top ASH queries joined to their text. |
 
 ## commands

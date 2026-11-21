@@ -65,3 +65,6 @@ Gates: G-GO-FULL 35 pkgs ok, lint 0; G-GO-INT TestINTNCH001/002 + NOTIINT001/002
 
 ## 2026-11-21 4.1/1 complete unit:4.1:1
 Gates: G-GO-FOCUS TestCMP001-003 race+shuffle pass; server+cmd packages pass; G-GO-INT TestINTCMP001 pass; golangci-lint 0 (plain + integration); G-API regenerated; review: self-review (agent:opus) accepted; changes: GET /api/v1/statements/compare: parseComparePeriods (D7 checks, field-named 400), per-period CTE from handleStatements SQL, FULL OUTER JOIN, per-second normalisation, delta/ratio/status, order by abs delta then queryid; OpenAPI StatementCompare; notes: self-review agent:opus: SQL sums identical to handleStatements; A10
+
+## 2026-11-21 4.2/1 complete unit:4.2:1
+Gates: G-GO-FOCUS TestCMP004-005 + server package race+shuffle pass; G-GO-INT TestINTCMP001/002 + ASH integration pass; golangci-lint 0 (plain + integration); G-API regenerated; review: self-review (agent:opus) accepted; changes: GET /api/v1/ash/compare: one group_by column from shared ashGroupColumns, per-period samples/ticks via ashWhere renumbered, AAS = samples/ticks, delta/ratio/status, order by abs delta then key; OpenAPI AshCompare; notes: self-review agent:opus: group_by interpolated only after whitelist; A11

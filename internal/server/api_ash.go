@@ -34,6 +34,7 @@ func NewAshAPI(pool *pgxpool.Pool) *AshAPI {
 func (a *AshAPI) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/ash", a.handleASH)
 	r.Get("/api/v1/ash/top", a.handleASHTop)
+	r.Get("/api/v1/ash/compare", a.handleASHCompare)
 }
 
 // ASH response types
@@ -140,22 +141,12 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	groupByCols := []string{}
 	if groupByStr != "" {
 		parts := strings.Split(groupByStr, ",")
-		validCols := map[string]bool{
-			"wait_event_type":  true,
-			"wait_event":       true,
-			"state":            true,
-			"queryid":          true,
-			"datname":          true,
-			"usename":          true,
-			"client_addr":      true,
-			"application_name": true,
-		}
 		for _, part := range parts {
 			col := strings.TrimSpace(part)
 			if col == "" {
 				continue
 			}
-			if !validCols[col] {
+			if !ashGroupColumns[col] {
 				writeError(w, http.StatusBadRequest, "invalid group_by", fmt.Sprintf("unknown column %q", col))
 				return
 			}
@@ -322,6 +313,19 @@ type ashFilters struct {
 	// dims holds the text-dimension filters by column name; the value ashUnknown
 	// matches empty. A column name is only ever one of ashDimColumns.
 	dims map[string]string
+}
+
+// ashGroupColumns are the columns group_by may name, on /api/v1/ash and
+// /api/v1/ash/compare.
+var ashGroupColumns = map[string]bool{
+	"wait_event_type":  true,
+	"wait_event":       true,
+	"state":            true,
+	"queryid":          true,
+	"datname":          true,
+	"usename":          true,
+	"client_addr":      true,
+	"application_name": true,
 }
 
 // ashDimColumns are the text dimensions a request may filter or group by.

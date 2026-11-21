@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 09:20 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 09:21 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 04e70771c932a46f3c38066fddc819198ce52e78 + tree 9e157e0a09d6733aa94d27bd0e00683a62849373 · branch main · last WIP tree none
-- Last closure: unit:4.1:1
-- Next: open 4.2 · next eligible: 4.2
+- Base: HEAD c679b7764b09f7df60d1b3ad90ab8abfebd4e564 + tree 62b7650e8ca8512484a23cb12a1c50437815a7e4 · branch main · last WIP tree none
+- Last closure: unit:4.2:1
+- Next: open 4.3 · next eligible: 4.3
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -65,6 +65,7 @@ none
 - A8 (autonomous, 2026-11-21, unit 3.3): the email kind needs the SMTP settings, but the kind hooks took only the address. Chosen: `AlertConfig.SMTP` (`SMTPConfig` = `notify.SMTPSettings`) filled by `LoadAlertConfig` through `LoadSMTPConfig(getenv, readFile)`, which also reads `PGLENS_SMTP_PASSWORD_FILE`; `build` and `available` take the config, and `NewNotificationChannel(cfg, kind, address)` gains it. main needs no change. Body = the plain text of the Slack message (summary + context line, or detail title, fields, sections, footer). The email channel removes its recipients and password from its own errors. Listings gain an email row; tests that used `email` as an unknown kind now use `sms`.
 - A9 (3.4, autonomous): webhook kinds keep the field label "Console URL" (existing contract, e2e selector); PagerDuty shows "Routing key", email "Recipients". The panel checks the address while typing and disables Save while invalid; the buttons keep "Set URL"/"Replace URL" for every kind. The 409 smtp_not_configured carries detail "set PGLENS_SMTP_HOST and PGLENS_SMTP_FROM on the server" (OpenAPI Error requires detail), via kind field unavailableDetail. deploy/server.example.env gains the Teams, PagerDuty and SMTP examples.
 - A10 (autonomous, 2026-11-21, unit 4.1): `handleStatements` groups by (cluster_id, queryid, datname); the compare CTEs group by (queryid, datname) with MIN(cluster_id) for the text lookup, so a FULL OUTER JOIN on (datname, queryid) gives one row per statement even if the instance changed cluster. Sums and the per-row seconds expression are copied unchanged. The 404 for an unknown instance is a separate `SELECT 1 FROM instances` (handleStatements has no 404); the compare itself is one statement with the 4 period bounds plus the 2 period lengths and limit as bind parameters. Ratio of a `gone` row is 0 (B counted as 0), null only when A is 0 or missing. All eight metrics appear in a, b, delta and ratio (superset of the example).
+- A11 (autonomous, 2026-11-21, unit 4.2): the inline group_by whitelist of `handleASH` became the package var `ashGroupColumns`, shared by `/api/v1/ash/compare` (no copy; behaviour of `/api/v1/ash` unchanged). `group_by` on compare takes exactly one column (a comma list is a 400), the row `key` is the value as text, '' when unknown. Each period's samples and ticks come from `ashWhere` built four times, placeholders renumbered into one statement; filters narrow samples, not ticks, as `/ash/top`. The response carries `group_by` instead of `order_by` and no `normalized` field (AAS is already a rate).
 
 ## 9. Blockers
 none
@@ -81,7 +82,7 @@ none
 | 3 Notification channels | DONE | 1 | 3.1–3.4 | unit:P3:1 |
 | 4 Period A versus B | IN_PROGRESS | 1 | 4.1–4.3 | — |
 | · 4.1 statements/compare | DONE | 1 | — | unit:4.1:1 |
-| · 4.2 ash/compare | TODO | 1 | — | — |
+| · 4.2 ash/compare | DONE | 1 | — | unit:4.2:1 |
 | · 4.3 console compare views | TODO | 1 | — | — |
 | · P4 closure | TODO | 1 | — | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |

@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -60,4 +62,48 @@ func TestINTCMP001(t *testing.T) {
 
 	code, _ = searchGet(t, pool, comparePath("/api/v1/statements/compare", uuid.New(), a, b, ""))
 	require.Equal(t, http.StatusNotFound, code)
+}
+
+// INT-CMP-002: the Lock wait averages 1 active session in A and 4 in B, so
+// it is the first row with ratio 4.
+func TestINTCMP002(t *testing.T) {
+	pool := getSharedPool(t)
+	instance, cluster := seedSearchInstance(t, pool)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM metrics_ash WHERE instance_id=$1`, instance)
+	})
+	base := time.Now().UTC().Truncate(time.Minute).Add(-10 * time.Minute)
+	a := period{From: base, To: base.Add(time.Minute)}
+	b := period{From: base.Add(time.Minute), To: base.Add(2 * time.Minute)}
+	seed := func(ts time.Time, waitType string, samples int) {
+		_, err := pool.Exec(context.Background(), `INSERT INTO metrics_ash (ts, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks)
+			VALUES ($1, $2, $3, 'app', $4, $4, 'active', 7, $5, 10, 10)`, ts, cluster, instance, waitType, samples)
+		require.NoError(t, err)
+	}
+	for i := 0; i < 6; i++ {
+		seed(a.From.Add(time.Duration(i*10)*time.Second), "Lock", 10)
+		seed(a.From.Add(time.Duration(i*10)*time.Second), "IO", 5)
+		seed(b.From.Add(time.Duration(i*10)*time.Second), "Lock", 40)
+		seed(b.From.Add(time.Duration(i*10)*time.Second), "IO", 5)
+	}
+	r := chi.NewRouter()
+	NewAshAPI(pool).RegisterRoutes(r)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, comparePath("/api/v1/ash/compare", instance, a, b, "&group_by=wait_event_type"), http.NoBody))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp ashCompareResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Rows, 2)
+	require.Equal(t, "Lock", resp.Rows[0].Key)
+	require.Equal(t, "both", resp.Rows[0].Status)
+	require.InDelta(t, 1.0, *resp.Rows[0].A.AAS, 1e-9)
+	require.InDelta(t, 4.0, *resp.Rows[0].Ratio.AAS, 1e-9)
+	require.InDelta(t, 1.0, *resp.Rows[1].Ratio.AAS, 1e-9)
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, comparePath("/api/v1/ash/compare", instance, a, b, "&group_by=wait_event_type&wait_event_type=IO"), http.NoBody))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Rows, 1)
+	require.InDelta(t, 0.5, *resp.Rows[0].A.AAS, 1e-9, "the filter narrows the samples, not the ticks")
 }

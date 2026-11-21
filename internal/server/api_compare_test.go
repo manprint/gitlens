@@ -2,10 +2,12 @@ package server
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -125,4 +127,51 @@ func TestCMP003(t *testing.T) {
 	for name, column := range map[string]string{"calls": "total_calls", "mean_time": "mean_exec", "wal_bytes_rate": "total_wal"} {
 		require.Equal(t, column, statementOrders[name].column, name)
 	}
+}
+
+func ashCompareGet(t *testing.T, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := chi.NewRouter()
+	NewAshAPI(nil).RegisterRoutes(r)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/ash/compare?instance_id="+uuid.NewString()+"&a_from=2026-01-10T10:00:00Z&a_to=2026-01-10T11:00:00Z&b_from=2026-01-10T11:00:00Z&b_to=2026-01-10T12:00:00Z"+query, http.NoBody))
+	return w
+}
+
+// CMP-004: group_by is required and must be one column of the /api/v1/ash
+// whitelist.
+func TestCMP004(t *testing.T) {
+	requireAPIError(t, ashCompareGet(t, ""), http.StatusBadRequest, "missing group_by")
+	requireAPIError(t, ashCompareGet(t, "&group_by=query_text"), http.StatusBadRequest, "invalid group_by")
+	requireAPIError(t, ashCompareGet(t, "&group_by=wait_event_type,wait_event"), http.StatusBadRequest, "invalid group_by")
+	for col := range ashGroupColumns {
+		require.Equal(t, http.StatusOK, ashCompareGet(t, "&group_by="+col).Code, col)
+	}
+}
+
+// CMP-005: the average active sessions of a group are its samples over the
+// period's ticks; delta and ratio follow from them, a group seen in one
+// period only is new or gone.
+func TestCMP005(t *testing.T) {
+	n := func(v int64) *int64 { return &v }
+	both := ashCompareRowOf("Lock", n(600), n(4800), 600, 1200)
+	require.Equal(t, "both", both.Status)
+	require.InDelta(t, 1.0, *both.A.AAS, 1e-9)
+	require.InDelta(t, 4.0, *both.B.AAS, 1e-9)
+	require.InDelta(t, 3.0, *both.Delta.AAS, 1e-9)
+	require.InDelta(t, 4.0, *both.Ratio.AAS, 1e-9)
+
+	fresh := ashCompareRowOf("IO", nil, n(300), 600, 600)
+	require.Equal(t, "new", fresh.Status)
+	require.Nil(t, fresh.A)
+	require.InDelta(t, 0.5, *fresh.Delta.AAS, 1e-9)
+	require.Nil(t, fresh.Ratio.AAS)
+
+	gone := ashCompareRowOf("CPU", n(60), nil, 600, 600)
+	require.Equal(t, "gone", gone.Status)
+	require.InDelta(t, -0.1, *gone.Delta.AAS, 1e-9)
+
+	noTicks := ashCompareRowOf("CPU", n(60), n(60), 0, 600)
+	require.Nil(t, noTicks.A.AAS, "no ticks, no average")
+	require.Nil(t, noTicks.Ratio.AAS)
 }

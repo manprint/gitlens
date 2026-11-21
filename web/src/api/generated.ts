@@ -796,6 +796,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ash/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare average active sessions per group between period A and period B.
+         * @description For each value of group_by, the average active sessions of each period with the formula of /api/v1/ash/top: the samples of the group over the period's sampling ticks (filters narrow the samples, never the ticks). delta is B minus A with a missing side counted as 0; ratio is B / A, null when A is 0 or missing. Rows are ordered by the absolute delta, largest first, then key. Each period lasts at most 31 days and ends at most one minute in the future; the periods may overlap. A wrong parameter is a 400 whose error names it.
+         */
+        get: operations["getAshCompare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans": {
         parameters: {
             query?: never;
@@ -1528,6 +1548,31 @@ export interface components {
             wal_bytes?: number | null;
             temp_blks_written?: number | null;
             truncated: components["schemas"]["Truncated"];
+        };
+        AshCompareMetrics: {
+            /**
+             * Format: double
+             * @description Average active sessions; null without sampling ticks.
+             */
+            aas: number | null;
+        };
+        AshCompareRow: {
+            key: string;
+            /**
+             * @description new = only in B
+             * @enum {string}
+             */
+            status: "both" | "new" | "gone";
+            a: components["schemas"]["AshCompareMetrics"] | null;
+            b: components["schemas"]["AshCompareMetrics"] | null;
+            delta: components["schemas"]["AshCompareMetrics"];
+            ratio: components["schemas"]["AshCompareMetrics"];
+        };
+        AshCompare: {
+            a: components["schemas"]["ComparePeriod"];
+            b: components["schemas"]["ComparePeriod"];
+            group_by: string;
+            rows: components["schemas"]["AshCompareRow"][];
         };
         ComparePeriod: {
             from: components["schemas"]["Timestamp"];
@@ -4387,6 +4432,48 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+        };
+    };
+    getAshCompare: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                a_from: components["schemas"]["Timestamp"];
+                a_to: components["schemas"]["Timestamp"];
+                b_from: components["schemas"]["Timestamp"];
+                b_to: components["schemas"]["Timestamp"];
+                /** @description One column; a row's key is its value as text, empty when unknown. */
+                group_by: "wait_event_type" | "wait_event" | "state" | "queryid" | "datname" | "usename" | "client_addr" | "application_name";
+                database?: string;
+                /** @description Only samples of this wait event type. */
+                wait_event_type?: string;
+                /** @description Only samples of this wait event. */
+                wait_event?: string;
+                /** @description Only samples of this user; - selects the samples whose user is unknown (empty). */
+                usename?: string;
+                /** @description Only samples from this client address; - selects the samples without one (local socket or unknown). */
+                client_addr?: string;
+                /** @description Only samples of this application name; - selects the samples without one. */
+                application_name?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The groups of both periods with their change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AshCompare"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
         };
     };
     getPlans: {

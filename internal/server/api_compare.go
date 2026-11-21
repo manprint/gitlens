@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -419,5 +420,148 @@ FROM top`, key("pb", n+6), key("pa", n+5), n+7)
 		return
 	}
 	sortStatementCompare(resp.Rows, order.metric)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+var placeholder = regexp.MustCompile(`\$(\d+)`)
+
+// ----- /api/v1/ash/compare -----
+
+// ashCompareMetrics is the average active sessions of a group in a period.
+type ashCompareMetrics struct {
+	AAS *float64 `json:"aas"`
+}
+
+type ashCompareRow struct {
+	Key    string             `json:"key"`
+	Status string             `json:"status"`
+	A      *ashCompareMetrics `json:"a"`
+	B      *ashCompareMetrics `json:"b"`
+	Delta  ashCompareMetrics  `json:"delta"`
+	Ratio  ashCompareMetrics  `json:"ratio"`
+}
+
+type ashCompareResp struct {
+	A       period          `json:"a"`
+	B       period          `json:"b"`
+	GroupBy string          `json:"group_by"`
+	Rows    []ashCompareRow `json:"rows"`
+}
+
+// ashCompareRowOf builds a row from the samples of a group in each period
+// (nil when not seen) and each period's sampling ticks, with the formula of
+// /api/v1/ash/top: samples over ticks.
+func ashCompareRowOf(key string, aSamples, bSamples *int64, aTicks, bTicks int) ashCompareRow {
+	side := func(samples *int64, ticks int) *ashCompareMetrics {
+		if samples == nil {
+			return nil
+		}
+		return &ashCompareMetrics{AAS: avgActive(int(*samples), ticks)}
+	}
+	ma, mb := side(aSamples, aTicks), side(bSamples, bTicks)
+	var va, vb *float64
+	if ma != nil {
+		va = ma.AAS
+	}
+	if mb != nil {
+		vb = mb.AAS
+	}
+	return ashCompareRow{
+		Key: key, Status: compareStatus(aSamples != nil, bSamples != nil), A: ma, B: mb,
+		Delta: ashCompareMetrics{AAS: compareDelta(va, vb)}, Ratio: ashCompareMetrics{AAS: compareRatio(va, vb)},
+	}
+}
+
+// renumber shifts the $n placeholders of where, built for its own argument
+// list, past the arguments already in args, and appends its arguments.
+func renumber(args *[]any, where string, local []any) string {
+	off := len(*args)
+	*args = append(*args, local...)
+	return placeholder.ReplaceAllStringFunc(where, func(m string) string {
+		n, _ := strconv.Atoi(m[1:])
+		return "$" + strconv.Itoa(n+off)
+	})
+}
+
+func (a *AshAPI) handleASHCompare(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	pa, pb, err := parseComparePeriods(q, time.Now())
+	if err != nil {
+		writeCompareError(w, err)
+		return
+	}
+	groupBy := strings.TrimSpace(q.Get("group_by"))
+	if groupBy == "" {
+		writeError(w, http.StatusBadRequest, "missing group_by", "query param group_by is required")
+		return
+	}
+	if !ashGroupColumns[groupBy] {
+		writeError(w, http.StatusBadRequest, "invalid group_by", fmt.Sprintf("unknown column %q", groupBy))
+		return
+	}
+	limit, err := parseLimitParam(q.Get("limit"), defaultCompareLimit, maxCompareLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid limit", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), compareTimeout)
+	defer cancel()
+	iid, ok := compareInstance(ctx, w, a.pool, q.Get("instance_id"))
+	if !ok {
+		return
+	}
+	resp := ashCompareResp{A: pa, B: pb, GroupBy: groupBy, Rows: []ashCompareRow{}}
+	if a.pool == nil {
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	database, filters := q.Get("database"), ashFiltersFrom(q)
+	// Filters narrow the samples, never the ticks, as for /api/v1/ash/top.
+	var args []any
+	where := func(p period, database string, f ashFilters) string {
+		clause, local := ashWhere(iid, &p.From, &p.To, database, f)
+		return renumber(&args, clause, local)
+	}
+	sa, sb := where(pa, database, filters), where(pb, database, filters)
+	ta, tb := where(pa, "", ashFilters{}), where(pb, "", ashFilters{})
+	args = append(args, limit)
+	key := "COALESCE(" + groupBy + "::text, '')"
+	query := fmt.Sprintf(`
+WITH ta AS (
+	SELECT COALESCE(SUM(t), 0)::int AS ticks FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %[1]s GROUP BY ts) w
+), tb AS (
+	SELECT COALESCE(SUM(t), 0)::int AS ticks FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %[2]s GROUP BY ts) w
+), ga AS (
+	SELECT %[3]s AS key, SUM(samples)::bigint AS samples FROM metrics_ash WHERE %[4]s GROUP BY 1
+), gb AS (
+	SELECT %[3]s AS key, SUM(samples)::bigint AS samples FROM metrics_ash WHERE %[5]s GROUP BY 1
+)
+SELECT COALESCE(gb.key, ga.key) AS key, ga.samples, gb.samples, ta.ticks, tb.ticks
+FROM ga FULL OUTER JOIN gb ON ga.key = gb.key CROSS JOIN ta CROSS JOIN tb
+ORDER BY abs(COALESCE(gb.samples::float8 / NULLIF(tb.ticks, 0), 0) - COALESCE(ga.samples::float8 / NULLIF(ta.ticks, 0), 0)) DESC,
+	COALESCE(gb.key, ga.key) COLLATE "C"
+LIMIT $%[6]d`, ta, tb, key, sa, sb, len(args))
+	rows, err := a.pool.Query(ctx, query, args...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			k              string
+			aS, bS         *int64
+			aTicks, bTicks int
+		)
+		if err := rows.Scan(&k, &aS, &bS, &aTicks, &bTicks); err != nil {
+			writeError(w, http.StatusInternalServerError, "scan failed", err.Error())
+			return
+		}
+		resp.Rows = append(resp.Rows, ashCompareRowOf(k, aS, bS, aTicks, bTicks))
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error", err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }

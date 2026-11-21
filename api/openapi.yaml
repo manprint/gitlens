@@ -338,6 +338,29 @@ components:
         wal_bytes: { type: [number, 'null'] }
         temp_blks_written: { type: [number, 'null'] }
         truncated: { $ref: '#/components/schemas/Truncated' }
+    AshCompareMetrics:
+      type: object
+      required: [aas]
+      properties:
+        aas: { type: [number, 'null'], format: double, description: Average active sessions; null without sampling ticks. }
+    AshCompareRow:
+      type: object
+      required: [key, status, a, b, delta, ratio]
+      properties:
+        key: { type: string }
+        status: { type: string, enum: [both, new, gone], description: new = only in B, gone = only in A. }
+        a: { anyOf: [{ $ref: '#/components/schemas/AshCompareMetrics' }, { type: 'null' }] }
+        b: { anyOf: [{ $ref: '#/components/schemas/AshCompareMetrics' }, { type: 'null' }] }
+        delta: { $ref: '#/components/schemas/AshCompareMetrics' }
+        ratio: { $ref: '#/components/schemas/AshCompareMetrics' }
+    AshCompare:
+      type: object
+      required: [a, b, group_by, rows]
+      properties:
+        a: { $ref: '#/components/schemas/ComparePeriod' }
+        b: { $ref: '#/components/schemas/ComparePeriod' }
+        group_by: { type: string }
+        rows: { type: array, items: { $ref: '#/components/schemas/AshCompareRow' } }
     ComparePeriod:
       type: object
       required: [from, to]
@@ -3868,6 +3891,77 @@ paths:
                       - { queryid: '1234567890', query_text: SELECT '* FROM users WHERE id = $1', samples: 45, ticks: 10, avg_active_sessions: 4.5 }
         '400': { $ref: '#/components/responses/BadRequest' }
 
+  /api/v1/ash/compare:
+    get:
+      tags: [ash]
+      operationId: getAshCompare
+      summary: Compare average active sessions per group between period A and period B.
+      description: >-
+        For each value of group_by, the average active sessions of each period
+        with the formula of /api/v1/ash/top: the samples of the group over the
+        period's sampling ticks (filters narrow the samples, never the ticks).
+        delta is B minus A with a missing side counted as 0; ratio is B / A,
+        null when A is 0 or missing. Rows are ordered by the absolute delta,
+        largest first, then key. Each period lasts at most 31 days and ends at
+        most one minute in the future; the periods may overlap. A wrong
+        parameter is a 400 whose error names it.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: a_from, in: query, required: true, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: a_to, in: query, required: true, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: b_from, in: query, required: true, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: b_to, in: query, required: true, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: group_by
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [wait_event_type, wait_event, state, queryid, datname, usename, client_addr, application_name]
+          description: One column; a row's key is its value as text, empty when unknown.
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - name: wait_event_type
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this wait event type.
+        - name: wait_event
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this wait event.
+        - name: usename
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this user; - selects the samples whose user is unknown (empty).
+        - name: client_addr
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples from this client address; - selects the samples without one (local socket or unknown).
+        - name: application_name
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this application name; - selects the samples without one.
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 50, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: The groups of both periods with their change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AshCompare' }
+              examples:
+                default:
+                  value:
+                    a: { from: '2026-11-20T09:00:00Z', to: '2026-11-20T10:00:00Z' }
+                    b: { from: '2026-11-21T09:00:00Z', to: '2026-11-21T10:00:00Z' }
+                    group_by: wait_event_type
+                    rows:
+                      - { key: Lock, status: both, a: { aas: 1 }, b: { aas: 4 }, delta: { aas: 3 }, ratio: { aas: 4 } }
+                      - { key: IO, status: new, a: null, b: { aas: 0.5 }, delta: { aas: 0.5 }, ratio: { aas: null } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/plans:
     get:
       tags: [statements]
