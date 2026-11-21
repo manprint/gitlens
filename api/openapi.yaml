@@ -2030,13 +2030,21 @@ components:
         rejected: { type: integer, format: int32 }
     RetentionFamily:
       type: object
-      required: [family, hypertable, days, source, min_days, max_days]
+      required: [family, hypertable, rollup, days, source, min_days, max_days]
       properties:
         family:
           $ref: '#/components/schemas/RetentionFamilyName'
         hypertable:
           type: string
-          description: The TimescaleDB hypertable of the family (public schema).
+          description: >-
+            The TimescaleDB hypertable of the family (public schema); for a
+            rollup, the continuous aggregate that carries the policy.
+        rollup:
+          type: boolean
+          description: >-
+            true for an hourly rollup: one row per hour, kept 730 days by
+            default (31 to 1825); charts read it for ranges older than the
+            raw retention.
         days:
           type: [integer, 'null']
           format: int32
@@ -2050,7 +2058,8 @@ components:
           enum: [default, custom]
           description: >-
             default when days equals the migration default (30 days; 90 for
-            metrics_bloat), custom otherwise, a missing policy included.
+            metrics_bloat; 730 for a rollup), custom otherwise, a missing
+            policy included.
         min_days:
           type: integer
           format: int32
@@ -2059,12 +2068,12 @@ components:
             in days) + 1), computed from the live compression policy
             (compress_after, or compress_created_before), so the retention
             never drops below the compression horizon; 3 without a
-            compression policy.
+            compression policy. A rollup takes at least 31.
         max_days:
           type: integer
           format: int32
-          enum: [365]
-          description: The longest retention the console sets.
+          enum: [365, 1825]
+          description: The longest retention the console sets (365 for raw data, 1825 for a rollup).
         unsupported_policy:
           type: string
           description: >-
@@ -2075,8 +2084,11 @@ components:
             policy).
     RetentionFamilyName:
       type: string
-      enum: [metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat]
-      description: A metrics family; each maps to the hypertable of the same name.
+      enum: [metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat, metrics_1h, metrics_statements_1h, metrics_ash_1h]
+      description: >-
+        A metrics family; each maps to the hypertable of the same name. The
+        three `_1h` families are the hourly rollups (continuous aggregates of
+        metrics, metrics_statements and metrics_ash).
     RetentionPreview:
       type: object
       required: [family, days, chunks_to_drop, bytes_to_free, oldest_chunk_at, newest_dropped_chunk_end]

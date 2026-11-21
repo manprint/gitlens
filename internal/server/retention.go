@@ -24,15 +24,21 @@ import (
 // parameter (I-3).
 
 // retentionFamily is one metrics family: the hypertable it maps to and the
-// retention its migration gives it.
+// retention its migration gives it. A rollup family (plan 007 D8) is a
+// continuous aggregate: Hypertable is the view name, which TimescaleDB jobs
+// list and the policy functions accept. Zero MinDays or MaxDays means the
+// bounds every raw family shares.
 type retentionFamily struct {
 	Name        string
 	Hypertable  string
 	DefaultDays int
+	MinDays     int
+	MaxDays     int
+	Rollup      bool
 }
 
 // retentionFamilies is the whitelist, in the order the API lists it (D17). The
-// defaults are those of migrations 0003 and 0007.
+// defaults are those of migrations 0003, 0007 and 0035 (rollups).
 var retentionFamilies = []retentionFamily{
 	{Name: "metrics", Hypertable: "metrics", DefaultDays: 30},
 	{Name: "metrics_statements", Hypertable: "metrics_statements", DefaultDays: 30},
@@ -41,11 +47,18 @@ var retentionFamilies = []retentionFamily{
 	{Name: "metrics_tables", Hypertable: "metrics_tables", DefaultDays: 30},
 	{Name: "metrics_indexes", Hypertable: "metrics_indexes", DefaultDays: 30},
 	{Name: "metrics_bloat", Hypertable: "metrics_bloat", DefaultDays: 90},
+	{Name: "metrics_1h", Hypertable: "metrics_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},
+	{Name: "metrics_statements_1h", Hypertable: "metrics_statements_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},
+	{Name: "metrics_ash_1h", Hypertable: "metrics_ash_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},
 }
 
 const (
-	// retentionMaxDays is the longest retention the console sets.
+	// retentionMaxDays is the longest retention the console sets on a raw
+	// family.
 	retentionMaxDays = 365
+	// rollupMinDays and rollupMaxDays bound the retention of an hourly rollup.
+	rollupMinDays = 31
+	rollupMaxDays = 1825
 	// retentionFloorDays is the shortest retention of a family, whatever its
 	// compression policy.
 	retentionFloorDays = 3
@@ -54,6 +67,20 @@ const (
 	// changed under it by another write.
 	retentionAttempts = 3
 )
+
+// maxDays is the longest retention the family takes.
+func (f retentionFamily) maxDays() int {
+	if f.MaxDays > 0 {
+		return f.MaxDays
+	}
+	return retentionMaxDays
+}
+
+// minDays is the shortest retention the family takes: its own minimum, and
+// never under its compression horizon.
+func (f retentionFamily) minDays(compressAfter *float64) int {
+	return max(f.MinDays, minRetentionDays(compressAfter))
+}
 
 // lookupRetentionFamily returns the whitelisted family of that name.
 func lookupRetentionFamily(name string) (retentionFamily, bool) {
@@ -143,18 +170,25 @@ const (
 	   AND j.hypertable_name = ANY($1::text[])`
 
 	// retentionPreviewSQL counts and sizes the chunks show_chunks would return
-	// for older_than = days, and reads the oldest chunk of the hypertable.
+	// for older_than = days, and reads the oldest chunk of the hypertable. The
+	// chunks of a continuous aggregate belong to its materialization
+	// hypertable, which h resolves (the view itself for a plain hypertable).
 	retentionPreviewSQL = `WITH h AS (
-		SELECT format('public.%I', $1::text)::regclass AS rel
+		SELECT format('public.%I', $1::text)::regclass AS rel,
+		       coalesce(ca.materialization_hypertable_schema::text, 'public') AS store_schema,
+		       coalesce(ca.materialization_hypertable_name::text, $1::text) AS store_name
+		  FROM (SELECT 1) one
+		  LEFT JOIN timescaledb_information.continuous_aggregates ca
+		    ON ca.view_schema = 'public' AND ca.view_name = $1::text
 	), dropped AS (
 		SELECT s.chunk FROM h, show_chunks(h.rel, older_than => $2::int * interval '1 day') AS s(chunk)
 	), sized AS (
 		SELECT format('%I.%I', d.chunk_schema, d.chunk_name)::regclass AS chunk, d.total_bytes
-		  FROM h, chunks_detailed_size(h.rel) AS d
+		  FROM h, chunks_detailed_size(format('%I.%I', h.store_schema, h.store_name)::regclass) AS d
 	), ranged AS (
 		SELECT format('%I.%I', c.chunk_schema, c.chunk_name)::regclass AS chunk, c.range_start, c.range_end
-		  FROM timescaledb_information.chunks c
-		 WHERE c.hypertable_schema = 'public' AND c.hypertable_name = $1::text
+		  FROM h JOIN timescaledb_information.chunks c
+		    ON c.hypertable_schema = h.store_schema AND c.hypertable_name = h.store_name
 	)
 	SELECT (SELECT count(*) FROM dropped),
 	       (SELECT coalesce(sum(sized.total_bytes), 0)::bigint FROM sized JOIN dropped USING (chunk)),
@@ -333,6 +367,8 @@ func (a *API) registerRetentionRoutes(r chi.Router) {
 type retentionRow struct {
 	Family     string `json:"family"`
 	Hypertable string `json:"hypertable"`
+	// Rollup marks an hourly rollup (continuous aggregate) family.
+	Rollup bool `json:"rollup"`
 	// Days is null when the hypertable has no retention policy, or one
 	// without drop_after (UnsupportedPolicy then describes it).
 	Days    *int   `json:"days"`
@@ -388,8 +424,9 @@ func renderRetentionRow(f retentionFamily, p livePolicy) retentionRow {
 		Hypertable: f.Hypertable,
 		Days:       retentionDays(p.DropAfter),
 		Source:     "custom",
-		MinDays:    minRetentionDays(p.CompressAfter),
-		MaxDays:    retentionMaxDays,
+		Rollup:     f.Rollup,
+		MinDays:    f.minDays(p.CompressAfter),
+		MaxDays:    f.maxDays(),
 		// A policy the console cannot read in days is custom by definition.
 		UnsupportedPolicy: p.Unsupported,
 	}
@@ -421,20 +458,20 @@ func writeRetentionUnsupported(w http.ResponseWriter, f retentionFamily, policy 
 // family shares, before the store is read: such a value is refused even with
 // the store down.
 func checkStaticRetentionDays(w http.ResponseWriter, f retentionFamily, days int) bool {
-	return checkRetentionDays(w, f, days, retentionFloorDays)
+	return checkRetentionDays(w, f, days, f.minDays(nil))
 }
 
 // checkRetentionDays answers 400 when days is outside the family's range.
 func checkRetentionDays(w http.ResponseWriter, f retentionFamily, days, minDays int) bool {
-	if days < minDays || days > retentionMaxDays {
+	if days < minDays || days > f.maxDays() {
 		writeError(w, http.StatusBadRequest, "invalid days",
-			fmt.Sprintf("days of %s must be between %d and %d", f.Name, minDays, retentionMaxDays))
+			fmt.Sprintf("days of %s must be between %d and %d", f.Name, minDays, f.maxDays()))
 		return false
 	}
 	return true
 }
 
-// handleGetRetention lists the seven families with their live retention.
+// handleGetRetention lists the families with their live retention.
 func (a *API) handleGetRetention(w http.ResponseWriter, r *http.Request) {
 	ps := a.retentionStore()
 	if ps == nil {
@@ -510,7 +547,7 @@ func (a *API) handlePreviewRetention(w http.ResponseWriter, r *http.Request) {
 		writeRetentionUnsupported(w, f, p.Unsupported)
 		return
 	}
-	if !checkRetentionDays(w, f, days, minRetentionDays(p.CompressAfter)) {
+	if !checkRetentionDays(w, f, days, f.minDays(p.CompressAfter)) {
 		return
 	}
 	out, err := previewOf(ctx, ps, f, p, days)
@@ -570,7 +607,7 @@ func (a *API) handleSetRetention(w http.ResponseWriter, r *http.Request) {
 			writeRetentionUnsupported(w, f, p.Unsupported)
 			return
 		}
-		if !checkRetentionDays(w, f, days, minRetentionDays(p.CompressAfter)) {
+		if !checkRetentionDays(w, f, days, f.minDays(p.CompressAfter)) {
 			return
 		}
 		if p.DropAfter != nil && *p.DropAfter == float64(days*secondsPerDay) {

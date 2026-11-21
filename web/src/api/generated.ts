@@ -3079,37 +3079,39 @@ export interface components {
         };
         RetentionFamily: {
             family: components["schemas"]["RetentionFamilyName"];
-            /** @description The TimescaleDB hypertable of the family (public schema). */
+            /** @description The TimescaleDB hypertable of the family (public schema); for a rollup, the continuous aggregate that carries the policy. */
             hypertable: string;
+            /** @description true for an hourly rollup: one row per hour, kept 730 days by default (31 to 1825); charts read it for ranges older than the raw retention. */
+            rollup: boolean;
             /**
              * Format: int32
              * @description The live retention in days, read from the hypertable's retention policy (drop_after, a part of a day rounded up); null when the hypertable has no retention policy and keeps its history, or when its policy has no drop_after (see unsupported_policy).
              */
             days: number | null;
             /**
-             * @description default when days equals the migration default (30 days; 90 for metrics_bloat), custom otherwise, a missing policy included.
+             * @description default when days equals the migration default (30 days; 90 for metrics_bloat; 730 for a rollup), custom otherwise, a missing policy included.
              * @enum {string}
              */
             source: "default" | "custom";
             /**
              * Format: int32
-             * @description The shortest retention the family takes: max(3, ceil(compress_after in days) + 1), computed from the live compression policy (compress_after, or compress_created_before), so the retention never drops below the compression horizon; 3 without a compression policy.
+             * @description The shortest retention the family takes: max(3, ceil(compress_after in days) + 1), computed from the live compression policy (compress_after, or compress_created_before), so the retention never drops below the compression horizon; 3 without a compression policy. A rollup takes at least 31.
              */
             min_days: number;
             /**
              * Format: int32
-             * @description The longest retention the console sets.
+             * @description The longest retention the console sets (365 for raw data, 1825 for a rollup).
              * @enum {integer}
              */
-            max_days: 365;
+            max_days: 365 | 1825;
             /** @description Present only when the hypertable's retention policy has no drop_after (for example drop_created_before, set outside the console): it describes that policy, days is null, and the console neither previews nor replaces it (503 unsupported retention policy). */
             unsupported_policy?: string;
         };
         /**
-         * @description A metrics family; each maps to the hypertable of the same name.
+         * @description A metrics family; each maps to the hypertable of the same name. The three `_1h` families are the hourly rollups (continuous aggregates of metrics, metrics_statements and metrics_ash).
          * @enum {string}
          */
-        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat";
+        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat" | "metrics_1h" | "metrics_statements_1h" | "metrics_ash_1h";
         RetentionPreview: {
             family: components["schemas"]["RetentionFamilyName"];
             /** Format: int32 */

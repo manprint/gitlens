@@ -77,3 +77,6 @@ Gates: G-GO-FULL 35 pkgs ok, lint 0; G-GO-INT TestINTCMP001/002 pass, integratio
 
 ## 2026-11-21 5.1/1 complete unit:5.1:1
 Gates: G-GO-INT ./internal/store/ race (TestINTRLP001-003 + all store integration) pass; server retention integration pass; golangci-lint integration 0; review: self-review (agent:opus) accepted (SQL reviewed before run: IF NOT EXISTS, WITH NO DATA, policies if_not_exists, no refresh in the migration); changes: migration 0035_rollups.sql (metrics_statements_1h, metrics_ash_1h, metrics_1h, refresh 3 d/1 h/30 min, retention 730 d); rollups_integration_test.go; notes: A13
+
+## 2026-11-21 5.2/1 complete unit:5.2:1
+Gates: G-GO-FOCUS ./internal/server race+shuffle pass (TestRET*, TestRLP001-003); G-GO-INT TestRETINT* + TestINTRLP004 pass; golangci-lint 0 (plain + integration); G-API regenerated (docs/api.md unchanged); tsc clean; vitest settings + retention 14 files/112 tests; review: self-review (agent:opus) accepted; changes: retentionFamily MinDays/MaxDays/Rollup, three rollup families (730 d, 31..1825), preview resolves the materialization hypertable, row field rollup; OpenAPI enum/rollup/max_days; console labels; notes: A14

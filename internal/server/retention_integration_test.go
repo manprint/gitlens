@@ -100,11 +100,14 @@ func TestRETINT001(t *testing.T) {
 
 	var rows []retentionRow
 	getJSON(t, h, "/api/v1/settings/retention", &rows)
-	require.Len(t, rows, 7)
+	require.Len(t, rows, 10)
 	for _, row := range rows {
 		require.NotNil(t, row.Days, row.Family)
 		require.Equal(t, "default", row.Source, row.Family)
-		if row.Family == "metrics_bloat" {
+		if row.Rollup {
+			require.Equal(t, 730, *row.Days, row.Family)
+			require.Equal(t, 31, row.MinDays, row.Family)
+		} else if row.Family == "metrics_bloat" {
 			require.Equal(t, 90, *row.Days)
 			require.Equal(t, 8, row.MinDays, "computed from the live 7-day compression policy")
 		} else {
@@ -157,7 +160,7 @@ func TestRETINT001(t *testing.T) {
 
 	rec = putRetention(t, h, "metrics_ash", `{"days":14,"confirm":true}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.JSONEq(t, `{"family":"metrics_ash","hypertable":"metrics_ash","days":14,"source":"custom","min_days":3,"max_days":365}`, rec.Body.String())
+	require.JSONEq(t, `{"family":"metrics_ash","hypertable":"metrics_ash","rollup":false,"days":14,"source":"custom","min_days":3,"max_days":365}`, rec.Body.String())
 	after := retentionJobs(t, pool, "metrics_ash")
 	require.Len(t, after, 1, "one retention policy, never two")
 	require.Equal(t, "14 days", after[0].DropAfter)
@@ -395,4 +398,40 @@ func TestRETINT003(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT fixed_schedule FROM timescaledb_information.jobs WHERE job_id = $1`, created.JobID).Scan(&fixed))
 	require.False(t, fixed, "a day after each run ends, as the migrations' jobs")
 	require.Zero(t, created.TotalRuns, "the new policy has not run")
+}
+
+// INT-RLP-004: a rollup's retention is read and set on its continuous
+// aggregate; the raw family's policy does not move, and the preview resolves
+// the rollup's materialization hypertable.
+func TestINTRLP004(t *testing.T) {
+	pool := getSharedPool(t)
+	restoreRetention(t, pool, "metrics_ash_1h", "730 days")
+	h := retentionRouter(NewAPI(pool))
+	rawBefore := retentionJobs(t, pool, "metrics_ash")
+
+	p := previewRetention(t, h, "metrics_ash_1h", 400)
+	require.Equal(t, "metrics_ash_1h", p.Family)
+	require.Zero(t, p.ChunksToDrop)
+
+	rec := putRetention(t, h, "metrics_ash_1h", `{"days":400}`)
+	require.Equal(t, http.StatusConflict, rec.Code, "400 is shorter than 730: %s", rec.Body.String())
+	rec = putRetention(t, h, "metrics_ash_1h", `{"days":400,"confirm":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var rows []retentionRow
+	getJSON(t, h, "/api/v1/settings/retention", &rows)
+	byFamily := map[string]retentionRow{}
+	for _, row := range rows {
+		byFamily[row.Family] = row
+	}
+	got := byFamily["metrics_ash_1h"]
+	require.True(t, got.Rollup)
+	require.Equal(t, 400, *got.Days)
+	require.Equal(t, "custom", got.Source)
+	require.Equal(t, 1825, got.MaxDays)
+	jobs := retentionJobs(t, pool, "metrics_ash_1h")
+	require.Len(t, jobs, 1)
+	require.Equal(t, "400 days", jobs[0].DropAfter)
+	require.Equal(t, rawBefore, retentionJobs(t, pool, "metrics_ash"))
+	require.Equal(t, 30, *byFamily["metrics_ash"].Days)
 }

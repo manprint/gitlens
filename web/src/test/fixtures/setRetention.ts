@@ -6,6 +6,7 @@ export const responseStatus = 200
 export const base = {
   family: 'metrics_ash' as const,
   hypertable: 'metrics_ash',
+  rollup: false,
   days: 14 as number | null,
   source: 'custom' as 'default' | 'custom',
   min_days: 3,

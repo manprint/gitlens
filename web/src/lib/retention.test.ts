@@ -111,6 +111,9 @@ describe('retention rules', () => {
       'metrics_tables',
       'metrics_indexes',
       'metrics_bloat',
+      'metrics_1h',
+      'metrics_statements_1h',
+      'metrics_ash_1h',
     ])
     expect(() =>
       assertMatchesContract('setRetention', 409, {

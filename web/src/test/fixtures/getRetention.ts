@@ -9,6 +9,7 @@ export const base: RetentionFamily[] = [
   {
     family: 'metrics',
     hypertable: 'metrics',
+    rollup: false,
     days: 30,
     source: 'default',
     min_days: 3,
@@ -17,6 +18,7 @@ export const base: RetentionFamily[] = [
   {
     family: 'metrics_statements',
     hypertable: 'metrics_statements',
+    rollup: false,
     days: 30,
     source: 'default',
     min_days: 3,
@@ -25,6 +27,7 @@ export const base: RetentionFamily[] = [
   {
     family: 'metrics_ash',
     hypertable: 'metrics_ash',
+    rollup: false,
     days: 30,
     source: 'default',
     min_days: 3,
@@ -33,6 +36,7 @@ export const base: RetentionFamily[] = [
   {
     family: 'metrics_replication',
     hypertable: 'metrics_replication',
+    rollup: false,
     days: 30,
     source: 'default',
     min_days: 3,
@@ -41,6 +45,7 @@ export const base: RetentionFamily[] = [
   {
     family: 'metrics_tables',
     hypertable: 'metrics_tables',
+    rollup: false,
     days: 30,
     source: 'default',
     min_days: 3,
@@ -49,6 +54,7 @@ export const base: RetentionFamily[] = [
   {
     family: 'metrics_indexes',
     hypertable: 'metrics_indexes',
+    rollup: false,
     days: 30,
     source: 'default',
     min_days: 3,
@@ -57,6 +63,7 @@ export const base: RetentionFamily[] = [
   {
     family: 'metrics_bloat',
     hypertable: 'metrics_bloat',
+    rollup: false,
     days: 90,
     source: 'default',
     min_days: 8,
