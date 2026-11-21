@@ -134,3 +134,6 @@ Gates: G-GO-FOCUS server/store (race, shuffle) ok, TestAVH007/008; G-GO-INT Test
 
 ## 2026-11-21 8.3/1 complete unit:8.3:1
 Gates: G-GO-FOCUS server/readiness/wire/i18n/agent PASS; INT TestINTAVH002/003 PASS; lint 0; G-API regen; tsc/eslint(2 pre-existing warnings)/prettier PASS; vitest instance+routes+i18n+help PASS; i18n-check PASS; review: self-review (agent:opus) accepted; changes: API /autovacuum/runs+summary; OpenAPI; AgentFlags.LogsEnabled; RDY-AV-01 + locales + MONITORING_READINESS; console Autovacuum activity view with per-table runs detail; captions en/it; help instance-overview#autovacuum-activity en/it; README Autovacuum history; notes: A29
+
+## 2026-11-21 P8/1 complete unit:P8:1
+Gates: G-GO-FULL rc=0; G-GO-INT rc=0 (agent, server, store, cmd/pglens-agent; TestINTAVH001-003, TestINTRO001 pg15/pg18; only opt-in TestINTFIRSTRUN001 skipped); G-WEB-FULL rc=0 (237 files, 2083 tests, statements 92.52%, budget PASS); G-API no diff; G-I18N pass; review: self-review (agent:opus) accepted; changes: Phase 8 closure review; notes: Review: order_by whitelist only (no SQL injection), instance_id tenant filter on every query, nullable numbers kept as null, old agents without logs_enabled leave RDY-AV-01 silent, runs fetched only when a summary row is expanded.
