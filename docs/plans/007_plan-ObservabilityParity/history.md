@@ -59,3 +59,6 @@ Gates: G-GO-FOCUS (notify, alert, server, cmd/pglens-server; race, shuffle) gree
 
 ## 2026-11-21 3.4/1 complete unit:3.4:1
 Gates: G-GO-FOCUS server/cmd/alert race+shuffle pass; golangci-lint 0; G-API regen; tsc/eslint/prettier clean; vitest 228 files/2043 tests rc=0; G-I18N 48 pass; review: self-review (agent:opus) accepted; changes: OpenAPI six kinds + 409 smtp_not_configured; console registry/labels/live validation for Teams, PagerDuty, Email; help en/it; README channels table + env rows; example env; notes: A9 recorded
+
+## 2026-11-21 P3/1 complete unit:P3:1
+Gates: G-GO-FULL 35 pkgs ok, lint 0; G-GO-INT TestINTNCH001/002 + NOTIINT001/002 pass, integration lint 0; G-API no diff; G-I18N 48; G-WEB-FULL typecheck/lint/coverage 228 files/2043 tests/budget rc=0; go.mod unchanged; review: self-review (agent:opus) accepted; changes: none (closure); notes: self-review agent:opus accepted: I-5 en/it catalogs + help parity (TestCatalogParity, I18N tests); I-7 secrets never in responses/logs (NCH-005/014/024 canaries, email redact of recipients+password, host-only listing); header injection: headerValue strips CR/LF, NCH-021, recipients parsed by net/mail and CRLF refused (NCH-024); docs: README six-channel table + env rows, example env, help en/it

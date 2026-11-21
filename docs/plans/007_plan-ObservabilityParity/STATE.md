@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 09:06 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 09:17 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD afcf00bc2962f3dd895379c2cee2239f8865d07e + tree 6c49e5657385153b32b20e0fb261cbfa672dacf4 · branch main · last WIP tree none
-- Last closure: unit:3.4:1
-- Next: open P3 · next eligible: P3
+- Base: HEAD e340689e50e1b6c28074ffbf710bce72fc2ba4a7 + tree 4ad1f7069c9b4a6caf3c4e58f75081ff061b753b · branch main · last WIP tree none
+- Last closure: unit:P3:1
+- Next: open 4.1 · next eligible: 4.1
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-none
+P3: none (closure)
 
 ## 6. Checkpoint
 none
@@ -77,11 +77,7 @@ none
 | 0 Baseline and test images | DONE | 1 | 0.1–0.2 | unit:P0:1 |
 | 1 Multixact wraparound rule | DONE | 1 | 1.1–1.3 | unit:P1:1 |
 | 2 ASH dimensions | DONE | 2 | 2.1–2.5 | unit:P2:2 |
-| 3 Notification channels | IN_PROGRESS | 1 | 3.1–3.4 | — |
-| · 3.1 Kind hooks and the Teams channel | DONE | 1 | — | unit:3.1:1 |
-| · 3.2 PagerDuty channel | DONE | 1 | — | unit:3.2:1 |
-| · 3.3 Email channel | DONE | 1 | — | unit:3.3:1 |
-| · 3.4 OpenAPI, console, help, README | DONE | 1 | — | unit:3.4:1 |
+| 3 Notification channels | DONE | 1 | 3.1–3.4 | unit:P3:1 |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |
 | 6 Log ingest | TODO | 1 | 6.1–6.6 | — |
