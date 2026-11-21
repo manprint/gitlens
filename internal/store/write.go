@@ -91,6 +91,9 @@ type ASHRow struct {
 	Usename         string
 	ClientAddr      string
 	ApplicationName string
+	// Service and Endpoint come from sqlcommenter tags; empty when untagged.
+	Service  string
+	Endpoint string
 }
 
 // ReplicationSourceSQL classifies a metrics_replication row as 'receiver'
@@ -803,8 +806,8 @@ func WriteASH(ctx context.Context, tx pgx.Tx, rows []ASHRow) error {
 		batch := &pgx.Batch{}
 		for _, r := range rows {
 			batch.Queue(
-				`INSERT INTO metrics_ash (ts, tenant_id, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks, usename, client_addr, application_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
-				r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.WaitEventType, r.WaitEvent, r.State, r.QueryID, r.Samples, r.WindowSeconds, r.WindowTicks, r.Usename, r.ClientAddr, r.ApplicationName,
+				`INSERT INTO metrics_ash (ts, tenant_id, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks, usename, client_addr, application_name, service, endpoint) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`,
+				r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.WaitEventType, r.WaitEvent, r.State, r.QueryID, r.Samples, r.WindowSeconds, r.WindowTicks, r.Usename, r.ClientAddr, r.ApplicationName, r.Service, r.Endpoint,
 			)
 		}
 		br := tx.SendBatch(ctx, batch)
@@ -827,12 +830,12 @@ func WriteASH(ctx context.Context, tx pgx.Tx, rows []ASHRow) error {
 	}
 	copyRows := make([][]any, 0, len(rows))
 	for _, r := range rows {
-		copyRows = append(copyRows, []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.WaitEventType, r.WaitEvent, r.State, r.QueryID, r.Samples, r.WindowSeconds, r.WindowTicks, r.Usename, r.ClientAddr, r.ApplicationName})
+		copyRows = append(copyRows, []any{r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.WaitEventType, r.WaitEvent, r.State, r.QueryID, r.Samples, r.WindowSeconds, r.WindowTicks, r.Usename, r.ClientAddr, r.ApplicationName, r.Service, r.Endpoint})
 	}
-	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"tmp_metrics_ash"}, []string{"ts", "tenant_id", "cluster_id", "instance_id", "datname", "wait_event_type", "wait_event", "state", "queryid", "samples", "window_seconds", "window_ticks", "usename", "client_addr", "application_name"}, pgx.CopyFromRows(copyRows)); err != nil {
+	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"tmp_metrics_ash"}, []string{"ts", "tenant_id", "cluster_id", "instance_id", "datname", "wait_event_type", "wait_event", "state", "queryid", "samples", "window_seconds", "window_ticks", "usename", "client_addr", "application_name", "service", "endpoint"}, pgx.CopyFromRows(copyRows)); err != nil {
 		return fmt.Errorf("copy ash: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO metrics_ash (ts, tenant_id, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks, usename, client_addr, application_name) SELECT ts, tenant_id, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks, usename, client_addr, application_name FROM tmp_metrics_ash ON CONFLICT DO NOTHING`); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO metrics_ash (ts, tenant_id, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks, usename, client_addr, application_name, service, endpoint) SELECT ts, tenant_id, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks, usename, client_addr, application_name, service, endpoint FROM tmp_metrics_ash ON CONFLICT DO NOTHING`); err != nil {
 		return fmt.Errorf("insert from tmp_metrics_ash: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `DROP TABLE IF EXISTS tmp_metrics_ash`); err != nil {

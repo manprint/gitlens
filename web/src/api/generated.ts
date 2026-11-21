@@ -1813,6 +1813,10 @@ export interface components {
             client_addr?: string;
             /** @description application_name of the samples, empty when unset. Present when grouped or filtered by application_name. */
             application_name?: string;
+            /** @description Service from the statements' sqlcommenter tags, empty when untagged. Present when grouped or filtered by service. */
+            service?: string;
+            /** @description Endpoint from the statements' sqlcommenter tags, empty when untagged. Present when grouped or filtered by endpoint. */
+            endpoint?: string;
         };
         CommandAuditEntry: {
             /** Format: int64 */
@@ -4742,7 +4746,7 @@ export interface operations {
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
                 /** @description Grouped by wait_event without wait_event_type, every bucket still carries its event's wait_event_type. */
-                group_by?: "wait_event_type" | "wait_event" | "queryid" | "state" | "datname" | "usename" | "client_addr" | "application_name";
+                group_by?: "wait_event_type" | "wait_event" | "queryid" | "state" | "datname" | "usename" | "client_addr" | "application_name" | "service" | "endpoint";
                 database?: string;
                 /** @description Only samples of this wait event type; echoed on every returned row. */
                 wait_event_type?: string;
@@ -4754,6 +4758,10 @@ export interface operations {
                 client_addr?: string;
                 /** @description Only samples of this application name; - selects the samples without one. Echoed on every grouped row. */
                 application_name?: string;
+                /** @description Only samples tagged with this service (sqlcommenter application or service tag); - selects the untagged samples. */
+                service?: string;
+                /** @description Only samples tagged with this endpoint (sqlcommenter route, or controller#action); - selects the untagged samples. */
+                endpoint?: string;
                 limit?: number;
             };
             header?: never;
@@ -4792,6 +4800,10 @@ export interface operations {
                 client_addr?: string;
                 /** @description Only samples of this application name; - selects the samples without one. */
                 application_name?: string;
+                /** @description Only samples tagged with this service (sqlcommenter application or service tag); - selects the untagged samples. */
+                service?: string;
+                /** @description Only samples tagged with this endpoint (sqlcommenter route, or controller#action); - selects the untagged samples. */
+                endpoint?: string;
                 limit?: number;
             };
             header?: never;
@@ -4821,7 +4833,7 @@ export interface operations {
                 b_from: components["schemas"]["Timestamp"];
                 b_to: components["schemas"]["Timestamp"];
                 /** @description One column; a row's key is its value as text, empty when unknown. */
-                group_by: "wait_event_type" | "wait_event" | "state" | "queryid" | "datname" | "usename" | "client_addr" | "application_name";
+                group_by: "wait_event_type" | "wait_event" | "state" | "queryid" | "datname" | "usename" | "client_addr" | "application_name" | "service" | "endpoint";
                 database?: string;
                 /** @description Only samples of this wait event type. */
                 wait_event_type?: string;
@@ -4833,6 +4845,10 @@ export interface operations {
                 client_addr?: string;
                 /** @description Only samples of this application name; - selects the samples without one. */
                 application_name?: string;
+                /** @description Only samples tagged with this service (sqlcommenter application or service tag); - selects the untagged samples. */
+                service?: string;
+                /** @description Only samples tagged with this endpoint (sqlcommenter route, or controller#action); - selects the untagged samples. */
+                endpoint?: string;
                 limit?: number;
             };
             header?: never;

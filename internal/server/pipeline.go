@@ -1740,6 +1740,8 @@ func buildASHRow(ts time.Time, tenantID string, clusterID int64, instanceID uuid
 		Usename:         m.Labels["usename"],
 		ClientAddr:      m.Labels["client_addr"],
 		ApplicationName: m.Labels["application_name"],
+		Service:         m.Labels["service"],
+		Endpoint:        m.Labels["endpoint"],
 	}
 }
 

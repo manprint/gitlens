@@ -479,6 +479,8 @@ components:
         usename: { type: string, description: 'User of the samples, empty when unknown. Present when grouped or filtered by usename.' }
         client_addr: { type: string, description: 'Client address of the samples, empty for a local socket or unknown. Present when grouped or filtered by client_addr.' }
         application_name: { type: string, description: 'application_name of the samples, empty when unset. Present when grouped or filtered by application_name.' }
+        service: { type: string, description: 'Service from the statements'' sqlcommenter tags, empty when untagged. Present when grouped or filtered by service.' }
+        endpoint: { type: string, description: 'Endpoint from the statements'' sqlcommenter tags, empty when untagged. Present when grouped or filtered by endpoint.' }
     CommandAuditEntry:
       type: object
       required: [audit_id, command_id, instance_id, kind, args, requested_by, executed_at, outcome]
@@ -4056,7 +4058,7 @@ paths:
         - name: group_by
           in: query
           required: false
-          schema: { type: string, enum: [wait_event_type, wait_event, queryid, state, datname, usename, client_addr, application_name] }
+          schema: { type: string, enum: [wait_event_type, wait_event, queryid, state, datname, usename, client_addr, application_name, service, endpoint] }
           description: Grouped by wait_event without wait_event_type, every bucket still carries its event's wait_event_type.
         - { name: database, in: query, required: false, schema: { type: string } }
         - name: wait_event_type
@@ -4084,6 +4086,16 @@ paths:
           required: false
           schema: { type: string }
           description: Only samples of this application name; - selects the samples without one. Echoed on every grouped row.
+        - name: service
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples tagged with this service (sqlcommenter application or service tag); - selects the untagged samples.
+        - name: endpoint
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples tagged with this endpoint (sqlcommenter route, or controller#action); - selects the untagged samples.
         - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 1000, minimum: 1, maximum: 10000 } }
       responses:
         '200':
@@ -4146,6 +4158,16 @@ paths:
           required: false
           schema: { type: string }
           description: Only samples of this application name; - selects the samples without one.
+        - name: service
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples tagged with this service (sqlcommenter application or service tag); - selects the untagged samples.
+        - name: endpoint
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples tagged with this endpoint (sqlcommenter route, or controller#action); - selects the untagged samples.
         - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 20, minimum: 1, maximum: 1000 } }
       responses:
         '200':
@@ -4187,7 +4209,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [wait_event_type, wait_event, state, queryid, datname, usename, client_addr, application_name]
+            enum: [wait_event_type, wait_event, state, queryid, datname, usename, client_addr, application_name, service, endpoint]
           description: One column; a row's key is its value as text, empty when unknown.
         - { name: database, in: query, required: false, schema: { type: string } }
         - name: wait_event_type
@@ -4215,6 +4237,16 @@ paths:
           required: false
           schema: { type: string }
           description: Only samples of this application name; - selects the samples without one.
+        - name: service
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples tagged with this service (sqlcommenter application or service tag); - selects the untagged samples.
+        - name: endpoint
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples tagged with this endpoint (sqlcommenter route, or controller#action); - selects the untagged samples.
         - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 50, minimum: 1, maximum: 200 } }
       responses:
         '200':

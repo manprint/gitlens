@@ -87,6 +87,8 @@ type ashBucket struct {
 	Usename         *string `json:"usename,omitempty"`
 	ClientAddr      *string `json:"client_addr,omitempty"`
 	ApplicationName *string `json:"application_name,omitempty"`
+	Service         *string `json:"service,omitempty"`
+	Endpoint        *string `json:"endpoint,omitempty"`
 }
 
 type ashResponse struct {
@@ -396,10 +398,12 @@ var ashGroupColumns = map[string]bool{
 	"usename":          true,
 	"client_addr":      true,
 	"application_name": true,
+	"service":          true,
+	"endpoint":         true,
 }
 
 // ashDimColumns are the text dimensions a request may filter or group by.
-var ashDimColumns = []string{"usename", "client_addr", "application_name"}
+var ashDimColumns = []string{"usename", "client_addr", "application_name", "service", "endpoint"}
 
 // ashUnknown in a dimension filter selects the samples whose value is empty.
 const ashUnknown = "-"
@@ -561,6 +565,12 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 			case "application_name":
 				b.ApplicationName = new(string)
 				dests = append(dests, b.ApplicationName)
+			case "service":
+				b.Service = new(string)
+				dests = append(dests, b.Service)
+			case "endpoint":
+				b.Endpoint = new(string)
+				dests = append(dests, b.Endpoint)
 			}
 		}
 		if carryType {
@@ -609,7 +619,7 @@ func foldASHGroups(rows []ashBucket, groupByCols []string, nBuckets, limit int) 
 		if b.QueryID != nil {
 			qid = *b.QueryID
 		}
-		return strings.Join([]string{b.Datname, b.WaitEventType, b.WaitEvent, b.State, qid, deref(b.Usename), deref(b.ClientAddr), deref(b.ApplicationName)}, "\x00")
+		return strings.Join([]string{b.Datname, b.WaitEventType, b.WaitEvent, b.State, qid, deref(b.Usename), deref(b.ClientAddr), deref(b.ApplicationName), deref(b.Service), deref(b.Endpoint)}, "\x00")
 	}
 	var template ashBucket
 	for _, col := range groupByCols {
@@ -628,6 +638,10 @@ func foldASHGroups(rows []ashBucket, groupByCols []string, nBuckets, limit int) 
 			template.ClientAddr = ptr(ashOther)
 		case "application_name":
 			template.ApplicationName = ptr(ashOther)
+		case "service":
+			template.Service = ptr(ashOther)
+		case "endpoint":
+			template.Endpoint = ptr(ashOther)
 		}
 	}
 	otherKey := keyOf(template)
@@ -694,6 +708,10 @@ func echoASHDims(b *ashBucket, filters ashFilters) {
 			b.ClientAddr = ptr(v)
 		case "application_name":
 			b.ApplicationName = ptr(v)
+		case "service":
+			b.Service = ptr(v)
+		case "endpoint":
+			b.Endpoint = ptr(v)
 		}
 	}
 }

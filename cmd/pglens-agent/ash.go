@@ -39,6 +39,9 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg, w
 
 	agg := ash.New(clk, ashWindow, ashMaxKeys)
 	sampler := ash.NewSampler(conn, clk, ashRowFilter(cfg, agg.Add))
+	if service, endpoint := cfg.ASHTagDimensions(); service || endpoint {
+		sampler.SetQueryTags(true)
+	}
 	if cfg.Interval != "" {
 		if d, err := time.ParseDuration(cfg.Interval); err == nil {
 			sampler.SetInterval(d)
@@ -331,6 +334,8 @@ func ashWindowToMetrics(w ash.Window) []wire.Metric {
 			agent.ASHDimUsename:         b.Key.Usename,
 			agent.ASHDimClientAddr:      b.Key.ClientAddr,
 			agent.ASHDimApplicationName: b.Key.ApplicationName,
+			agent.ASHDimService:         b.Key.Service,
+			agent.ASHDimEndpoint:        b.Key.Endpoint,
 		} {
 			if v != "" {
 				labels[name] = v
@@ -350,7 +355,14 @@ func ashWindowToMetrics(w ash.Window) []wire.Metric {
 // row reaches the aggregator, so rows that differ only there merge into one key.
 func ashRowFilter(cfg agent.CheckConfig, add func(ash.SampleRow)) func(ash.SampleRow) {
 	usename, clientAddr, applicationName := cfg.ASHDimensions()
+	service, endpoint := cfg.ASHTagDimensions()
 	return func(r ash.SampleRow) {
+		if !service {
+			r.Service = ""
+		}
+		if !endpoint {
+			r.Endpoint = ""
+		}
 		if !usename {
 			r.Usename = ""
 		}

@@ -608,4 +608,12 @@ checks: `
 	require.Equal(t, []bool{true, true, false}, []bool{u, c, a})
 	u, c, a = CheckConfig{}.ASHDimensions()
 	require.Equal(t, []bool{true, true, true}, []bool{u, c, a})
+
+	sv, ep := cfg.Checks["ash"].ASHTagDimensions()
+	require.Equal(t, []bool{false, false}, []bool{sv, ep})
+	cfg = loadChecksYAML(t, `{ash: {dimensions: [endpoint]}}`)
+	sv, ep = cfg.Checks["ash"].ASHTagDimensions()
+	require.Equal(t, []bool{false, true}, []bool{sv, ep})
+	sv, ep = CheckConfig{}.ASHTagDimensions()
+	require.Equal(t, []bool{true, true}, []bool{sv, ep})
 }

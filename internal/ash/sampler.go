@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/manprint/pglens/internal/sqltag"
 )
 
 // SampleRow represents one row from the ASH sample query.
@@ -24,6 +25,11 @@ type SampleRow struct {
 	Usename         string
 	ClientAddr      string
 	ApplicationName string
+	// Service and Endpoint come from the sqlcommenter tags at the end of the
+	// statement; empty when untagged or not sampled. The statement text itself
+	// never leaves the sampler.
+	Service  string
+	Endpoint string
 }
 
 // maxDimensionBytes bounds a text dimension so one long application name
@@ -62,6 +68,7 @@ type Sampler struct {
 	onSample func(SampleRow)    // invoked for every row of every successful tick; nil is valid (rows dropped)
 	onTick   func(success bool) // invoked exactly once per tick attempt, success or not; nil is valid
 	onBatch  func([]SampleRow)  // invoked with the rows of each successful tick, after its deadline is released; nil is valid
+	tags     bool               // read the statement tail for the service and endpoint tags
 
 	mu          sync.Mutex
 	running     bool
@@ -94,6 +101,15 @@ func (s *Sampler) SetInterval(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.interval = d
+}
+
+// SetQueryTags makes each tick also read the last 700 bytes of the statement
+// and derive Service and Endpoint from its sqlcommenter tags. Must be called
+// before Start.
+func (s *Sampler) SetQueryTags(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tags = on
 }
 
 // Start begins the sampling loop at the configured interval (default 1s).
@@ -213,6 +229,37 @@ func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
 	}
 }
 
+const (
+	sampleColumns = `
+SELECT COALESCE(datname, '')             AS datname,
+       state                             AS state,
+       COALESCE(wait_event_type, 'CPU')  AS wait_event_type,
+       COALESCE(wait_event, 'CPU')       AS wait_event,
+       query_id,
+       COALESCE(usename, '')             AS usename,
+       COALESCE(host(client_addr), '')   AS client_addr,
+       COALESCE(application_name, '')    AS application_name`
+	sampleTagColumn = `,
+       right(query, 700)                 AS query_tail`
+	sampleFrom = `
+  FROM pg_stat_activity
+ WHERE backend_type IN ('client backend', 'parallel worker')
+   AND state <> 'idle'
+   AND pid <> pg_backend_pid()
+   AND COALESCE(application_name, '') NOT LIKE 'pglens/%'
+	`
+)
+
+// sampleQuery is the tick's statement. Without tags it is the statement of
+// phase 2, byte for byte; with tags it also reads the statement's tail, which
+// PostgreSQL has already cut at track_activity_query_size.
+func sampleQuery(tags bool) string {
+	if tags {
+		return sampleColumns + sampleTagColumn + sampleFrom
+	}
+	return sampleColumns + sampleFrom
+}
+
 // doSample executes one ASH sample query.
 //
 // The agent's own sessions are named pglens/shared, pglens/ash and
@@ -228,21 +275,10 @@ func (s *Sampler) doSample(ctx context.Context) error {
 // sampleBatch runs one tick's query and returns its rows, after handing each
 // to onSample.
 func (s *Sampler) sampleBatch(ctx context.Context) ([]SampleRow, error) {
-	rows, err := s.conn.Query(ctx, `
-SELECT COALESCE(datname, '')             AS datname,
-       state                             AS state,
-       COALESCE(wait_event_type, 'CPU')  AS wait_event_type,
-       COALESCE(wait_event, 'CPU')       AS wait_event,
-       query_id,
-       COALESCE(usename, '')             AS usename,
-       COALESCE(host(client_addr), '')   AS client_addr,
-       COALESCE(application_name, '')    AS application_name
-  FROM pg_stat_activity
- WHERE backend_type IN ('client backend', 'parallel worker')
-   AND state <> 'idle'
-   AND pid <> pg_backend_pid()
-   AND COALESCE(application_name, '') NOT LIKE 'pglens/%'
-	`)
+	s.mu.Lock()
+	tags := s.tags
+	s.mu.Unlock()
+	rows, err := s.conn.Query(ctx, sampleQuery(tags))
 	if err != nil {
 		return nil, err
 	}
@@ -256,9 +292,18 @@ SELECT COALESCE(datname, '')             AS datname,
 	for rows.Next() {
 		var datname, state, waitEventType, waitEvent, usename, clientAddr, applicationName string
 		var queryID *int64
-
-		if err := rows.Scan(&datname, &state, &waitEventType, &waitEvent, &queryID, &usename, &clientAddr, &applicationName); err != nil {
+		var tail *string
+		dest := []any{&datname, &state, &waitEventType, &waitEvent, &queryID, &usename, &clientAddr, &applicationName}
+		if tags {
+			dest = append(dest, &tail)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
+		}
+		var service, endpoint string
+		if tail != nil {
+			parsed := sqltag.Parse(*tail)
+			service, endpoint = sqltag.Service(parsed), sqltag.Endpoint(parsed)
 		}
 
 		batch = append(batch, SampleRow{
@@ -270,6 +315,8 @@ SELECT COALESCE(datname, '')             AS datname,
 			Usename:         cut64(usename),
 			ClientAddr:      cut64(clientAddr),
 			ApplicationName: cut64(applicationName),
+			Service:         service,
+			Endpoint:        endpoint,
 		})
 	}
 	if err := rows.Err(); err != nil {

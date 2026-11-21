@@ -147,7 +147,7 @@ type CheckConfig struct {
 	// API — never an empty result indistinguishable from an idle database).
 	Enabled *bool `yaml:"enabled"`
 	// Dimensions (ash only) lists the text dimensions the sampler keeps: nil
-	// keeps all three, an empty list turns them all off.
+	// keeps all five, an empty list turns them all off.
 	Dimensions *[]string `yaml:"dimensions,omitempty"`
 	// The keys below belong to checks.logs only (see config_logs.go).
 	Source              string `yaml:"source,omitempty"`
@@ -163,6 +163,10 @@ const (
 	ASHDimUsename         = "usename"
 	ASHDimClientAddr      = "client_addr"
 	ASHDimApplicationName = "application_name"
+	// ASHDimService and ASHDimEndpoint come from the sqlcommenter tags at the
+	// end of the statement (internal/sqltag).
+	ASHDimService  = "service"
+	ASHDimEndpoint = "endpoint"
 )
 
 // ASHDimensions resolves checks.ash.dimensions: all on when the key is unset,
@@ -182,6 +186,23 @@ func (c CheckConfig) ASHDimensions() (usename, clientAddr, applicationName bool)
 		}
 	}
 	return usename, clientAddr, applicationName
+}
+
+// ASHTagDimensions resolves the two tag dimensions of checks.ash.dimensions:
+// both on when the key is unset, otherwise on only when listed.
+func (c CheckConfig) ASHTagDimensions() (service, endpoint bool) {
+	if c.Dimensions == nil {
+		return true, true
+	}
+	for _, d := range *c.Dimensions {
+		switch d {
+		case ASHDimService:
+			service = true
+		case ASHDimEndpoint:
+			endpoint = true
+		}
+	}
+	return service, endpoint
 }
 
 // ByApplicationEnabled resolves checks.activity.by_application: on unless the
@@ -352,7 +373,7 @@ func (c *Config) validate() error {
 			}
 			for _, d := range *check.Dimensions {
 				switch d {
-				case ASHDimUsename, ASHDimClientAddr, ASHDimApplicationName:
+				case ASHDimUsename, ASHDimClientAddr, ASHDimApplicationName, ASHDimService, ASHDimEndpoint:
 				default:
 					return fmt.Errorf("checks.ash.dimensions: unknown dimension %q", d)
 				}

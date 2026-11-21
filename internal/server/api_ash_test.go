@@ -670,3 +670,27 @@ func TestASHD011_UnknownSelectsEmpty(t *testing.T) {
 	require.Equal(t, "a", *b.Usename)
 	require.Nil(t, b.ApplicationName)
 }
+
+// QTAG-010: service and endpoint are accepted group_by values and filters; the
+// grouped SQL selects and groups by the column, and the row carries the value.
+func TestQTAG010_GroupByService(t *testing.T) {
+	t.Parallel()
+	r := chi.NewRouter()
+	NewAshAPI(nil).RegisterRoutes(r)
+	instID := uuid.NewString()
+	for _, q := range []string{"group_by=service", "group_by=endpoint", "group_by=service,endpoint", "service=shop", "endpoint=-"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+instID+"&"+q, nil))
+		require.Equal(t, http.StatusOK, w.Code, q)
+	}
+
+	from := time.Unix(1_700_000_000, 0).UTC()
+	pool := &ashArgsPool{mockPool: &mockPool{queryResults: []*mockRows{{rows: [][]any{{from, 3, 10, "shop"}}}}, queryRowVals: []*mockRow{{vals: []any{6}}}}}
+	buckets, _, err := (&AshAPI{pool: pool}).queryASHGrouped(context.Background(), uuid.New(), from, from.Add(time.Minute), 10, "", ashFiltersFrom(url.Values{"endpoint": {"/cart"}}), []string{"service"}, 24)
+	require.NoError(t, err)
+	require.Contains(t, pool.querySQL[0], "GROUP BY 1, service")
+	require.Contains(t, pool.querySQL[0], "endpoint = $")
+	require.Len(t, buckets, 1)
+	require.Equal(t, "shop", *buckets[0].Service)
+	require.Equal(t, "/cart", *buckets[0].Endpoint)
+}

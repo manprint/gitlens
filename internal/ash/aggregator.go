@@ -31,6 +31,9 @@ type Key struct {
 	Usename         string
 	ClientAddr      string
 	ApplicationName string
+	// Service and Endpoint come from the statement's sqlcommenter tags.
+	Service  string
+	Endpoint string
 }
 
 // Bucket is one distinct key's sample count within a window.
@@ -89,6 +92,7 @@ func (a *Aggregator) Add(r SampleRow) {
 	k := Key{
 		Datname: r.Datname, WaitEventType: r.WaitEventType, WaitEvent: r.WaitEvent, State: r.State,
 		Usename: r.Usename, ClientAddr: r.ClientAddr, ApplicationName: r.ApplicationName,
+		Service: r.Service, Endpoint: r.Endpoint,
 	}
 	if r.QueryID != nil {
 		k.QueryID = *r.QueryID
@@ -237,5 +241,11 @@ func keyLess(a, b Key) bool {
 	if a.ClientAddr != b.ClientAddr {
 		return a.ClientAddr < b.ClientAddr
 	}
-	return a.ApplicationName < b.ApplicationName
+	if a.ApplicationName != b.ApplicationName {
+		return a.ApplicationName < b.ApplicationName
+	}
+	if a.Service != b.Service {
+		return a.Service < b.Service
+	}
+	return a.Endpoint < b.Endpoint
 }

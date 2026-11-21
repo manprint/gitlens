@@ -1214,3 +1214,21 @@ func TestASHD008_BuildASHRowDimensions(t *testing.T) {
 	row = buildASHRow(now, "default", 1, inst, "postgres", m, "ash")
 	require.Empty(t, row.Usename+row.ClientAddr+row.ApplicationName)
 }
+
+// QTAG-009: buildASHRow reads the service and endpoint labels; without them
+// (untagged, turned off, or an older agent) the fields store ”.
+func TestQTAG009_BuildASHRowTags(t *testing.T) {
+	inst := uuid.New()
+	now := time.Now()
+	m := wire.Metric{Name: "ash_samples", Value: 2, Labels: map[string]string{
+		"wait_event_type": "CPU", "wait_event": "CPU", "state": "active",
+		"service": "shop", "endpoint": "/cart",
+	}}
+	row := buildASHRow(now, "default", 1, inst, "postgres", m, "ash")
+	require.Equal(t, []string{"shop", "/cart"}, []string{row.Service, row.Endpoint})
+
+	delete(m.Labels, "service")
+	delete(m.Labels, "endpoint")
+	row = buildASHRow(now, "default", 1, inst, "postgres", m, "ash")
+	require.Empty(t, row.Service+row.Endpoint)
+}
