@@ -92,3 +92,6 @@ Gates: G-GO-FULL 35 pkgs ok 0 FAIL; G-GO-INT server+store ok (TestINTRLP00*, Tes
 
 ## 2026-11-21 6.1/1 complete unit:6.1:1
 Gates: G-GO-FOCUS ./internal/pglog/ (race, shuffle) ok; lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW internal/pglog entry/jsonlog/csvlog/reader + parse_test (PGL-001..005, 015); fixtures from postgres:18.6/15.19-alpine containers (27 records each); notes: self-review: Split keeps half records unread, CSV restarts after a broken record at the next line, cut at 262144; fixtures hold no host or user data
+
+## 2026-11-21 6.2/1 complete unit:6.2:1
+Gates: G-GO-FOCUS ./internal/pglog/ ok; lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW classify.go (Classify, Classes, Shipped, class constants), classify_test.go (PGL-006..008); notes: self-review: SQLSTATE rules first (57014 split by message), then English message rules in spec order, then severity; Classes derived from the rule tables so the test catches a missing case

@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD dd9d100cfbb59d09fed368ce767b220464c6c226 + tree 5b7732da546ece557a1cd024ade71a188904ecdd · branch main · last WIP tree none
-- Last closure: unit:6.1:1
-- Next: open 6.2 · next eligible: 6.2
+- Base: HEAD 17ecd5027c80a8a7ba1019a21143ffda780d9bc4 + tree 329058daf71c01ae6192f59d63993c66d29c2be6 · branch main · last WIP tree none
+- Last closure: unit:6.2:1
+- Next: open 6.3 · next eligible: 6.3
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -93,7 +93,7 @@ none
 | · P5 closure | IN_PROGRESS | 1 | — | — |
 | 6 Log ingest | IN_PROGRESS | 1 | 6.1–6.6 | — |
 | · 6.1 | DONE | 1 | — | unit:6.1:1 |
-| · 6.2 | TODO | 1 | — | — |
+| · 6.2 | DONE | 1 | — | unit:6.2:1 |
 | · 6.3 | TODO | 1 | — | — |
 | · 6.4 | TODO | 1 | — | — |
 | · 6.5 | TODO | 1 | — | — |
