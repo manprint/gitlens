@@ -164,3 +164,6 @@ Gates: G-WEB-STATIC tsc/eslint(2 pre-existing warnings)/prettier ok; G-WEB-UNIT 
 
 ## 2026-11-21 P10/1 complete unit:P10:1
 Gates: G-GO-FULL rc=0; G-GO-INT rc=0 (TestINTIDXV001-004, TestINTRO001 pg15/pg18, TestINTRO003 pglens-pgext:18, none skipped); G-API no diff; G-WEB-FULL rc=0 (budget PASS); G-I18N rc=0; review: self-review (agent:opus) accepted; changes: Phase 10 closure review; notes: Review: I-6 hypopg_reset before and in deferred cleanup, connection discarded; I-1 only BEGIN READ ONLY + SET LOCAL, hypopg functions run in the agent's own session; identifiers quoted with pgx.Identifier.Sanitize; I-3 command args carry queryid and identifiers, never SQL text; README Validating an index suggestion and help indexes#missing-validate.
+
+## 2026-11-21 11.1/1 complete unit:11.1:1
+Gates: G-GO-FOCUS ./internal/sqltag ok; FuzzParse 10s clean (1.46M execs); lint 0; review: self-review (agent:opus) accepted; changes: NEW internal/sqltag: Parse, Service, Endpoint, TraceID, label cleaning; notes: self-review agent:opus: no findings
