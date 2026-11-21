@@ -29,6 +29,7 @@ export const RETENTION_FAMILY_KEYS = {
   log_events: 'settings.lib.retention.family.logEvents',
   plan_samples: 'settings.lib.retention.family.planSamples',
   autovacuum_runs: 'settings.lib.retention.family.autovacuumRuns',
+  metrics_processes: 'settings.lib.retention.family.processes',
   metrics_1h: 'settings.lib.retention.family.metrics1h',
   metrics_statements_1h: 'settings.lib.retention.family.metricsStatements1h',
   metrics_ash_1h: 'settings.lib.retention.family.metricsAsh1h',

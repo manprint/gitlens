@@ -22,6 +22,8 @@ type hostAPIResponse struct {
 
 func (a *API) registerHostRoutes(r chi.Router) {
 	r.Get("/api/v1/instances/{id}/host", a.handleHost)
+	r.Get("/api/v1/instances/{id}/host/processes", a.handleProcesses)
+	r.Get("/api/v1/instances/{id}/host/processes/top", a.handleProcessesTop)
 }
 
 func hostSource(value float64) string {

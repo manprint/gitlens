@@ -114,6 +114,7 @@ describe('retention rules', () => {
       'log_events',
       'plan_samples',
       'autovacuum_runs',
+      'metrics_processes',
       'metrics_1h',
       'metrics_statements_1h',
       'metrics_ash_1h',

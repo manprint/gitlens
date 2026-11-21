@@ -554,7 +554,7 @@ func getTestPool(t *testing.T) *pgxpool.Pool {
 func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-	_, _ = pool.Exec(ctx, `TRUNCATE events, databases, instances, clusters, agents, metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat, object_facts, lock_snapshots, query_texts, log_events, query_plans, plan_samples, autovacuum_runs CASCADE`)
+	_, _ = pool.Exec(ctx, `TRUNCATE events, databases, instances, clusters, agents, metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat, object_facts, lock_snapshots, query_texts, log_events, query_plans, plan_samples, autovacuum_runs, metrics_processes CASCADE`)
 }
 
 var _ = fmt.Sprintf

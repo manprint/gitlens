@@ -27,6 +27,8 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/instances/{id}/extensions` | `getInstanceExtensions` | Return the extensions installed in each database. |
 | GET | `/api/v1/instances/{id}/functions` | `getInstanceFunctions` | Return the busiest tracked functions and each database's function tracking. |
 | GET | `/api/v1/instances/{id}/host` | `getInstanceHost` | Return measurable host metrics for an instance. |
+| GET | `/api/v1/instances/{id}/host/processes` | `getInstanceHostProcesses` | Return the PostgreSQL processes of the newest host sample at or before a time. |
+| GET | `/api/v1/instances/{id}/host/processes/top` | `getInstanceHostProcessesTop` | Return process usage over a range, grouped by a session label. |
 | GET | `/api/v1/instances/{id}/index-suggestions` | `getIndexSuggestions` | Suggest candidate btree indexes from the tracked statements of the window. |
 | GET | `/api/v1/instances/{id}/indexes` | `getInstanceIndexes` | Return index relation statistics. |
 | GET | `/api/v1/instances/{id}/indexes/history` | `getIndexHistory` | Return the scan rate, tuple read rate and size of one index over time. |

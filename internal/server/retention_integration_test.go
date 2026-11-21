@@ -100,7 +100,7 @@ func TestRETINT001(t *testing.T) {
 
 	var rows []retentionRow
 	getJSON(t, h, "/api/v1/settings/retention", &rows)
-	require.Len(t, rows, 13)
+	require.Len(t, rows, 14)
 	for _, row := range rows {
 		require.NotNil(t, row.Days, row.Family)
 		require.Equal(t, "default", row.Source, row.Family)
@@ -115,6 +115,9 @@ func TestRETINT001(t *testing.T) {
 			require.Equal(t, 3, row.MinDays, "no compression policy: the floor")
 		} else if row.Family == "plan_samples" {
 			require.Equal(t, 30, *row.Days)
+			require.Equal(t, 3, row.MinDays, "no compression policy: the floor")
+		} else if row.Family == "metrics_processes" {
+			require.Equal(t, 7, *row.Days)
 			require.Equal(t, 3, row.MinDays, "no compression policy: the floor")
 		} else if row.Family == "autovacuum_runs" {
 			require.Equal(t, 90, *row.Days)

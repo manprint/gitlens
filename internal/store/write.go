@@ -978,3 +978,41 @@ func (w *Writer) WriteBloat(ctx context.Context, tx pgx.Tx, rows []BloatRow) err
 func (w *Writer) WriteObjectFacts(ctx context.Context, tx pgx.Tx, rows []ObjectFactRow) error {
 	return WriteObjectFacts(ctx, tx, rows)
 }
+
+// ProcessRow is one PostgreSQL process over a host interval (plan 007 phase
+// 12). Nil I/O rates mean the agent could not read the process's counters.
+type ProcessRow struct {
+	TS                                                    time.Time
+	TenantID                                              string
+	InstanceID                                            uuid.UUID
+	ClusterID                                             int64
+	PID                                                   int32
+	BackendType, Datname, Usename, ApplicationName, State string
+	QueryID                                               *int64
+	CPURatio                                              float64
+	RSSBytes                                              int64
+	ReadBytesPerS, WriteBytesPerS                         *float64
+}
+
+// WriteProcesses inserts the process rows; a row already stored is kept.
+func WriteProcesses(ctx context.Context, tx pgx.Tx, rows []ProcessRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, r := range rows {
+		batch.Queue(`INSERT INTO metrics_processes (ts, tenant_id, instance_id, cluster_id, pid, backend_type, datname, usename, application_name, state,
+  queryid, cpu_ratio, rss_bytes, read_bytes_per_s, write_bytes_per_s)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
+			r.TS, r.TenantID, r.InstanceID, r.ClusterID, r.PID, r.BackendType, r.Datname, r.Usename, r.ApplicationName, r.State,
+			r.QueryID, r.CPURatio, r.RSSBytes, r.ReadBytesPerS, r.WriteBytesPerS)
+	}
+	br := tx.SendBatch(ctx, batch)
+	for range rows {
+		if _, err := br.Exec(); err != nil {
+			_ = br.Close()
+			return fmt.Errorf("write process: %w", err)
+		}
+	}
+	return br.Close()
+}

@@ -185,3 +185,6 @@ Gates: G-GO-FOCUS ./internal/host (race, shuffle); golangci-lint 0 issues; revie
 
 ## 2026-11-21 12.2/1 complete unit:12.2:1
 Gates: G-GO-FOCUS ./cmd/pglens-agent ./internal/agent ./internal/wire ./internal/host; lint 0; G-RO INTRO001 pg15/pg18 + INTRO003; G-GO-INT TestINTPROC001 SKIPPED (documented); review: self-review (agent:opus) accepted; changes: host.processes config (enabled, top_n 1-100), fact kind host_process/check host_processes, processTracker per host-local target in the host loop, Manager.BackendPID/ProcessSessions, example config; notes: TestPROC006-009 PASS; A40; self-review agent:opus: only pid, session labels (64-byte cut) and numbers shipped; namespace guard
+
+## 2026-11-21 12.3/1 complete unit:12.3:1
+Gates: G-GO-FOCUS server+store race; TestINTPROC002 + TestRETINT001 PASS; lint 0; G-API regenerated; vitest retention; review: self-review (agent:opus) accepted; changes: migration 0042 metrics_processes; store.WriteProcesses; pipeline host_process routing with invalid_fact rejects; GET host/processes and host/processes/top; OpenAPI + generated; retention family metrics_processes (Go, web, i18n); notes: A41

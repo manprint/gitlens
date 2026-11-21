@@ -196,6 +196,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var logEventRows []store.LogEventRow
 	var planSampleRows []store.PlanSampleRow
 	var autovacuumRows []store.AutovacuumRunRow
+	var processRows []store.ProcessRow
 	var planRows []store.QueryPlanRow
 	var relationPrunes []store.RelationStatsPrune
 	var factPrunes []store.ObjectFactPrune
@@ -367,6 +368,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		var instLogEvents []store.LogEventRow
 		var instPlanSamples []store.PlanSampleRow
 		var instAutovacuum []store.AutovacuumRunRow
+		var instProcesses []store.ProcessRow
 		var instPlans []store.QueryPlanRow
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
@@ -559,6 +561,15 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 						continue
 					}
 					instAutovacuum = append(instAutovacuum, row)
+					continue
+				}
+				if f.Kind == wire.HostProcessFact {
+					row, ok := processRow(f, r.TS, tenantID, cidDB, instUUID)
+					if !ok {
+						IncIngestRejected("invalid_fact")
+						continue
+					}
+					instProcesses = append(instProcesses, row)
 					continue
 				}
 				if f.Kind == logEventFactKind {
@@ -937,6 +948,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		logEventRows = append(logEventRows, instLogEvents...)
 		planSampleRows = append(planSampleRows, instPlanSamples...)
 		autovacuumRows = append(autovacuumRows, instAutovacuum...)
+		processRows = append(processRows, instProcesses...)
 		planRows = append(planRows, instPlans...)
 		relationPrunes = append(relationPrunes, instRelationPrunes...)
 		factPrunes = append(factPrunes, instFactPrunes...)
@@ -1005,6 +1017,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		return nil, err
 	}
 	if err := store.WriteAutovacuumRuns(ctx, tx, autovacuumRows); err != nil {
+		return nil, err
+	}
+	if err := store.WriteProcesses(ctx, tx, processRows); err != nil {
 		return nil, err
 	}
 	if err := store.WriteLockSnapshots(ctx, tx, lockSnapshotRows); err != nil {

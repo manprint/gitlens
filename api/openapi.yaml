@@ -878,6 +878,54 @@ components:
           type: object
           description: Never sent. Read the host_* properties instead.
           additionalProperties: { type: number }
+    HostProcess:
+      type: object
+      required: [pid, backend_type, datname, usename, application_name, state, queryid, cpu_ratio, rss_bytes, read_bytes_per_s, write_bytes_per_s]
+      description: >-
+        One PostgreSQL process at one sample time. cpu_ratio 1.0 is one full
+        core. The I/O rates are null when the agent cannot read the process's
+        I/O counters. Empty labels mean the process had no pg_stat_activity row.
+      properties:
+        pid: { type: integer, format: int32 }
+        backend_type: { type: string }
+        datname: { type: string }
+        usename: { type: string }
+        application_name: { type: string }
+        state: { type: string }
+        queryid: { type: [string, 'null'], description: pg_stat_activity.query_id as a decimal string. }
+        cpu_ratio: { type: number }
+        rss_bytes: { type: integer, format: int64 }
+        read_bytes_per_s: { type: [number, 'null'] }
+        write_bytes_per_s: { type: [number, 'null'] }
+    HostProcessesResponse:
+      type: object
+      required: [ts, processes]
+      properties:
+        ts: { anyOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }], description: The sample shown; null when no sample is at most 5 minutes older than at. }
+        processes: { type: array, items: { $ref: '#/components/schemas/HostProcess' } }
+    HostProcessGroup:
+      type: object
+      required: [group, avg_cpu_ratio, max_rss_bytes, avg_read_bytes_per_s, avg_write_bytes_per_s]
+      description: >-
+        Averages are over every sample time in the range (a group absent at a
+        sample time counts as zero there); max_rss_bytes is the largest single
+        process of the group. An I/O average is null when no process of the
+        group had readable I/O counters.
+      properties:
+        group: { type: string }
+        avg_cpu_ratio: { type: number }
+        max_rss_bytes: { type: integer, format: int64 }
+        avg_read_bytes_per_s: { type: [number, 'null'] }
+        avg_write_bytes_per_s: { type: [number, 'null'] }
+    HostProcessesTopResponse:
+      type: object
+      required: [from, to, group_by, sample_times, groups]
+      properties:
+        from: { $ref: '#/components/schemas/Timestamp' }
+        to: { $ref: '#/components/schemas/Timestamp' }
+        group_by: { type: string, enum: [backend_type, datname, usename, application_name] }
+        sample_times: { type: integer, format: int64 }
+        groups: { type: array, items: { $ref: '#/components/schemas/HostProcessGroup' } }
     Setting:
       type: object
       required: [name, value, unit, source, context, pending_restart, first_seen, last_seen, changed_at]
@@ -2276,7 +2324,7 @@ components:
             policy).
     RetentionFamilyName:
       type: string
-      enum: [metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat, log_events, plan_samples, autovacuum_runs, metrics_1h, metrics_statements_1h, metrics_ash_1h]
+      enum: [metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat, log_events, plan_samples, autovacuum_runs, metrics_processes, metrics_1h, metrics_statements_1h, metrics_ash_1h]
       description: >-
         A metrics family; each maps to the hypertable of the same name. The
         three `_1h` families are the hourly rollups (continuous aggregates of
@@ -2284,7 +2332,8 @@ components:
         PostgreSQL log lines the agent ships (14 days by default); plan_samples
         holds the executions auto_explain logged (30 days by default);
         autovacuum_runs holds the autovacuum and autoanalyze runs read from the
-        log (90 days by default).
+        log (90 days by default); metrics_processes holds the per-process CPU,
+        memory and I/O samples of the host agent (7 days by default).
     RetentionPreview:
       type: object
       required: [family, days, chunks_to_drop, bytes_to_free, oldest_chunk_at, newest_dropped_chunk_end]
@@ -2806,6 +2855,59 @@ paths:
                     instance_id: 11111111-1111-1111-1111-111111111111
                     available: false
                     reason: target is not local to any agent
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/host/processes:
+    get:
+      tags: [instances]
+      operationId: getInstanceHostProcesses
+      summary: Return the PostgreSQL processes of the newest host sample at or before a time.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: at, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' }, description: Defaults to now. }
+        - { name: order_by, in: query, required: false, schema: { type: string, enum: [cpu, rss, read, write], default: cpu } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 40, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: The processes, highest first, then by pid.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostProcessesResponse' }
+              examples:
+                default:
+                  value:
+                    ts: '2026-11-21T10:00:00Z'
+                    processes:
+                      - { pid: 4242, backend_type: client backend, datname: app, usename: app, application_name: web, state: active, queryid: '-6620135178291093426', cpu_ratio: 0.82, rss_bytes: 104857600, read_bytes_per_s: 524288, write_bytes_per_s: null }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/instances/{id}/host/processes/top:
+    get:
+      tags: [instances]
+      operationId: getInstanceHostProcessesTop
+      summary: Return process usage over a range, grouped by a session label.
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' }, description: Defaults to one hour before to. }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' }, description: Defaults to now. }
+        - { name: group_by, in: query, required: false, schema: { type: string, enum: [backend_type, datname, usename, application_name], default: backend_type } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 40, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: The groups by average CPU, highest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostProcessesTopResponse' }
+              examples:
+                default:
+                  value:
+                    from: '2026-11-21T09:00:00Z'
+                    to: '2026-11-21T10:00:00Z'
+                    group_by: backend_type
+                    sample_times: 360
+                    groups:
+                      - { group: client backend, avg_cpu_ratio: 1.4, max_rss_bytes: 209715200, avg_read_bytes_per_s: 1048576, avg_write_bytes_per_s: 65536 }
+                      - { group: checkpointer, avg_cpu_ratio: 0.02, max_rss_bytes: 52428800, avg_read_bytes_per_s: null, avg_write_bytes_per_s: null }
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/instances/{id}/readiness:

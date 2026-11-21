@@ -202,6 +202,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/host/processes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return the PostgreSQL processes of the newest host sample at or before a time. */
+        get: operations["getInstanceHostProcesses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/host/processes/top": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return process usage over a range, grouped by a session label. */
+        get: operations["getInstanceHostProcessesTop"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/readiness": {
         parameters: {
             query?: never;
@@ -2174,6 +2208,46 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** @description One PostgreSQL process at one sample time. cpu_ratio 1.0 is one full core. The I/O rates are null when the agent cannot read the process's I/O counters. Empty labels mean the process had no pg_stat_activity row. */
+        HostProcess: {
+            /** Format: int32 */
+            pid: number;
+            backend_type: string;
+            datname: string;
+            usename: string;
+            application_name: string;
+            state: string;
+            /** @description pg_stat_activity.query_id as a decimal string. */
+            queryid: string | null;
+            cpu_ratio: number;
+            /** Format: int64 */
+            rss_bytes: number;
+            read_bytes_per_s: number | null;
+            write_bytes_per_s: number | null;
+        };
+        HostProcessesResponse: {
+            /** @description The sample shown; null when no sample is at most 5 minutes older than at. */
+            ts: components["schemas"]["Timestamp"] | null;
+            processes: components["schemas"]["HostProcess"][];
+        };
+        /** @description Averages are over every sample time in the range (a group absent at a sample time counts as zero there); max_rss_bytes is the largest single process of the group. An I/O average is null when no process of the group had readable I/O counters. */
+        HostProcessGroup: {
+            group: string;
+            avg_cpu_ratio: number;
+            /** Format: int64 */
+            max_rss_bytes: number;
+            avg_read_bytes_per_s: number | null;
+            avg_write_bytes_per_s: number | null;
+        };
+        HostProcessesTopResponse: {
+            from: components["schemas"]["Timestamp"];
+            to: components["schemas"]["Timestamp"];
+            /** @enum {string} */
+            group_by: "backend_type" | "datname" | "usename" | "application_name";
+            /** Format: int64 */
+            sample_times: number;
+            groups: components["schemas"]["HostProcessGroup"][];
+        };
         Setting: {
             name: string;
             value: string | null;
@@ -3438,10 +3512,10 @@ export interface components {
             unsupported_policy?: string;
         };
         /**
-         * @description A metrics family; each maps to the hypertable of the same name. The three `_1h` families are the hourly rollups (continuous aggregates of metrics, metrics_statements and metrics_ash); log_events holds the PostgreSQL log lines the agent ships (14 days by default); plan_samples holds the executions auto_explain logged (30 days by default); autovacuum_runs holds the autovacuum and autoanalyze runs read from the log (90 days by default).
+         * @description A metrics family; each maps to the hypertable of the same name. The three `_1h` families are the hourly rollups (continuous aggregates of metrics, metrics_statements and metrics_ash); log_events holds the PostgreSQL log lines the agent ships (14 days by default); plan_samples holds the executions auto_explain logged (30 days by default); autovacuum_runs holds the autovacuum and autoanalyze runs read from the log (90 days by default); metrics_processes holds the per-process CPU, memory and I/O samples of the host agent (7 days by default).
          * @enum {string}
          */
-        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat" | "log_events" | "plan_samples" | "autovacuum_runs" | "metrics_1h" | "metrics_statements_1h" | "metrics_ash_1h";
+        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat" | "log_events" | "plan_samples" | "autovacuum_runs" | "metrics_processes" | "metrics_1h" | "metrics_statements_1h" | "metrics_ash_1h";
         RetentionPreview: {
             family: components["schemas"]["RetentionFamilyName"];
             /** Format: int32 */
@@ -3867,6 +3941,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceHostProcesses: {
+        parameters: {
+            query?: {
+                /** @description Defaults to now. */
+                at?: components["schemas"]["Timestamp"];
+                order_by?: "cpu" | "rss" | "read" | "write";
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The processes, highest first, then by pid. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostProcessesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInstanceHostProcessesTop: {
+        parameters: {
+            query?: {
+                /** @description Defaults to one hour before to. */
+                from?: components["schemas"]["Timestamp"];
+                /** @description Defaults to now. */
+                to?: components["schemas"]["Timestamp"];
+                group_by?: "backend_type" | "datname" | "usename" | "application_name";
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["InstanceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The groups by average CPU, highest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostProcessesTopResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
