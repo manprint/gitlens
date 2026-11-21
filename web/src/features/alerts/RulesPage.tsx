@@ -5,12 +5,15 @@ import { Link } from 'react-router-dom'
 import type { AlertRule } from '@/api/alerts'
 import { useAlertRules } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
+import { useT, type Translate } from '@/i18n/react'
 import { ruleText } from '@/lib/ruleText'
 
+import { severityText } from './AlertRow'
 import { RuleEditor } from './RuleEditor'
 import { thresholdText } from './ruleThreshold'
 import { Button } from '@/components/ui/button'
@@ -32,12 +35,41 @@ function enabledLabel(rule: AlertRule): string {
   return rule.enabled === undefined ? '—' : rule.enabled ? 'Yes' : 'No'
 }
 
-const RULE_TOOLBAR: TableToolbarSpec<AlertRule> = {
-  searchFields: [(rule) => rule.id, (rule) => ruleText(rule.id) ?? ''],
-  filters: [
-    { id: 'severity', label: 'Severity', kind: 'select', accessor: (rule) => rule.severity },
-    { id: 'enabled', label: 'Enabled', kind: 'select', accessor: enabledLabel },
-  ],
+function enabledText(value: string, t: Translate): string {
+  if (value === 'Yes') return t('alerts.rules.yes')
+  return value === 'No' ? t('alerts.rules.no') : value
+}
+
+// The options are the values the rules have, sorted as the derived options are; only the labels are translated.
+function distinctOptions(values: readonly string[], label: (value: string) => string) {
+  return [...new Set(values)]
+    .sort((left, right) => left.localeCompare(right))
+    .map((value) => ({ value, label: label(value) }))
+}
+
+function ruleToolbar(rules: readonly AlertRule[], t: Translate): TableToolbarSpec<AlertRule> {
+  return {
+    searchFields: [(rule) => rule.id, (rule) => ruleText(rule.id) ?? ''],
+    filters: [
+      {
+        id: 'severity',
+        label: t('alerts.column.severity'),
+        kind: 'select',
+        accessor: (rule) => rule.severity,
+        options: distinctOptions(
+          rules.map((rule) => rule.severity),
+          (value) => severityText(value, t),
+        ),
+      },
+      {
+        id: 'enabled',
+        label: t('alerts.rules.enabled'),
+        kind: 'select',
+        accessor: enabledLabel,
+        options: distinctOptions(rules.map(enabledLabel), (value) => enabledText(value, t)),
+      },
+    ],
+  }
 }
 
 function ruleLine(ruleId: string): string {
@@ -55,11 +87,11 @@ function RuleCell({ ruleId }: { ruleId: string }) {
   )
 }
 
-function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[] {
+function ruleColumns(onEdit: (ruleId: string) => void, t: Translate): SimpleColumn<AlertRule>[] {
   return [
     {
       id: 'rule',
-      header: 'Rule',
+      header: t('alerts.column.rule'),
       rowHeader: true,
       sortValue: (rule) => rule.id,
       help: 'rules.rule',
@@ -68,7 +100,7 @@ function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[
     },
     {
       id: 'tier',
-      header: 'Tier',
+      header: t('alerts.rules.tier'),
       width: '6rem',
       help: 'rules.tier',
       sortValue: tierLabel,
@@ -76,14 +108,14 @@ function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[
     },
     {
       id: 'severity',
-      header: 'Severity',
+      header: t('alerts.column.severity'),
       width: '8rem',
       sortValue: (rule) => rule.severity,
-      cell: (rule) => rule.severity,
+      cell: (rule) => severityText(rule.severity, t),
     },
     {
       id: 'threshold',
-      header: 'Threshold',
+      header: t('alerts.rules.threshold'),
       width: '16rem',
       help: 'rules.threshold',
       sortValue: (rule) => rule.threshold,
@@ -92,20 +124,25 @@ function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[
     },
     {
       id: 'duration',
-      header: 'Duration',
+      header: t('alerts.rules.duration'),
       width: '8rem',
       help: 'rules.duration',
       sortValue: (rule) => rule.for_seconds,
       cell: (rule) => (rule.for_seconds === undefined ? '—' : `${rule.for_seconds}s`),
     },
-    { id: 'enabled', header: 'Enabled', width: '7rem', cell: enabledLabel },
+    {
+      id: 'enabled',
+      header: t('alerts.rules.enabled'),
+      width: '7rem',
+      cell: (rule) => enabledText(enabledLabel(rule), t),
+    },
     {
       id: 'action',
-      header: 'Action',
+      header: t('alerts.column.action'),
       width: '18rem',
       cell: (rule) =>
         isTierZero(rule) ? (
-          <span className="text-muted-foreground">Always on by design</span>
+          <span className="text-muted-foreground">{t('alerts.rules.alwaysOn')}</span>
         ) : (
           // From 1600 px the button fits the one-line row (D26).
           <Button
@@ -115,7 +152,7 @@ function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[
             type="button"
             variant="outline"
           >
-            Edit {rule.id}
+            {t('alerts.rules.edit', { id: rule.id })}
           </Button>
         ),
     },
@@ -123,6 +160,7 @@ function ruleColumns(onEdit: (ruleId: string) => void): SimpleColumn<AlertRule>[
 }
 
 export function RulesPage() {
+  const t = useT()
   const rulesQuery = useAlertRules()
   const [editingRuleId, setEditingRuleId] = useState<string>()
 
@@ -136,12 +174,13 @@ export function RulesPage() {
   useEffect(() => {
     if (editingId !== undefined) document.getElementById('alert-rule-editor-title')?.focus()
   }, [editingId])
-  const columns = useMemo(() => ruleColumns(setEditingRuleId), [])
+  const columns = useMemo(() => ruleColumns(setEditingRuleId, t), [t])
+  const toolbar = useMemo(() => ruleToolbar(rules, t), [rules, t])
 
   if (rulesQuery.error && !rulesQuery.data) {
     return (
       <ErrorState
-        endpoint="alert rules"
+        endpoint={t('alerts.endpoint.rules')}
         failure={rulesQuery.error}
         onRetry={() => void rulesQuery.refetch()}
       />
@@ -149,8 +188,8 @@ export function RulesPage() {
   }
   if (rulesQuery.isPending) {
     return (
-      <section aria-busy="true" aria-label="Loading alert rules" role="status">
-        Loading alert rules…
+      <section aria-busy="true" aria-label={t('alerts.rules.loadingLabel')} role="status">
+        {t('alerts.rules.loading')}
       </section>
     )
   }
@@ -158,24 +197,25 @@ export function RulesPage() {
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="alert-rules" label={t('alerts.rules.helpLabel')} />}
         icon={ListChecks}
-        eyebrow="Alerting"
+        eyebrow={t('alerts.page.eyebrow')}
         actions={
           <Link
             className="hover:bg-muted inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors"
             to="/alerts"
           >
-            Back to alerts
+            {t('alerts.rules.back')}
           </Link>
         }
         freshness={<FreshnessBadge dataUpdatedAt={rulesQuery.dataUpdatedAt} policy="findings" />}
-        subtitle="Review built-in and operator-managed alert thresholds."
-        title="Alert rules"
+        subtitle={t('alerts.rules.subtitle')}
+        title={t('alerts.rules.title')}
       />
 
       {rulesQuery.error ? (
         <ErrorState
-          endpoint="alert rules"
+          endpoint={t('alerts.endpoint.rules')}
           failure={rulesQuery.error}
           onRetry={() => void rulesQuery.refetch()}
         />
@@ -183,7 +223,11 @@ export function RulesPage() {
 
       {/* Above the list: with 20 rows per page a form below it would open off screen (15.3). */}
       {editingRule ? (
-        <Section captionId="rules.edit" title="Edit rule">
+        <Section
+          actions={<HelpLink anchor="alert-rules#editing" label={t('alerts.rules.editTitle')} />}
+          captionId="rules.edit"
+          title={t('alerts.rules.editTitle')}
+        >
           <RuleEditor
             key={editingRule.id}
             onCancel={() => setEditingRuleId(undefined)}
@@ -193,11 +237,20 @@ export function RulesPage() {
       ) : null}
 
       {rules.length === 0 ? (
-        <EmptyState description="No alert rules are currently available." title="No alert rules" />
+        <EmptyState
+          description={t('alerts.rules.emptyDescription')}
+          title={t('alerts.rules.emptyTitle')}
+        />
       ) : (
-        <Section captionId="rules.list" title="Configured rules">
+        <Section
+          actions={
+            <HelpLink anchor="alert-rules#rules-table" label={t('alerts.rules.configured')} />
+          }
+          captionId="rules.list"
+          title={t('alerts.rules.configured')}
+        >
           <SimpleTable
-            ariaLabel="Alert rules"
+            ariaLabel={t('alerts.rules.title')}
             captionId="rules.table"
             columns={columns}
             emptyState={null}
@@ -205,7 +258,7 @@ export function RulesPage() {
             rows={rules}
             scope="rules"
             tableId="alert-rules"
-            toolbar={RULE_TOOLBAR}
+            toolbar={toolbar}
           />
         </Section>
       )}

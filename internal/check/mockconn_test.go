@@ -400,12 +400,10 @@ func TestStatStatementsCheck_Scrape_Happy(t *testing.T) {
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			q1 := "SELECT 1"
 			q2 := "SELECT 2"
-			return &mockRows{
-				rows: []([]any){
-					{int64(1), int64(100), float64(10.5), int64(1000), int64(5000), int64(500), int64(0), int64(0), &q1, int64(2)},
-					{int64(2), int64(200), float64(20.5), int64(2000), int64(15000), int64(1000), int64(512), int64(7), &q2, int64(2)},
-				},
-			}, nil
+			return answerStatements(sql, args, [][]any{
+				{int64(1), int64(100), float64(10.5), int64(1000), int64(5000), int64(500), int64(0), int64(0), &q1, int64(2)},
+				{int64(2), int64(200), float64(20.5), int64(2000), int64(15000), int64(1000), int64(512), int64(7), &q2, int64(2)},
+			})
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			if strings.Contains(sql, "compute_query_id") {
@@ -504,7 +502,7 @@ func TestStatStatementsCheck_Scrape_CycleAdvancesAndForgetsStaleRetained(t *test
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			rows := rounds[call]
 			call++
-			return &mockRows{rows: rows}, nil
+			return answerStatements(sql, args, rows)
 		},
 		queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			if strings.Contains(sql, "compute_query_id") {

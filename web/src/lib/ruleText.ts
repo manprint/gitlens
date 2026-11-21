@@ -1,3 +1,5 @@
+import { domainText } from '@/i18n/store'
+
 /** One plain sentence for every advisor rule and alert rule id. */
 const ADVISOR_RULE_TEXT = {
   'archive.disabled':
@@ -117,14 +119,19 @@ const ALERT_RULE_TEXT = {
 export const ADVISOR_RULE_IDS = Object.keys(ADVISOR_RULE_TEXT) as readonly string[]
 export const ALERT_RULE_IDS = Object.keys(ALERT_RULE_TEXT) as readonly string[]
 
+export type RuleTextId = keyof typeof ADVISOR_RULE_TEXT | keyof typeof ALERT_RULE_TEXT
+
 const RULE_TEXT: Readonly<Record<string, string>> = { ...ALERT_RULE_TEXT, ...ADVISOR_RULE_TEXT }
 
-/** The plain sentence for a rule id, or `undefined` for an id this build does not know. */
+/** The plain sentence for a rule id in the console language, or `undefined` for an id this build does not know. */
 export function ruleText(id: string): string | undefined {
-  return RULE_TEXT[id]
+  const english = RULE_TEXT[id]
+  return english === undefined
+    ? undefined
+    : domainText(english, (domain) => domain.rules[id as RuleTextId])
 }
 
-const NEED_TEXT: Readonly<Record<string, string>> = {
+const NEED_TEXT_BY_NAME = {
   Baseline: 'seven-day query history',
   Bloat: 'wasted-space estimates',
   Indexes: 'index statistics',
@@ -163,14 +170,23 @@ const NEED_TEXT: Readonly<Record<string, string>> = {
   trigger_inventory: 'triggers and constraints',
   wal_directory: 'size of the WAL directory',
   xmin_horizon: 'oldest transaction holding back vacuum',
-}
+} as const satisfies Record<string, string>
+
+export type NeedName = keyof typeof NEED_TEXT_BY_NAME
+
+const NEED_TEXT: Readonly<Record<string, string>> = NEED_TEXT_BY_NAME
 
 /** Plain words for one input a rule needs; an unknown name is shown with its underscores removed. */
 export function needText(name: string): string {
-  return NEED_TEXT[name] ?? name.replaceAll('_', ' ')
+  const english = NEED_TEXT[name]
+  return english === undefined
+    ? name.replaceAll('_', ' ')
+    : domainText(english, (domain) => domain.needs[name as NeedName])
 }
 
 /** The inputs a rule needs, in plain words and separated by commas. */
 export function needsText(needs: readonly string[]): string {
-  return needs.length === 0 ? 'None' : needs.map(needText).join(', ')
+  return needs.length === 0
+    ? domainText('None', (domain) => domain.noNeeds)
+    : needs.map(needText).join(', ')
 }

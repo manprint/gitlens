@@ -2,6 +2,7 @@ import { act, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { qk } from '@/api/keys'
+import { formatTimestamp } from '@/lib/format'
 
 import type { Schemas } from '@/api/types'
 import { CLUSTER, CLUSTER_ID, INSTANCE_ID, NOW } from '@/test/fixture-helpers'
@@ -10,7 +11,7 @@ import { renderWithProviders } from '@/test/render'
 
 import { InstanceHeader } from './InstanceHeader'
 
-function renderHeader(displayName?: string | null) {
+function renderHeader(displayName?: string | null, search = '') {
   const instance = {
     ...makeGetInstance(),
     ...(displayName === undefined ? {} : { display_name: displayName }),
@@ -21,7 +22,7 @@ function renderHeader(displayName?: string | null) {
       instance={instance}
       replayLag={{ state: 'loading' }}
     />,
-    { route: `/instances/${INSTANCE_ID}` },
+    { route: `/instances/${INSTANCE_ID}${search}` },
   )
 }
 
@@ -69,5 +70,23 @@ describe('InstanceHeader names', () => {
     expect(owning()).toHaveTextContent('odoo-prod')
     expect(owning()).toHaveAttribute('title', CLUSTER_ID)
     expect(owning()).toHaveAttribute('href', `/clusters/${CLUSTER_ID}`)
+  })
+})
+
+describe('InstanceHeader views', () => {
+  it('UI-INST-HDR-001 leaves the views to the sidebar and keeps the instance id behind a copy button', () => {
+    renderHeader(undefined, '?db=app')
+    expect(screen.queryByRole('navigation', { name: 'Instance views' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Query performance' })).not.toBeInTheDocument()
+    expect(screen.queryByText(INSTANCE_ID)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy instance ID' })).toHaveTextContent('ID')
+    expect(screen.getByTestId('instance-id')).toHaveAttribute('title', `Instance ID ${INSTANCE_ID}`)
+  })
+
+  it('UI-INST-HDR-002 shows the last seen time with the full timestamp as its title', () => {
+    renderHeader()
+    const time = screen.getByTitle(formatTimestamp(NOW, undefined, 'en-GB'))
+    expect(time).toHaveAttribute('datetime', NOW)
+    expect(time).not.toBeEmptyDOMElement()
   })
 })

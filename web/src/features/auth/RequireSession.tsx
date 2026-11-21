@@ -6,6 +6,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { configureAuth, useSession } from '@/api/auth'
 import { Logo } from '@/components/layout/Logo'
 import { Button } from '@/components/ui/button'
+import { useT } from '@/i18n/react'
 
 interface RequireSessionProps {
   children: ReactNode
@@ -17,6 +18,7 @@ export default function RequireSession({ children }: RequireSessionProps) {
   const queryClient = useQueryClient()
   configureAuth(queryClient, navigate)
   const session = useSession()
+  const t = useT()
   // The sign-in page returns to the page the operator asked for, not to the fleet.
   const loginPath = `/login?next=${encodeURIComponent(`${location.pathname}${location.search}${location.hash}`)}`
 
@@ -34,12 +36,10 @@ export default function RequireSession({ children }: RequireSessionProps) {
           role="alert"
         >
           <Logo className="text-foreground justify-center" />
-          <p className="text-foreground font-medium">Could not verify the session.</p>
-          <p className="text-muted-foreground text-sm">
-            The server did not respond. Check the connection and try again.
-          </p>
+          <p className="text-foreground font-medium">{t('auth.session.failedTitle')}</p>
+          <p className="text-muted-foreground text-sm">{t('auth.session.failedBody')}</p>
           <Button className="w-full" onClick={() => void session.refetch()} type="button">
-            Retry
+            {t('auth.session.retry')}
           </Button>
         </div>
       </main>
@@ -50,7 +50,7 @@ export default function RequireSession({ children }: RequireSessionProps) {
     return (
       <main
         aria-busy="true"
-        aria-label="Loading session"
+        aria-label={t('auth.session.loadingLabel')}
         className="bg-background flex min-h-screen items-center justify-center"
         data-testid="session-loading"
       >
@@ -68,11 +68,9 @@ export default function RequireSession({ children }: RequireSessionProps) {
         <div className="bg-card shadow-card w-full max-w-md space-y-4 rounded-xl border p-8">
           <Logo className="text-foreground" />
           <h1 className="text-foreground text-2xl font-semibold tracking-tight">
-            Interface not configured
+            {t('auth.session.notConfiguredTitle')}
           </h1>
-          <p className="text-muted-foreground text-sm">
-            Set the interface password on the server with:
-          </p>
+          <p className="text-muted-foreground text-sm">{t('auth.session.notConfiguredBody')}</p>
           <code className="bg-muted block rounded-lg px-3 py-2 font-mono text-sm">
             PGLENS_UI_PASSWORD
           </code>

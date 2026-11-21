@@ -45,7 +45,7 @@ export const settingsCaptions = {
     source:
       'Server command-audit endpoint for this instance, rows of command_audit (kind, args, requested_by, executed_at, outcome, detail); the filters and search run in the browser.',
     unit: 'audit entries',
-    window: 'The newest 100 entries; times are UTC.',
+    window: 'The newest 100 entries; times in the console time zone.',
     howToRead:
       'Each entry is one event: the request, its result or its expiry. State is requested, ok, error, rejected or expired. A request the agent never claimed is shown as expired when it ran out in the queue.',
   },
@@ -54,7 +54,7 @@ export const settingsCaptions = {
     source:
       'Rows of the command_audit table through the server command-audit endpoint for this instance; the search and filters run in the browser.',
     unit: 'audit entries',
-    window: 'The newest 100 entries; the Time column is UTC.',
+    window: 'The newest 100 entries; the Time column is in the console time zone.',
     howToRead:
       'Time is when the entry was recorded. Requested by is the credential that asked, not a person. Timing and detail adds when it was requested, claimed or expires, and the result detail.',
   },
@@ -74,7 +74,7 @@ export const settingsCaptions = {
     unit: 'instances',
     window: 'Latest report of each instance.',
     howToRead:
-      'Permission tier is T0 (reads statistics only), T1 (also runs EXPLAIN) or T2 (also cancels or ends sessions). Last seen is a UTC time. Host metrics says whether the agent on the same host sends operating system figures: Available, Available (stale) when the last sample is over 90 seconds old, or Unavailable with the reason on hover.',
+      'Permission tier is T0 (reads statistics only), T1 (also runs EXPLAIN) or T2 (also cancels or ends sessions). Last seen is in the console time zone. Host metrics says whether the agent on the same host sends operating system figures: Available, Available (stale) when the last sample is over 90 seconds old, or Unavailable with the reason on hover.',
   },
   'settings.permission-tiers': {
     what: 'Each instance has a permission tier: T0 reads statistics only, T1 also runs EXPLAIN for query plans, T2 also cancels or ends other sessions.',
@@ -99,7 +99,7 @@ export const settingsCaptions = {
     source:
       'Built in the browser from the instances list and the firing alerts; the agent name is agent- plus the instance ID.',
     unit: 'agents',
-    window: 'Latest report of each instance; times are UTC.',
+    window: 'Latest report of each instance; times in the console time zone.',
     howToRead: 'State is Reporting or Down. The search matches the agent, address and reason.',
   },
   'settings.inventory-databases': {

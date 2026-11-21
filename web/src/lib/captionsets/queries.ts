@@ -190,39 +190,75 @@ export const queriesCaptions = {
       'On an instance whose tier is lower than the rule minimum, the rule reports a degraded finding instead of being evaluated.',
   },
   'queries.explain-panel': {
-    what: 'Asks the agent for the execution plan of this statement: the steps PostgreSQL chooses to run it, shown as a tree.',
+    what: 'How PostgreSQL runs this statement: the operations it chooses, the rows each handles and where time and cost go.',
     source:
-      'The agent runs EXPLAIN on the monitored database for this query id and returns the plan; the server stores it in the plan history.',
-    unit: 'plan nodes',
+      'The agent runs EXPLAIN on the monitored database for this query id, in a read-only transaction, and returns the plan; the server keeps it in the plan history.',
+    unit: 'plan operations',
     window: 'One plan per request; it describes the database at the moment of the request.',
     howToRead:
-      'Plan needs permission tier T1 and does not run the statement. Plan with ANALYZE runs it to measure real times: the console offers it at T2, and the agent must also allow it with allow_explain_analyze.',
+      'Plan only needs tier T1 and runs nothing: its figures are the planner estimates. Plan with ANALYZE needs T2 and allow_explain_analyze on the agent: it runs the statement, rolled back afterwards, and measures real times and rows.',
+  },
+  'queries.explain-params': {
+    what: 'Values for the $1…$n pg_stat_statements put in place of the constants; ANALYZE needs them to run the statement.',
+    source:
+      'You type them; the agent binds them as parameters and never writes them into the statement. Left empty, the agent takes a recent execution from pg_stat_activity.',
+    unit: 'one value per placeholder',
+    window: 'Used for the next request only.',
+    howToRead:
+      'Fill all of them or none. Type each value as in SQL without quotes; tick NULL for SQL NULL. Plan only without values gives a generic plan (PostgreSQL 16+).',
+  },
+  'queries.plan-tree': {
+    what: 'The plan as a tree of operations, with rows, loops and the time or cost each one adds without its children.',
+    source:
+      'The EXPLAIN output the agent returned. Time and rows are totals over all loops; buffers are 8 kB pages, cached or read from disk.',
+    unit: 'ms, rows, planner cost units, bytes',
+    window: 'One execution, or the planner estimate when ANALYZE did not run.',
+    howToRead:
+      'Start from What to look at, then the widest bar: the operation where the time goes. A ×N badge marks a row estimate N times off, a sign of stale statistics. Text gives the plan as psql prints it.',
   },
   'queries.plan-history': {
-    what: 'The plans requested for this statement, newest first; pick two to compare them side by side.',
+    what: 'Every plan requested for this statement, newest first, with its shape: select one to read it, two to compare them.',
     source:
-      'Server plans endpoint over the query_plans table, filled only by the plans requested above; the 20 newest entries for this query id.',
+      'Server plans endpoint over the query_plans table, filled only by the plans requested above; the 20 newest for this query id.',
     unit: 'plans',
     window: 'Every request kept by the server, newest first, at most 20 shown.',
     howToRead:
-      'Each entry shows when it was captured, whether it ran EXPLAIN or ANALYZE, and the plan hash; the server counts entries with the same hash as one plan shape. pglens does not sample plans by itself.',
+      'The shape is a fingerprint of operations, tables, indexes and conditions, not of costs or times. A new shape means PostgreSQL now runs the statement another way: after an index, statistics or parameter change.',
+  },
+  'queries.plan-captures': {
+    what: 'One row per captured plan: when, which kind, its shape, cost, time and rows, and the top operation.',
+    source: 'The plans stored by the server for this query id, newest first.',
+    unit: 'plans; cost in planner units, time in ms',
+    window: 'The 20 newest captures.',
+    howToRead:
+      'New shape marks a capture whose shape differs from the capture before it. Compare an EXPLAIN with an EXPLAIN by cost and an ANALYZE with an ANALYZE by time.',
   },
   'queries.plan-comparison': {
-    what: 'The nodes of two selected plans side by side, matched by their position in the plan tree.',
+    what: 'The operations of two captured plans side by side, matched by their place in the tree, with what changed.',
     source:
-      'The two plans selected in the plan history; each node shows its type and its total cost.',
-    unit: 'plan nodes; cost in planner units',
+      'The two plans selected in the plan history: operation, object, conditions, cost, rows and time of each.',
+    unit: 'plan operations; cost in planner units, time in ms',
     window: 'The two stored plans, as captured.',
     howToRead:
-      'Path is the position of a node in the tree. A highlighted row has a different node type or total cost, or exists in only one plan. Cost is the planner estimate, not a time.',
+      'Changed marks a different operation, object or condition at the same place; Added and Removed exist in one plan only. Figures show older → newer.',
   },
   'findings.table': {
-    what: 'One row per advisor finding: its severity, title, object, rule, scope, state and when it was last seen.',
+    what: 'One row per advisor finding: severity, what was found, the statement or object it is about, and when it was last seen.',
     source:
-      'Server findings endpoint over the findings table written by the advisor engine; rule sentences come from the advisor rule catalogue.',
+      'Server findings endpoint over the findings table written by the advisor engine, with the statement text kept by the server; rule sentences come from the rule catalogue.',
     unit: 'findings',
-    window: 'The findings matching the filters above, at most 1000; last seen is a UTC timestamp.',
+    window:
+      'The findings matching the filters above, at most 1000; last seen in the console time zone.',
     howToRead:
-      'Open a row for the detail, the advice and the evidence. Object names the cluster or instance when the fleet list knows its name. Rule shows what the rule checks, then its id.',
+      'A state other than open shows under the severity. Open a row for the full statement, what to do, the SQL to verify it on the database and the evidence.',
+  },
+  'findings.verify': {
+    what: 'The steps and the read-only SQL that show on the database what the finding reports, to check it yourself.',
+    source:
+      'Built by the console from the rule and the finding: database, object, statement id and threshold. Nothing runs from here.',
+    unit: 'steps and one SQL script',
+    window: 'Run it now: it reads the current statistics, not the moment of the finding.',
+    howToRead:
+      'Connect to the database named in step 1 and run the script. It runs in a read-only transaction that is rolled back, so it changes nothing. Compare its numbers with the evidence below.',
   },
 } as const satisfies Record<string, CaptionEntry>

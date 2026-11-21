@@ -5,9 +5,10 @@ import { useNavigate } from 'react-router-dom'
 import { useSignOut } from '@/api/auth'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { useTheme } from '@/hooks/useTheme'
 import { useOnline } from '@/hooks/useOnline'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT, type Translate } from '@/i18n/react'
 import { formatRelative } from '@/lib/format/relative'
 import { cn } from '@/lib/utils'
 
@@ -22,7 +23,6 @@ export interface ConnectionState {
 
 export interface HeaderProps {
   connection?: ConnectionState
-  dataUpdatedAt?: number
   /** Opens the navigation drawer on narrow screens. */
   onOpenNavigation?: () => void
   /**
@@ -35,13 +35,13 @@ export interface HeaderProps {
   statusSlot?: Ref<HTMLDivElement> | undefined
 }
 
-const SHORTCUTS: readonly (readonly [readonly string[], string])[] = [
-  [['g', 'f'], 'Fleet'],
-  [['g', 'q'], 'Slowest queries'],
-  [['g', 'a'], 'Alerts'],
-  [['g', 's'], 'Settings'],
-  [['/'], 'Focus the page filter'],
-  [['?'], 'Show this help'],
+const SHORTCUTS: readonly (readonly [readonly string[], MessageKey])[] = [
+  [['g', 'f'], 'shell.header.shortcut.fleet'],
+  [['g', 'q'], 'shell.header.shortcut.queries'],
+  [['g', 'a'], 'shell.header.shortcut.alerts'],
+  [['g', 's'], 'shell.header.shortcut.settings'],
+  [['/'], 'shell.header.shortcut.filter'],
+  [['?'], 'shell.header.shortcut.help'],
 ]
 
 const defaultConnection: ConnectionState = {
@@ -49,12 +49,12 @@ const defaultConnection: ConnectionState = {
   lastSuccessAt: null,
 }
 
-function lastSuccessLabel(lastSuccessAt: number | null): string {
-  if (lastSuccessAt === null) return 'No successful response yet.'
+function lastSuccessLabel(t: Translate, lastSuccessAt: number | null): string {
+  if (lastSuccessAt === null) return t('shell.header.noSuccess')
 
   const date = new Date(lastSuccessAt)
-  if (!Number.isFinite(date.getTime())) return 'Last success age unknown.'
-  return `Last success ${formatRelative(date.toISOString(), new Date())}`
+  if (!Number.isFinite(date.getTime())) return t('shell.header.successUnknown')
+  return t('shell.header.lastSuccess', { age: formatRelative(date.toISOString(), new Date()) })
 }
 
 export function ConnectionIndicator({
@@ -62,19 +62,23 @@ export function ConnectionIndicator({
   lastSuccessAt,
   online = true,
 }: ConnectionState) {
-  const status = !online ? 'browser is offline' : lastPollFailed ? 'not reachable' : 'reachable'
+  const t = useT()
+  const status = t(
+    !online
+      ? 'shell.header.status.offline'
+      : lastPollFailed
+        ? 'shell.header.status.down'
+        : 'shell.header.status.up',
+  )
+  const detail = online ? lastSuccessLabel(t, lastSuccessAt) : t('shell.header.offline')
   const variant = !online || lastPollFailed ? 'destructive' : 'secondary'
 
   const healthy = online && !lastPollFailed
 
   return (
-    <div
-      className="flex items-center gap-2"
-      data-testid="connection-indicator"
-      title={online ? lastSuccessLabel(lastSuccessAt) : 'Browser is offline.'}
-    >
+    <div className="flex items-center gap-2" data-testid="connection-indicator" title={detail}>
       <Badge
-        aria-label={`Connection: ${status}`}
+        aria-label={t('shell.header.connection', { status })}
         className={cn(
           'gap-1.5 font-medium',
           healthy && 'border-success/30 bg-success/10 text-success-foreground dark:text-success',
@@ -89,21 +93,21 @@ export function ConnectionIndicator({
             healthy ? 'bg-success animate-pulse' : 'bg-current',
           )}
         />
+        {/* Names the pglens server, so it is not read as the instance's own reachability. */}
+        <span className="opacity-70">{t('shell.header.server')}</span>
         {status}
       </Badge>
-      <span className="text-muted-foreground hidden text-xs 2xl:inline">
-        {online ? lastSuccessLabel(lastSuccessAt) : 'Browser is offline.'}
-      </span>
+      <span className="text-muted-foreground hidden text-xs 2xl:inline">{detail}</span>
     </div>
   )
 }
 
 export function Header({
   connection = defaultConnection,
-  dataUpdatedAt = 0,
   onOpenNavigation,
   statusSlot,
 }: HeaderProps) {
+  const t = useT()
   const navigate = useNavigate()
   const signOut = useSignOut()
   const { resolvedTheme, setTheme, theme } = useTheme()
@@ -177,12 +181,15 @@ export function Header({
 
   // The label names the current theme, and each click moves to the next one in
   // the cycle light, dark, system.
-  const themeLabel =
+  const themeLabel = t(
     theme === 'system'
-      ? `System (${resolvedTheme})`
+      ? resolvedTheme === 'dark'
+        ? 'shell.header.theme.systemDark'
+        : 'shell.header.theme.systemLight'
       : theme === 'dark'
-        ? 'Dark theme'
-        : 'Light theme'
+        ? 'shell.header.theme.dark'
+        : 'shell.header.theme.light',
+  )
   const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun
 
   return (
@@ -194,7 +201,7 @@ export function Header({
         <div className="flex min-w-0 flex-1 items-center gap-2" data-testid="header-start">
           {onOpenNavigation ? (
             <Button
-              aria-label="Open navigation"
+              aria-label={t('shell.header.openNavigation')}
               className="md:hidden"
               onClick={onOpenNavigation}
               size="icon-sm"
@@ -218,17 +225,14 @@ export function Header({
         >
           <TimeRangePicker />
           <span aria-hidden="true" className="bg-border mx-1 hidden h-6 w-px sm:block" />
-          <span className="hidden sm:contents">
-            <FreshnessBadge dataUpdatedAt={dataUpdatedAt} policy="fleet" />
-          </span>
           <ConnectionIndicator {...connection} online={online} />
           <span aria-hidden="true" className="bg-border mx-1 hidden h-6 w-px sm:block" />
           <Button
-            aria-label="Keyboard shortcuts"
+            aria-label={t('shell.header.shortcuts')}
             className="hidden sm:inline-flex"
             onClick={() => setShortcutSheetOpen((open) => !open)}
             size="icon-sm"
-            title="Keyboard shortcuts (?)"
+            title={t('shell.header.shortcutsTitle')}
             variant="ghost"
           >
             <Keyboard aria-hidden="true" />
@@ -236,7 +240,7 @@ export function Header({
           {/* The accessible name keeps the visible label (WCAG 2.5.3), so the
               screen reader hears the current theme along with the control. */}
           <Button
-            aria-label={`Toggle theme: ${themeLabel}`}
+            aria-label={t('shell.header.toggleTheme', { theme: themeLabel })}
             onClick={toggleTheme}
             size="sm"
             title={themeLabel}
@@ -246,14 +250,14 @@ export function Header({
             <span className="sr-only">{themeLabel}</span>
           </Button>
           <Button
-            aria-label="Sign out"
+            aria-label={t('shell.header.signOut')}
             disabled={signOut.isPending}
             onClick={() => signOut.mutate()}
             size="sm"
             variant="outline"
           >
             <LogOut aria-hidden="true" />
-            <span className="hidden sm:inline">Sign out</span>
+            <span className="hidden sm:inline">{t('shell.header.signOut')}</span>
           </Button>
         </div>
       </div>
@@ -262,24 +266,24 @@ export function Header({
           className="border-destructive/30 bg-destructive/10 text-destructive border-t px-6 py-2 text-sm"
           role="alert"
         >
-          Sign-out failed: the server session may still be active. Try signing out again.
+          {t('shell.header.signOutFailed')}
         </p>
       ) : null}
       {shortcutSheetOpen ? (
         <section
-          aria-label="Keyboard shortcuts"
+          aria-label={t('shell.header.shortcuts')}
           className="bg-popover shadow-raised absolute top-full right-4 z-30 mt-2 w-80 rounded-lg border p-4 text-sm"
           role="dialog"
         >
           <div className="mb-3 flex items-center justify-between gap-4">
-            <strong>Keyboard shortcuts</strong>
+            <strong>{t('shell.header.shortcuts')}</strong>
             <Button
-              aria-label="Close keyboard shortcuts"
+              aria-label={t('shell.header.closeShortcuts')}
               onClick={() => setShortcutSheetOpen(false)}
               size="sm"
               variant="ghost"
             >
-              Close
+              {t('shell.header.close')}
             </Button>
           </div>
           <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2">
@@ -295,7 +299,7 @@ export function Header({
                     </kbd>
                   ))}
                 </dt>
-                <dd className="text-muted-foreground">{label}</dd>
+                <dd className="text-muted-foreground">{t(label)}</dd>
               </Fragment>
             ))}
           </dl>

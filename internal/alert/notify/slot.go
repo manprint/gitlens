@@ -18,6 +18,9 @@ var ErrNotConfigured = errors.New("notification channel not configured")
 type Slot struct {
 	name    string
 	current atomic.Pointer[slotEntry]
+	// locale is the language of the channel's messages; nil or "" is the
+	// server default (PGLENS_LANG).
+	locale atomic.Pointer[string]
 }
 
 // slotEntry boxes the channel, since an atomic.Pointer holds a pointer and not
@@ -56,6 +59,27 @@ func (s *Slot) Store(c Channel) {
 
 // Configured reports whether the Slot holds a channel.
 func (s *Slot) Configured() bool { return s.Channel() != nil }
+
+// SetLocale sets the language the channel's messages are written in; ""
+// restores the server default.
+func (s *Slot) SetLocale(code string) { s.locale.Store(&code) }
+
+// Locale is the language SetLocale set, "" for the server default.
+func (s *Slot) Locale() string {
+	if p := s.locale.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// LocaleOf is the language c's messages are written in, "" for the server
+// default. Only a channel that names one, such as a Slot, has one.
+func LocaleOf(c Channel) string {
+	if l, ok := c.(interface{ Locale() string }); ok {
+		return l.Locale()
+	}
+	return ""
+}
 
 // Send sends m through the channel the Slot holds now.
 func (s *Slot) Send(ctx context.Context, m Message) error {

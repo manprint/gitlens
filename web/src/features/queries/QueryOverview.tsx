@@ -1,24 +1,19 @@
 import { ArrowLeft, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { useInstance, useStatements } from '@/api/queries'
-import type { Schemas } from '@/api/types'
+import { useInstance } from '@/api/queries'
 import { CopyButton } from '@/components/layout/CopyButton'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { MetricTile } from '@/components/layout/MetricTile'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SqlText } from '@/components/layout/SqlText'
 import { Badge } from '@/components/ui/badge'
-import { useTimeRange } from '@/hooks/useTimeRange'
+import { useT } from '@/i18n/react'
 import { formatBytes, formatCount, formatMilliseconds, formatPercent } from '@/lib/format'
 import { instanceLabel } from '@/lib/names'
-import { queryWindowOf } from '@/lib/timerange'
 
-type Statement = Schemas['Statement']
-
-// pg_stat_statements has no per-query endpoint, so the statement is looked up
-// in the instance's statements for the selected window, as wide as the API allows.
-const LOOKUP_LIMIT = 1000
+import { useQueryStatement, type Statement } from './useQueryStatement'
 
 interface QueryOverviewProps {
   instanceId: string
@@ -26,18 +21,8 @@ interface QueryOverviewProps {
   datname?: string
 }
 
-function findStatement(
-  statements: readonly Statement[],
-  queryid: string,
-  datname: string | undefined,
-): Statement | undefined {
-  return statements.find(
-    (statement) =>
-      statement.queryid === queryid && (datname === undefined || statement.datname === datname),
-  )
-}
-
 function StatementMetrics({ statement }: { statement: Statement }) {
+  const t = useT()
   const calls = statement.calls ?? null
   const rowsPerCall =
     calls !== null && calls > 0 && statement.rows !== null && statement.rows !== undefined
@@ -51,7 +36,7 @@ function StatementMetrics({ statement }: { statement: Statement }) {
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
       <MetricTile
         captionId="queries.detail-mean-time"
-        label="Mean time"
+        label={t('queries.common.meanTime')}
         value={
           statement.mean_exec_time === null || statement.mean_exec_time === undefined
             ? null
@@ -60,7 +45,7 @@ function StatementMetrics({ statement }: { statement: Statement }) {
       />
       <MetricTile
         captionId="queries.detail-total-time"
-        label="Total time"
+        label={t('queries.common.totalTime')}
         value={
           statement.total_exec_time_ms === null || statement.total_exec_time_ms === undefined
             ? null
@@ -69,23 +54,23 @@ function StatementMetrics({ statement }: { statement: Statement }) {
       />
       <MetricTile
         captionId="queries.detail-calls"
-        label="Calls"
+        label={t('queries.common.calls')}
         value={calls === null ? null : formatCount(calls)}
       />
       <MetricTile
         captionId="queries.detail-rows-per-call"
-        label="Rows per call"
+        label={t('queries.overview.rowsPerCall')}
         unit="rows"
         value={rowsPerCall === null ? null : formatCount(Math.round(rowsPerCall * 10) / 10)}
       />
       <MetricTile
         captionId="queries.detail-cache-hit-ratio"
-        label="Cache hit ratio"
+        label={t('queries.overview.cacheHitRatio')}
         value={cacheHit}
       />
       <MetricTile
         captionId="queries.detail-wal"
-        label="WAL generated"
+        label={t('queries.overview.walGenerated')}
         value={
           statement.wal_bytes === null || statement.wal_bytes === undefined
             ? null
@@ -101,19 +86,9 @@ function StatementMetrics({ statement }: { statement: Statement }) {
  * how it performed in the selected time range.
  */
 export function QueryOverview({ instanceId, queryid, datname }: QueryOverviewProps) {
-  const { range } = useTimeRange()
+  const t = useT()
   const instanceQuery = useInstance(instanceId)
-  const statementsQuery = useStatements(
-    {
-      instance_id: instanceId,
-      limit: LOOKUP_LIMIT,
-      order_by: 'total_exec_time',
-      ...(datname === undefined ? {} : { database: datname }),
-    },
-    queryWindowOf(range),
-  )
-  const response = statementsQuery.data as Schemas['StatementsResponse'] | undefined
-  const statement = findStatement(response?.statements ?? [], queryid, datname)
+  const { statementsQuery, statement } = useQueryStatement(instanceId, queryid, datname)
   const instance = instanceQuery.data
   const server = instance ? instanceLabel(instance) : null
   const backLink = `/instances/${encodeURIComponent(instanceId)}/queries`
@@ -121,13 +96,14 @@ export function QueryOverview({ instanceId, queryid, datname }: QueryOverviewPro
   return (
     <div className="space-y-6 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="query-performance" label={t('queries.overview.detailHelp')} />}
         icon={Zap}
-        eyebrow={server ?? 'Query performance'}
-        title="Query detail and plan history"
+        eyebrow={server ?? t('queries.overview.eyebrow')}
+        title={t('queries.overview.title')}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <span>
-              Query <code className="font-mono text-xs">{queryid}</code>
+              {t('queries.overview.query')} <code className="font-mono text-xs">{queryid}</code>
             </span>
             {statement?.datname || datname ? (
               <Badge variant="outline">{statement?.datname ?? datname}</Badge>
@@ -145,23 +121,29 @@ export function QueryOverview({ instanceId, queryid, datname }: QueryOverviewPro
             to={backLink}
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
-            All queries
+            {t('queries.overview.allQueries')}
           </Link>
         }
       />
 
       {statementsQuery.isPending ? (
-        <div aria-busy="true" aria-label="Loading statement statistics" role="status">
-          Loading statement statistics…
+        <div aria-busy="true" aria-label={t('queries.overview.loadingStatsLabel')} role="status">
+          {t('queries.overview.loadingStats')}
         </div>
       ) : statement ? (
         <>
           <section
-            aria-label="Statement text"
+            aria-label={t('queries.overview.statementText')}
             className="bg-card shadow-card overflow-hidden rounded-xl border"
           >
             <div className="flex items-center justify-between gap-3 border-b px-5 py-2.5">
-              <h2 className="text-sm font-semibold">Statement</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold">{t('queries.overview.statement')}</h2>
+                <HelpLink
+                  anchor="query-performance#statement-text"
+                  label={t('queries.overview.statementText')}
+                />
+              </div>
               <CopyButton text={statement.query_text} />
             </div>
             <pre className="max-h-80 overflow-auto px-5 py-4 whitespace-pre-wrap" tabIndex={0}>
@@ -172,8 +154,7 @@ export function QueryOverview({ instanceId, queryid, datname }: QueryOverviewPro
         </>
       ) : (
         <p className="text-muted-foreground bg-card rounded-xl border border-dashed px-5 py-4 text-sm">
-          No pg_stat_statements activity was recorded for this query in the selected time range, so
-          only its plans are shown.
+          {t('queries.overview.noActivity')}
         </p>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { Check, Copy, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useT } from '@/i18n/react'
 
 type CopyState = 'idle' | 'copied' | 'failed'
 
@@ -43,7 +44,19 @@ function capitalise(text: string): string {
 }
 
 /** Copies a query's text (or the named subject) to the clipboard and confirms it, or the failure, for a moment. */
-export function CopyButton({ text, subject = 'query text' }: { text: string; subject?: string }) {
+export function CopyButton({
+  text,
+  subject: subjectProp,
+  label: labelProp,
+}: {
+  text: string
+  subject?: string
+  /** The resting label; `Copied` and `Copy failed` replace it for a moment. */
+  label?: string
+}) {
+  const t = useT()
+  const subject = subjectProp ?? t('shell.copy.subject')
+  const label = labelProp ?? t('shell.copy.label')
   const [state, setState] = useState<CopyState>('idle')
 
   useEffect(() => {
@@ -61,17 +74,21 @@ export function CopyButton({ text, subject = 'query text' }: { text: string; sub
     <button
       aria-label={
         state === 'copied'
-          ? `${capitalise(subject)} copied`
+          ? capitalise(t('shell.copy.ariaCopied', { subject }))
           : state === 'failed'
-            ? `Could not copy ${subject}`
-            : `Copy ${subject}`
+            ? t('shell.copy.ariaFailed', { subject })
+            : t('shell.copy.aria', { subject })
       }
       className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors min-[1600px]:h-5"
       onClick={copy}
       type="button"
     >
       <Icon aria-hidden="true" className="size-3.5" />
-      {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
+      {state === 'copied'
+        ? t('shell.copy.copied')
+        : state === 'failed'
+          ? t('shell.copy.failed')
+          : label}
     </button>
   )
 }

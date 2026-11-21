@@ -42,10 +42,12 @@ type stubNotificationStore struct {
 	by   map[string]string
 	sets int
 	err  error
+	// langs is the language of each kind (plan 006 F7).
+	langs map[string]string
 }
 
 func newStubNotificationStore() *stubNotificationStore {
-	return &stubNotificationStore{rows: map[string]string{}, by: map[string]string{}}
+	return &stubNotificationStore{rows: map[string]string{}, by: map[string]string{}, langs: map[string]string{}}
 }
 
 func (s *stubNotificationStore) NotificationChannels(context.Context) (map[string]string, error) {
@@ -164,9 +166,9 @@ func TestNOTI006_SetValidURL(t *testing.T) {
 	listing := retentionRequest(t, api, http.MethodGet, "/api/v1/notification-channels", "")
 	bodies = append(bodies, listing.Body.String())
 	require.JSONEq(t, `[
-		{"kind":"slack","configured":false,"source":"env","host":null},
-		{"kind":"webhook","configured":true,"source":"ui","host":"hooks.stored.example"},
-		{"kind":"google_chat","configured":true,"source":"ui","host":"chat.googleapis.com"}
+		{"kind":"slack","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"webhook","configured":true,"source":"ui","host":"hooks.stored.example","language":null},
+		{"kind":"google_chat","configured":true,"source":"ui","host":"chat.googleapis.com","language":null}
 	]`, listing.Body.String())
 
 	// The store is down: nothing changes, and the error that quotes the

@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { withOrigins, withTruncatedConnections } from '@/test/fixtures/getLocks'
+import { renderInRouter as render } from '@/test/render'
 
 import { ConnectionSummary } from './ConnectionSummary'
 import { OriginBadge } from './OriginBadge'

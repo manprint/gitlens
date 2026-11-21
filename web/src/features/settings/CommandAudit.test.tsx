@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
+import { formatTimestamp } from '@/lib/format'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { INSTANCE_ID, INSTANCE_SUMMARY } from '@/test/fixture-helpers'
@@ -193,7 +194,10 @@ describe('CommandAudit', () => {
 
     expect(await screen.findByText('ui-session 9f86d081 from 192.0.2.10')).toBeInTheDocument()
     expect(auditTable().getByText('requested')).toBeInTheDocument()
-    expect(screen.getByText(/Recorded:/)).toBeInTheDocument()
+    expect(auditTable().getByText(formatTimestamp('2026-09-01T02:00:00Z'))).toHaveAttribute(
+      'datetime',
+      '2026-09-01T02:00:00Z',
+    )
     expect(screen.queryByText(/Executed:/)).not.toBeInTheDocument()
     // The caption line is the visible one; the hint tooltip holds the same sentence.
     expect(

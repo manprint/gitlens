@@ -1,9 +1,10 @@
+import { activeIntl } from '@/i18n/store'
 import { localizedNumber } from './shared'
 
 export function formatPercent(
   numerator: number,
   denominator: number,
-  locale = 'en-US',
+  locale = activeIntl(),
 ): string | null {
   if (denominator === 0 || !Number.isFinite(numerator) || !Number.isFinite(denominator)) {
     return null

@@ -1,0 +1,5 @@
+{
+  "advisor.bloat.estimate_blind.title": "Bloat estimate blind",
+  "advisor.bloat.estimate_blind.detail": "{count} tables have column statistics the monitoring role cannot read, so no bloat is estimated for them",
+  "advisor.bloat.estimate_blind.remediation": "Grant the monitoring role SELECT on the columns of these tables and row access that row security does not hide, or accept that they are not estimated"
+}

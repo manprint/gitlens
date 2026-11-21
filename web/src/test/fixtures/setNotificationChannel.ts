@@ -10,4 +10,5 @@ export const base: NotificationChannel = {
   configured: true,
   source: 'ui',
   host: 'chat.googleapis.com',
+  language: null,
 }

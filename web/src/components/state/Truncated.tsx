@@ -1,3 +1,5 @@
+import { useT } from '@/i18n/react'
+
 interface TruncatedProps {
   shown: number
   budget: number
@@ -5,9 +7,10 @@ interface TruncatedProps {
 }
 
 export function Truncated({ shown, budget, scope }: TruncatedProps) {
+  const t = useT()
   return (
     <div role="status" className="text-muted-foreground text-sm">
-      Showing {shown} of {budget} {scope} (truncated; budget {budget}).
+      {t('shell.state.truncated', { shown, budget, scope })}
     </div>
   )
 }

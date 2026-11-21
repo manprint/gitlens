@@ -2,12 +2,16 @@ import { useEffect, useState } from 'react'
 
 import { Link, useLocation } from 'react-router-dom'
 
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT } from '@/i18n/react'
 import { cn } from '@/lib/utils'
 
 export interface ChartNavLink {
   /** Element id of the target on the same page. */
   id: string
   label: string
+  /** Catalog key of the label; without it the English label is shown. */
+  labelKey?: MessageKey
   /** An instance-page tab (`?section=`) instead of an anchor on this page. */
   section?: string
 }
@@ -39,13 +43,16 @@ function withSection(search: string, section: string): string {
 }
 
 export function ChartNav({ links }: ChartNavProps) {
+  const t = useT()
+  const labelOf = (link: ChartNavLink) =>
+    link.labelKey === undefined ? link.label : t(link.labelKey)
   const current = useCurrentTarget(links.filter((link) => link.section === undefined))
   const { search } = useLocation()
 
   return (
     <nav
-      aria-label="Chart groups"
-      className="bg-card/95 supports-[backdrop-filter]:bg-card/80 -mx-5 border-y px-5 py-2 backdrop-blur xl:sticky xl:top-14 xl:z-10"
+      aria-label={t('instance.chartNav.label')}
+      className="bg-card/95 supports-[backdrop-filter]:bg-card/80 shadow-card rounded-xl border px-3 py-2 backdrop-blur xl:sticky xl:top-14 xl:z-10"
     >
       <ul className="flex gap-1.5 overflow-x-auto whitespace-nowrap">
         {links.map((link) => (
@@ -56,7 +63,7 @@ export function ChartNav({ links }: ChartNavProps) {
                 className={cn(LINK, current === link.id && 'bg-muted text-foreground')}
                 href={`#${link.id}`}
               >
-                {link.label}
+                {labelOf(link)}
               </a>
             ) : (
               <Link
@@ -65,7 +72,7 @@ export function ChartNav({ links }: ChartNavProps) {
                 state={{ focusSection: true }}
                 to={{ search: withSection(search, link.section) }}
               >
-                {link.label}
+                {labelOf(link)}
               </Link>
             )}
           </li>

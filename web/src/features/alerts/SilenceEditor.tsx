@@ -1,11 +1,14 @@
+import { displayTimeZone, fromZonedInput, toZonedInput } from '@/lib/timezone'
 import { useMemo, useState } from 'react'
 
 import { useCreateSilence } from '@/api/silences'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Input } from '@/components/ui/input'
 import type { Alert, Silence } from '@/lib/alerts'
 import { matchSilence } from '@/lib/alerts'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { useT } from '@/i18n/react'
 
 interface MatcherDraft {
   name: string
@@ -19,21 +22,14 @@ interface SilenceEditorProps {
   onCreated: () => void
 }
 
-// A datetime-local input holds wall-clock text in the browser's own zone, and
-// isoTimestamp reads it back in that zone. The text therefore has to come from
-// the local getters: formatting UTC shifted every default window by the offset.
+// A datetime-local input holds wall-clock text; both directions read it in the
+// console's zone, so the default window and the saved one never shift by the offset.
 function dateTimeLocal(timestamp: number): string {
-  const date = new Date(timestamp)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return [
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-    `${pad(date.getHours())}:${pad(date.getMinutes())}`,
-  ].join('T')
+  return toZonedInput(timestamp, displayTimeZone())
 }
 
 function isoTimestamp(value: string): string | null {
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null
+  return fromZonedInput(value, displayTimeZone())?.toISOString() ?? null
 }
 
 const emptyMatcher: MatcherDraft = { name: '', value: '' }
@@ -44,6 +40,7 @@ export function SilenceEditor({
   onCancel,
   onCreated,
 }: SilenceEditorProps) {
+  const t = useT()
   const [matchers, setMatchers] = useState<MatcherDraft[]>([{ ...emptyMatcher }])
   const [reason, setReason] = useState('')
   const [startsAt, setStartsAt] = useState(() => dateTimeLocal(Date.now()))
@@ -100,27 +97,25 @@ export function SilenceEditor({
       (matcher) => Boolean(matcher.name.trim()) !== Boolean(matcher.value.trim()),
     )
     if (hasPartialMatcher || completeMatchers.length === 0) {
-      setValidationError('Each matcher needs both a name and a value.')
+      setValidationError(t('alerts.silenceEditor.matcherIncomplete'))
       return
     }
     if (!reason.trim()) {
-      setValidationError('Reason is required.')
+      setValidationError(t('alerts.silenceEditor.reasonRequired'))
       return
     }
     const start = isoTimestamp(startsAt)
     const end = isoTimestamp(endsAt)
     if (!start || !end) {
-      setValidationError('Start and end must be valid dates.')
+      setValidationError(t('alerts.silenceEditor.datesInvalid'))
       return
     }
     if (new Date(end).getTime() <= new Date(start).getTime()) {
-      setValidationError('End must be after start.')
+      setValidationError(t('alerts.silenceEditor.endBeforeStart'))
       return
     }
     if (matchesAllFiring && !confirmAll) {
-      setValidationError(
-        `Confirm that this silence will suppress all ${firingAlerts.length} currently firing alerts.`,
-      )
+      setValidationError(t('alerts.silenceEditor.confirmAll', { count: firingAlerts.length }))
       return
     }
 
@@ -140,16 +135,16 @@ export function SilenceEditor({
     <section aria-labelledby="silence-editor-title" className="border-primary/30 bg-primary/5 p-4">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h2 id="silence-editor-title" className="text-lg font-semibold">
-            Create silence
-          </h2>
-          <p className="text-muted-foreground text-sm">
-            A silence suppresses notifications only; the alert remains visible and continues to be
-            evaluated.
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="silence-editor-title" className="text-lg font-semibold">
+              {t('alerts.silenceEditor.title')}
+            </h2>
+            <HelpLink anchor="silences#create" label={t('alerts.silenceEditor.title')} />
+          </div>
+          <p className="text-muted-foreground text-sm">{t('alerts.silenceEditor.intro')}</p>
         </div>
         <Button size="sm" variant="outline" onClick={onCancel} type="button">
-          Cancel
+          {t('alerts.silenceEditor.cancel')}
         </Button>
       </div>
 
@@ -162,25 +157,28 @@ export function SilenceEditor({
         }}
       >
         <fieldset className="space-y-3">
-          <legend className="font-medium">Matchers</legend>
+          <legend className="font-medium">{t('alerts.silences.matchers')}</legend>
           <p className="text-muted-foreground text-xs" id="silence-matchers-help">
-            An alert is silenced when it matches every matcher. The name is rule_id, severity,
-            cluster_id, instance_id, datname or any alert label; the value must equal it exactly.
+            {t('alerts.silenceEditor.matchersHelp')}
           </p>
           {matchers.map((matcher, index) => (
             <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]" key={index}>
               <label>
-                <span className="text-sm">Matcher {index + 1} name</span>
+                <span className="text-sm">
+                  {t('alerts.silenceEditor.matcherName', { index: index + 1 })}
+                </span>
                 <Input
-                  aria-label={`Matcher ${index + 1} name`}
+                  aria-label={t('alerts.silenceEditor.matcherName', { index: index + 1 })}
                   onChange={(event) => updateMatcher(index, 'name', event.target.value)}
                   value={matcher.name}
                 />
               </label>
               <label>
-                <span className="text-sm">Matcher {index + 1} value</span>
+                <span className="text-sm">
+                  {t('alerts.silenceEditor.matcherValue', { index: index + 1 })}
+                </span>
                 <Input
-                  aria-label={`Matcher ${index + 1} value`}
+                  aria-label={t('alerts.silenceEditor.matcherValue', { index: index + 1 })}
                   onChange={(event) => updateMatcher(index, 'value', event.target.value)}
                   value={matcher.value}
                 />
@@ -189,7 +187,7 @@ export function SilenceEditor({
                 <Button
                   size="sm"
                   variant="outline"
-                  aria-label={`Remove matcher ${index + 1}`}
+                  aria-label={t('alerts.silenceEditor.removeMatcher', { index: index + 1 })}
                   onClick={() =>
                     setMatchers((current) =>
                       current.filter((_, matcherIndex) => matcherIndex !== index),
@@ -197,7 +195,7 @@ export function SilenceEditor({
                   }
                   type="button"
                 >
-                  Remove
+                  {t('alerts.silenceEditor.remove')}
                 </Button>
               ) : null}
             </div>
@@ -208,40 +206,40 @@ export function SilenceEditor({
             onClick={() => setMatchers((current) => [...current, { ...emptyMatcher }])}
             type="button"
           >
-            Add matcher
+            {t('alerts.silenceEditor.addMatcher')}
           </Button>
         </fieldset>
 
         <label className="block">
-          <span className="text-sm">Reason</span>
+          <span className="text-sm">{t('alerts.silences.reason')}</span>
           <Input
-            aria-label="Reason"
+            aria-label={t('alerts.silences.reason')}
             aria-describedby="silence-reason-help"
-            aria-invalid={validationError === 'Reason is required.'}
+            aria-invalid={validationError === t('alerts.silenceEditor.reasonRequired')}
             onChange={(event) => setReason(event.target.value)}
             value={reason}
           />
           <span className="text-muted-foreground text-xs" id="silence-reason-help">
-            Explain why notifications should be suppressed.
+            {t('alerts.silenceEditor.reasonHelp')}
           </span>
         </label>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label>
-            <span className="text-sm">Start</span>
+            <span className="text-sm">{t('alerts.silences.start')}</span>
             <Input
               aria-describedby="silence-window-help"
-              aria-label="Start"
+              aria-label={t('alerts.silences.start')}
               onChange={(event) => setStartsAt(event.target.value)}
               type="datetime-local"
               value={startsAt}
             />
           </label>
           <label>
-            <span className="text-sm">End</span>
+            <span className="text-sm">{t('alerts.silences.end')}</span>
             <Input
               aria-describedby="silence-window-help"
-              aria-label="End"
+              aria-label={t('alerts.silences.end')}
               onChange={(event) => setEndsAt(event.target.value)}
               type="datetime-local"
               value={endsAt}
@@ -249,11 +247,14 @@ export function SilenceEditor({
           </label>
         </div>
         <p className="text-muted-foreground text-xs" id="silence-window-help">
-          The silence is in effect from Start until End, read in your browser’s time zone and stored
-          in UTC. A preset sets Start to now and End 1, 4 or 24 hours later.
+          {t('alerts.silenceEditor.windowHelp', { zone: displayTimeZone() })}
         </p>
-        <div aria-label="Silence duration presets" className="flex flex-wrap gap-2" role="group">
-          <span className="text-sm">Presets:</span>
+        <div
+          aria-label={t('alerts.silenceEditor.presetsLabel')}
+          className="flex flex-wrap gap-2"
+          role="group"
+        >
+          <span className="text-sm">{t('alerts.silenceEditor.presets')}</span>
           {[1, 4, 24].map((hours) => (
             <Button
               size="sm"
@@ -262,23 +263,21 @@ export function SilenceEditor({
               onClick={() => applyPreset(hours)}
               type="button"
             >
-              {hours} hour{hours === 1 ? '' : 's'}
+              {t('alerts.silenceEditor.hours', { count: hours })}
             </Button>
           ))}
         </div>
 
         <div aria-live="polite" className="bg-muted/20 rounded-lg border p-3 text-sm">
-          <strong>Live preview</strong>
+          <strong>{t('alerts.silenceEditor.preview')}</strong>
           {previewUnavailable ? (
-            <p>Current firing alerts are unavailable, so the preview cannot be verified.</p>
+            <p>{t('alerts.silenceEditor.previewUnavailable')}</p>
           ) : completeMatchers.length === 0 ||
             completeMatchers.some((matcher) => !matcher.name || !matcher.value) ? (
-            <p>Complete a matcher to see which currently firing alerts would be silenced.</p>
+            <p>{t('alerts.silenceEditor.previewIncomplete')}</p>
           ) : previewAlerts.length > 0 ? (
             <>
-              <p>
-                Would suppress notifications for {previewAlerts.length} currently firing alert(s):
-              </p>
+              <p>{t('alerts.silenceEditor.wouldSuppress', { count: previewAlerts.length })}</p>
               <ul className="list-disc pl-5">
                 {previewAlerts.map((alert) => (
                   <li key={alert.alert_key}>{alert.alert_key}</li>
@@ -286,25 +285,21 @@ export function SilenceEditor({
               </ul>
             </>
           ) : (
-            <p>No currently firing alerts match these matchers.</p>
+            <p>{t('alerts.silenceEditor.noMatch')}</p>
           )}
         </div>
 
         {matchesAllFiring ? (
           <label className="border-destructive/40 bg-destructive/10 block rounded-lg border p-3 text-sm">
-            <span>
-              This silence would suppress notifications for all {firingAlerts.length} currently
-              firing alerts. Confirm to continue.
-            </span>
+            <span>{t('alerts.silenceEditor.confirmBlock', { count: firingAlerts.length })}</span>
             <span className="mt-2 flex items-center gap-2">
               <input
-                aria-label={`I understand this will suppress notifications for all ${firingAlerts.length} currently firing alerts`}
+                aria-label={t('alerts.silenceEditor.understand', { count: firingAlerts.length })}
                 checked={confirmAll}
                 onChange={(event) => setConfirmAll(event.target.checked)}
                 type="checkbox"
               />
-              I understand this will suppress notifications for all {firingAlerts.length} currently
-              firing alerts
+              {t('alerts.silenceEditor.understand', { count: firingAlerts.length })}
             </span>
           </label>
         ) : null}
@@ -315,7 +310,9 @@ export function SilenceEditor({
         ) : null}
         <div className="flex gap-2">
           <Button size="sm" disabled={createSilence.isPending} type="submit">
-            {createSilence.isPending ? 'Creating…' : 'Create silence'}
+            {createSilence.isPending
+              ? t('alerts.silenceEditor.creating')
+              : t('alerts.silenceEditor.submit')}
           </Button>
           <Button
             size="sm"
@@ -324,7 +321,7 @@ export function SilenceEditor({
             onClick={onCancel}
             type="button"
           >
-            Cancel
+            {t('alerts.silenceEditor.cancel')}
           </Button>
         </div>
       </form>

@@ -1,3 +1,6 @@
+import type { MessageKey } from '@/i18n/messages/en'
+import { translate } from '@/i18n/store'
+
 import type { ActivityMetrics } from './activity'
 import { hasReported } from './activity'
 
@@ -15,24 +18,36 @@ export interface XminHorizon {
   sampled_at: string
 }
 
-export const XMIN_HOLDER_KIND_LABELS: Record<XminHorizon['holder_kind'], string> = {
-  session: 'Session',
-  slot: 'Replication slot',
-  standby: 'Standby',
-  prepared: 'Prepared transaction',
-}
+const HOLDER_KIND_KEYS = {
+  session: 'locks.xmin.kind.session',
+  slot: 'locks.xmin.kind.slot',
+  standby: 'locks.xmin.kind.standby',
+  prepared: 'locks.xmin.kind.prepared',
+} as const satisfies Record<XminHorizon['holder_kind'], MessageKey>
 
 // The name of the identity field, in the words of its holder kind.
-export const XMIN_IDENTITY_LABELS: Record<XminHorizon['holder_kind'], string> = {
-  session: 'PID',
-  slot: 'Slot name',
-  standby: 'application_name',
-  prepared: 'Transaction gid',
+const IDENTITY_KEYS = {
+  session: 'locks.xmin.identity.session',
+  slot: 'locks.xmin.identity.slot',
+  standby: 'locks.xmin.identity.standby',
+  prepared: 'locks.xmin.identity.prepared',
+} as const satisfies Record<XminHorizon['holder_kind'], MessageKey>
+
+export function xminHolderKindLabel(kind: XminHorizon['holder_kind']): string {
+  return translate(HOLDER_KIND_KEYS[kind])
 }
 
-export const XMIN_PENDING_TEXT = 'xmin holder unknown: no activity snapshot'
-export const XMIN_NONE_TEXT =
-  'No session, replication slot, standby or prepared transaction holds an xmin in the latest activity sample.'
+export function xminIdentityLabel(kind: XminHorizon['holder_kind']): string {
+  return translate(IDENTITY_KEYS[kind])
+}
+
+export function xminPendingText(): string {
+  return translate('locks.xmin.pending')
+}
+
+export function xminNoneText(): string {
+  return translate('locks.xmin.none')
+}
 
 export type XminHorizonState =
   { state: 'holder'; holder: XminHorizon } | { state: 'none' } | { state: 'unknown' }
@@ -54,5 +69,5 @@ export function xminHorizonState(
 
 // An empty identity is shown as (none), as an empty application_name is.
 export function xminIdentityText(holder: XminHorizon): string {
-  return holder.identity === '' ? '(none)' : holder.identity
+  return holder.identity === '' ? translate('locks.xmin.emptyIdentity') : holder.identity
 }

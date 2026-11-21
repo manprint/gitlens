@@ -3,17 +3,12 @@ import { LoaderCircle, Search, X } from 'lucide-react'
 
 import { Input } from '@/components/ui/input'
 import { useSearchDraft, type SearchDraft } from '@/hooks/useSearch'
+import { useT } from '@/i18n/react'
 import { HIGHLIGHT_MIN_LENGTH, highlightMatches } from '@/lib/highlight'
 import { cn } from '@/lib/utils'
 
 /** How long the box waits after the last keystroke before it searches. */
 export const SEARCH_DEBOUNCE_MS = 300
-
-/** The hint shown while the term is too short to search. */
-export const SEARCH_TOO_SHORT = 'Type at least 2 characters'
-
-/** The line under the full-search boxes (D20): the search is bounded by what the agent kept. */
-export const FULL_SEARCH_HINT = 'Searches everything pglens has collected in this range'
 
 /** The longest term the server searches for (D20); the box takes no more. */
 export const SEARCH_MAX_LENGTH = 200
@@ -34,6 +29,8 @@ export interface SearchBoxProps {
   busy?: boolean
   /** The explanatory line under the box. */
   hint?: string
+  /** The hint is the full-search line (D20): the search is bounded by what the agent kept. */
+  fullSearch?: boolean
   /** The input's id, so a page that moves the box can give it focus back (`useKeepFocus`). */
   id?: string
   className?: string
@@ -69,14 +66,17 @@ export function SearchBox({
   value,
   onChange,
   label,
-  placeholder = 'Search',
+  placeholder,
   busy = false,
-  hint,
+  hint: hintProp,
+  fullSearch = false,
   id,
   className,
   boxClassName,
   draft: pageDraft,
 }: SearchBoxProps) {
+  const t = useT()
+  const hint = fullSearch ? t('shell.search.fullHint') : hintProp
   const descriptionId = `${useId().replaceAll(':', '')}-search-hint`
   const input = useRef<HTMLInputElement>(null)
   // A new value from outside (the URL, a clear action) replaces the draft,
@@ -103,7 +103,7 @@ export function SearchBox({
   }, [draft, value])
 
   const tooShort = draft.trim() !== '' && length(draft) < HIGHLIGHT_MIN_LENGTH
-  const description = tooShort ? SEARCH_TOO_SHORT : hint
+  const description = tooShort ? t('shell.search.tooShort') : hint
 
   function clear() {
     setDraft('')
@@ -136,7 +136,7 @@ export function SearchBox({
           id={id}
           maxLength={SEARCH_MAX_LENGTH}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('shell.table.search')}
           title={hint}
           type="search"
           value={draft}
@@ -151,7 +151,7 @@ export function SearchBox({
           ) : null}
           {draft !== '' ? (
             <button
-              aria-label="Clear search"
+              aria-label={t('shell.search.clear')}
               className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex size-6 items-center justify-center rounded outline-none focus-visible:ring-[3px]"
               onClick={clear}
               type="button"

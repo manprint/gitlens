@@ -81,3 +81,37 @@ func TestNOTIINT001_StoredURLPersistsAndOverridesEnv(t *testing.T) {
 	// And after the next restart the environment is all there is.
 	require.Equal(t, "env", notificationRows(t, envAPI(t, pool, cfg))[2].Source)
 }
+
+// NOTI-INT-002 (plan 006 F7): a channel language set through the API is a row
+// with who set it; a fresh wiring of the server puts it back in the slot, and
+// null removes the row.
+func TestNOTIINT002_ChannelLanguagePersists(t *testing.T) {
+	pool := getSharedPool(t)
+	clean := func() {
+		_, err := pool.Exec(context.Background(), `DELETE FROM notification_channel_languages`)
+		require.NoError(t, err)
+	}
+	clean()
+	t.Cleanup(clean)
+	ctx := context.Background()
+	cfg := AlertConfig{SlackURL: "https://hooks.slack.example/services/X"}
+
+	api := envAPI(t, pool, cfg)
+	rec := retentionRequest(t, api, http.MethodPut, "/api/v1/notification-channels/slack/language", `{"language":"it"}`)
+	require.Equal(t, strPtr("it"), decodeChannelRow(t, rec).Language)
+	var language, by string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT language, updated_by FROM notification_channel_languages WHERE tenant_id = 'default' AND kind = 'slack'`).Scan(&language, &by))
+	require.Equal(t, "it", language)
+	require.Contains(t, by, "ui-session")
+
+	restarted := envAPI(t, pool, cfg)
+	require.Equal(t, "it", restarted.notificationState().slots["slack"].Locale())
+	require.Equal(t, strPtr("it"), notificationRows(t, restarted)[0].Language)
+
+	rec = retentionRequest(t, restarted, http.MethodPut, "/api/v1/notification-channels/slack/language", `{"language":null}`)
+	require.Nil(t, decodeChannelRow(t, rec).Language)
+	var rows int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM notification_channel_languages`).Scan(&rows))
+	require.Zero(t, rows)
+	require.Equal(t, "", envAPI(t, pool, cfg).notificationState().slots["slack"].Locale())
+}

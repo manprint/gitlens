@@ -5,12 +5,15 @@ import { useInstanceDatabases, useInstanceHost } from '@/api/queries'
 import { REFRESH } from '@/api/policy'
 import type { Schemas } from '@/api/types'
 import { DataTable, type DataTableToolbar } from '@/components/layout/DataTable'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { withTerms } from '@/components/layout/withTerms'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT, type Translate } from '@/i18n/react'
 import { formatCountOf, formatPostgresVersion, formatTimestamp } from '@/lib/format'
 import { clusterLabel, hasDisplayName, instanceAddress, instanceLabel } from '@/lib/names'
 import { ruleText } from '@/lib/ruleText'
@@ -32,10 +35,17 @@ type PermTier = Schemas['PermTier']
 const permissionTiers: readonly PermTier[] = ['T0', 'T1', 'T2']
 
 /** What each tier lets pglens do, in the words of the glossary (internal/pgtype/role.go). */
-const TIER_MEANING: Record<PermTier, string> = {
-  T0: 'Reads statistics only.',
-  T1: 'Also runs EXPLAIN to show query plans.',
-  T2: 'Also cancels or ends other sessions.',
+const TIER_MEANING: Record<PermTier, MessageKey> = {
+  T0: 'settings.inventory.tierMeaningT0',
+  T1: 'settings.inventory.tierMeaningT1',
+  T2: 'settings.inventory.tierMeaningT2',
+}
+
+/** What each tier unlocks, one key per list item. */
+const TIER_ACTIONS: Record<PermTier, readonly MessageKey[]> = {
+  T0: ['settings.inventory.actionT0View'],
+  T1: ['settings.inventory.actionT1Explain', 'settings.inventory.actionT1ExplainAnalyze'],
+  T2: ['settings.inventory.actionT2Cancel', 'settings.inventory.actionT2Signals'],
 }
 
 function isAgentDownAlert(alert: Alert): boolean {
@@ -54,16 +64,14 @@ function isAgentDownAlert(alert: Alert): boolean {
  * open; an alert can stay open for a moment after the instance reports again, until
  * the alert rules next run.
  */
-function agentReason(up: boolean, alert: Alert | undefined): string {
-  const summary = alert === undefined ? '' : ` Alert: ${alert.summary}`
-  if (!up && alert !== undefined) {
-    return `No report from this agent within the expected interval; an 'Agent down' alert is open.${summary}`
-  }
+function agentReason(up: boolean, alert: Alert | undefined, t: Translate): string {
   if (alert !== undefined) {
-    return `The instance reports again, but an 'Agent down' alert is still open; it closes when the alert rules next run.${summary}`
+    const summary = t('settings.inventory.alertSummary', { summary: alert.summary })
+    return up
+      ? t('settings.inventory.reasonBackOpen', { summary })
+      : t('settings.inventory.reasonDownOpen', { summary })
   }
-  if (!up) return 'No report from this agent within the expected interval.'
-  return "The instance reported recently and no 'Agent down' alert is open."
+  return up ? t('settings.inventory.reasonRecent') : t('settings.inventory.reasonNoReport')
 }
 
 interface InstanceRow extends InstanceSummary {
@@ -80,7 +88,7 @@ interface AgentRow {
   instance_id: string
   address: string
   last_seen: string
-  state: string
+  state: 'Down' | 'Reporting'
   reason: string
 }
 
@@ -105,64 +113,103 @@ const MONITORED_INSTANCE_SEARCH: readonly SearchField<InstanceRow>[] = [
   (instance) => instance.perm_tier,
 ]
 
-const INSTANCE_TOOLBAR: DataTableToolbar<InstanceRow> = {
-  searchFields: MONITORED_INSTANCE_SEARCH,
-  filters: [
-    { id: 'role', label: 'Role', kind: 'select', accessor: (instance) => instance.role },
-    {
-      id: 'state',
-      label: 'State',
-      kind: 'select',
-      options: [
-        { value: 'up', label: 'Up' },
-        { value: 'down', label: 'Down' },
-      ],
-      accessor: (instance) => (instance.up ? 'up' : 'down'),
-    },
-  ],
+function instanceToolbar(t: Translate): DataTableToolbar<InstanceRow> {
+  return {
+    searchFields: MONITORED_INSTANCE_SEARCH,
+    filters: [
+      {
+        id: 'role',
+        label: t('settings.inventory.colRole'),
+        kind: 'select',
+        accessor: (instance) => instance.role,
+      },
+      {
+        id: 'state',
+        label: t('settings.inventory.colState'),
+        kind: 'select',
+        options: [
+          { value: 'up', label: t('settings.inventory.up') },
+          { value: 'down', label: t('settings.inventory.down') },
+        ],
+        accessor: (instance) => (instance.up ? 'up' : 'down'),
+      },
+    ],
+  }
 }
 
-const DATABASE_TOOLBAR: DataTableToolbar<DatabaseRow> = {
-  searchFields: [(database) => database.datname, (database) => database.skip_reason],
-  filters: [
-    {
-      id: 'monitored',
-      label: 'Monitored',
-      kind: 'select',
-      options: [
-        { value: 'yes', label: 'Yes' },
-        { value: 'no', label: 'No' },
-      ],
-      accessor: (database) => (database.monitored ? 'yes' : 'no'),
-    },
-  ],
+function databaseToolbar(t: Translate): DataTableToolbar<DatabaseRow> {
+  return {
+    searchFields: [(database) => database.datname, (database) => database.skip_reason],
+    filters: [
+      {
+        id: 'monitored',
+        label: t('settings.inventory.colMonitored'),
+        kind: 'select',
+        options: [
+          { value: 'yes', label: t('settings.inventory.yes') },
+          { value: 'no', label: t('settings.inventory.no') },
+        ],
+        accessor: (database) => (database.monitored ? 'yes' : 'no'),
+      },
+    ],
+  }
 }
 
-const AGENT_TOOLBAR: DataTableToolbar<AgentRow> = {
-  searchFields: [(agent) => agent.agent_id, (agent) => agent.address, (agent) => agent.reason],
-  filters: [{ id: 'state', label: 'State', kind: 'select', accessor: (agent) => agent.state }],
+function agentToolbar(t: Translate): DataTableToolbar<AgentRow> {
+  return {
+    searchFields: [(agent) => agent.agent_id, (agent) => agent.address, (agent) => agent.reason],
+    filters: [
+      {
+        id: 'state',
+        label: t('settings.inventory.colState'),
+        kind: 'select',
+        options: [
+          { value: 'Down', label: t('settings.inventory.down') },
+          { value: 'Reporting', label: t('settings.inventory.reporting') },
+        ],
+        accessor: (agent) => agent.state,
+      },
+    ],
+  }
 }
 
 function HostMetricsCell({ instanceId }: { instanceId: string }) {
+  const t = useT()
   const query = useInstanceHost(instanceId, REFRESH.inventory)
 
   if (query.error && !query.data) {
-    return <span title="The host metrics endpoint could not be loaded">Unavailable</span>
+    return (
+      <span title={t('settings.inventory.hostUnavailableTitle')}>
+        {t('settings.inventory.hostUnavailable')}
+      </span>
+    )
   }
   if (query.isPending || query.data === undefined) {
-    return <span>Loading…</span>
+    return <span>{t('settings.inventory.loading')}</span>
   }
   if (!query.data.available) {
-    return <span title={query.data.reason ?? 'Host metrics are unavailable'}>Unavailable</span>
+    return (
+      <span title={query.data.reason ?? t('settings.inventory.hostUnavailableFallback')}>
+        {t('settings.inventory.hostUnavailable')}
+      </span>
+    )
   }
-  return <span>{query.data.stale ? 'Available (stale)' : 'Available'}</span>
+  return (
+    <span>
+      {t(
+        query.data.stale
+          ? 'settings.inventory.hostAvailableStale'
+          : 'settings.inventory.hostAvailable',
+      )}
+    </span>
+  )
 }
 
-function instanceColumns() {
+function instanceColumns(t: Translate) {
   return [
     {
       accessorKey: 'instance_id',
-      header: 'Instance',
+      header: t('settings.inventory.colInstance'),
       // A named instance shows its name; the id stays in the tooltip and the search.
       cell: ({ row }: { row: { original: InstanceRow } }) =>
         hasDisplayName(row.original) ? (
@@ -173,14 +220,14 @@ function instanceColumns() {
     },
     {
       accessorKey: 'addr',
-      header: 'Address / port',
+      header: t('settings.inventory.colAddress'),
       cell: ({ row }: { row: { original: InstanceRow } }) => (
         <span>{instanceAddress(row.original)}</span>
       ),
     },
     {
       accessorKey: 'cluster_name',
-      header: 'Cluster',
+      header: t('settings.inventory.colCluster'),
       cell: ({ row }: { row: { original: InstanceRow } }) =>
         row.original.cluster_id ? (
           <Link to={`/clusters/${row.original.cluster_id}`}>
@@ -190,39 +237,38 @@ function instanceColumns() {
             )}
           </Link>
         ) : (
-          <span>Not assigned</span>
+          <span>{t('settings.inventory.notAssigned')}</span>
         ),
     },
-    { accessorKey: 'role', header: 'Role' },
+    { accessorKey: 'role', header: t('settings.inventory.colRole') },
     {
       accessorKey: 'pg_version',
-      header: 'PostgreSQL',
+      header: t('settings.inventory.colPostgres'),
       cell: ({ row }: { row: { original: InstanceRow } }) =>
         formatPostgresVersion(row.original.pg_version),
     },
     {
       accessorKey: 'perm_tier',
-      header: 'Permission tier',
+      header: t('settings.inventory.colPermTier'),
       meta: { help: 'settings.permission-tier' as const },
     },
     {
       accessorKey: 'last_seen',
-      header: 'Last seen',
+      header: t('settings.inventory.colLastSeen'),
       cell: ({ row }: { row: { original: InstanceRow } }) => (
-        <time dateTime={row.original.last_seen}>
-          {formatTimestamp(row.original.last_seen, 'UTC')}
-        </time>
+        <time dateTime={row.original.last_seen}>{formatTimestamp(row.original.last_seen)}</time>
       ),
     },
     {
       accessorKey: 'up',
-      header: 'State',
+      header: t('settings.inventory.colState'),
       meta: { help: 'settings.instance-state' as const },
-      cell: ({ row }: { row: { original: InstanceRow } }) => (row.original.up ? 'Up' : 'Down'),
+      cell: ({ row }: { row: { original: InstanceRow } }) =>
+        t(row.original.up ? 'settings.inventory.up' : 'settings.inventory.down'),
     },
     {
       accessorKey: 'host_metrics',
-      header: 'Host metrics',
+      header: t('settings.inventory.colHostMetrics'),
       enableSorting: false,
       cell: ({ row }: { row: { original: InstanceRow } }) => (
         <HostMetricsCell instanceId={row.original.instance_id} />
@@ -231,33 +277,35 @@ function instanceColumns() {
   ]
 }
 
-function databaseColumns() {
+function databaseColumns(t: Translate) {
   return [
-    { accessorKey: 'datname', header: 'Database' },
+    { accessorKey: 'datname', header: t('settings.inventory.colDatabase') },
     {
       accessorKey: 'monitored',
-      header: 'Monitored',
+      header: t('settings.inventory.colMonitored'),
       cell: ({ row }: { row: { original: DatabaseRow } }) =>
-        row.original.monitored ? 'Yes' : 'No',
+        t(row.original.monitored ? 'settings.inventory.yes' : 'settings.inventory.no'),
     },
     {
       accessorKey: 'skip_reason',
-      header: 'Skip reason',
+      header: t('settings.inventory.colSkipReason'),
       meta: { help: 'settings.skip-reason' as const },
     },
   ]
 }
 
 function DatabaseInventory({ instance }: { instance: InstanceRow }) {
+  const t = useT()
   const query = useInstanceDatabases(instance.instance_id, REFRESH.inventory)
+  const toolbar = useMemo(() => databaseToolbar(t), [t])
   const label = instanceLabel(instance)
-  const title = `Databases — ${label}`
+  const title = t('settings.inventory.databasesTitle', { label })
 
   if (query.error && !query.data) {
     return (
       <Section captionId="settings.inventory-databases-instance" title={title}>
         <ErrorState
-          endpoint={`databases for ${label}`}
+          endpoint={t('settings.inventory.endpointDatabases', { label })}
           failure={query.error}
           onRetry={() => void query.refetch()}
         />
@@ -267,8 +315,12 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
   if (query.isPending || query.data === undefined) {
     return (
       <Section captionId="settings.inventory-databases-instance" title={title}>
-        <section aria-busy="true" aria-label={`Loading databases for ${label}`} role="status">
-          Loading databases…
+        <section
+          aria-busy="true"
+          aria-label={t('settings.inventory.loadingDatabasesFor', { label })}
+          role="status"
+        >
+          {t('settings.inventory.loadingDatabases')}
         </section>
       </Section>
     )
@@ -284,21 +336,23 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
   return (
     <Section captionId="settings.inventory-databases-instance" title={title}>
       <DataTable
-        ariaLabel={`Databases for ${label}`}
+        ariaLabel={t('settings.inventory.databasesFor', { label })}
         captionId="settings.inventory-databases-table"
         toolbarExtra={
           <span className="text-muted-foreground text-sm">
-            Databases not monitored: {query.data.not_monitored_count}.
+            {t('settings.inventory.notMonitoredCount', {
+              count: query.data.not_monitored_count,
+            })}
           </span>
         }
         tableId={`instance-databases-${instance.instance_id}`}
-        toolbar={DATABASE_TOOLBAR}
-        columns={databaseColumns()}
+        toolbar={toolbar}
+        columns={databaseColumns(t)}
         data={rows}
         emptyState={
           <EmptyState
-            description="The instance reported no databases in this inventory sample."
-            title="No databases reported"
+            description={t('settings.inventory.noDatabasesDescription')}
+            title={t('settings.inventory.noDatabasesTitle')}
           />
         }
         scope="databases"
@@ -309,26 +363,19 @@ function DatabaseInventory({ instance }: { instance: InstanceRow }) {
 }
 
 function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances' | 'rules'>) {
+  const t = useT()
   return (
-    <Section captionId="settings.permission-tiers" title="Permission tiers">
+    <Section
+      actions={<HelpLink anchor="settings#permission-tiers" label={t('settings.views.tiers')} />}
+      captionId="settings.permission-tiers"
+      title={t('settings.views.tiers')}
+    >
       <div className="grid gap-4 md:grid-cols-3">
         {permissionTiers.map((tier) => {
           // A rule's minimum tier is the lowest tier at which it can run (internal/advisor); a
           // higher tier runs it too, so each card lists only the rules that first need this tier.
           const tierRules = rules.filter((rule) => rule.min_tier === tier)
           const instanceCount = instances.filter((instance) => instance.perm_tier === tier).length
-          const actions =
-            tier === 'T0'
-              ? ['View inventory, findings, and the rule catalogue.']
-              : tier === 'T1'
-                ? [
-                    'Run plan-only EXPLAIN on eligible targets.',
-                    'EXPLAIN ANALYZE, which runs the query, only when the target allows it in its own settings; the interface offers it at T2 only.',
-                  ]
-                : [
-                    'Cancel or terminate client backends on eligible targets.',
-                    'The target must also allow sending signals to its sessions in its own settings.',
-                  ]
 
           return (
             // From 1600 px the cards are tighter and each label runs in before its list,
@@ -338,17 +385,17 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
               className="rounded-md border p-4 min-[1600px]:px-3 min-[1600px]:py-2.5"
             >
               <div className="min-[1600px]:flex min-[1600px]:flex-wrap min-[1600px]:items-baseline min-[1600px]:gap-x-3">
-                <h3 className="font-medium">Tier {tier}</h3>
+                <h3 className="font-medium">{t('settings.inventory.tierHeading', { tier })}</h3>
                 <p className="mt-1 text-sm min-[1600px]:mt-0">
-                  <strong>Instances:</strong> {instanceCount}
+                  <strong>{t('settings.inventory.instancesLabel')}</strong> {instanceCount}
                 </p>
                 <p className="text-muted-foreground mt-1 text-sm min-[1600px]:mt-0 min-[1600px]:text-xs">
-                  {withTerms(TIER_MEANING[tier])}
+                  {withTerms(t(TIER_MEANING[tier]))}
                 </p>
               </div>
               <div className="mt-3 text-sm min-[1600px]:mt-1.5 min-[1600px]:text-xs min-[1600px]:leading-4">
                 <strong className="min-[1600px]:mr-2 min-[1600px]:whitespace-nowrap min-[1600px]:after:content-[':']">
-                  Advisor rules that first need {tier}
+                  {t('settings.inventory.rulesNeedTier', { tier })}
                 </strong>
                 {tierRules.length > 0 ? (
                   <>
@@ -357,7 +404,7 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
                     </span>
                     <details className="mt-1 min-[1600px]:inline">
                       <summary className="text-primary cursor-pointer min-[1600px]:inline">
-                        Show the list
+                        {t('settings.inventory.showList')}
                       </summary>
                       <ul
                         className="mt-1 list-disc space-y-0.5 pl-5"
@@ -383,22 +430,22 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
                 ) : (
                   <span className="text-muted-foreground mt-1">
                     {tier === 'T0'
-                      ? 'No rules returned by the catalogue.'
-                      : `None: every rule runs without ${tier}.`}
+                      ? t('settings.inventory.noRulesT0')
+                      : t('settings.inventory.noRulesWithout', { tier })}
                   </span>
                 )}
               </div>
               <div className="mt-3 text-sm min-[1600px]:mt-1.5 min-[1600px]:text-xs min-[1600px]:leading-4">
                 <strong className="min-[1600px]:mr-2 min-[1600px]:whitespace-nowrap min-[1600px]:after:content-[':']">
-                  Actions unlocked
+                  {t('settings.inventory.actionsUnlocked')}
                 </strong>
                 <ul
                   className="mt-1 list-disc pl-5 min-[1600px]:inline min-[1600px]:list-none min-[1600px]:pl-0"
                   role="list"
                 >
-                  {actions.map((action) => (
-                    <li className="min-[1600px]:mr-2 min-[1600px]:inline" key={action}>
-                      {action}
+                  {TIER_ACTIONS[tier].map((key) => (
+                    <li className="min-[1600px]:mr-2 min-[1600px]:inline" key={key}>
+                      {t(key)}
                     </li>
                   ))}
                 </ul>
@@ -412,6 +459,8 @@ function TierSummary({ instances, rules }: Pick<InventoryTablesProps, 'instances
 }
 
 function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'instances' | 'alerts'>) {
+  const t = useT()
+  const toolbar = useMemo(() => agentToolbar(t), [t])
   const rows: AgentRow[] = instances.map((instance) => {
     const alert = alerts.find(
       (candidate) => candidate.instance_id === instance.instance_id && isAgentDownAlert(candidate),
@@ -423,45 +472,52 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
       address: `${instance.addr}:${instance.port}`,
       last_seen: instance.last_seen,
       state: isDown ? 'Down' : 'Reporting',
-      reason: agentReason(instance.up, alert),
+      reason: agentReason(instance.up, alert, t),
     }
   })
 
   return (
-    <Section captionId="settings.inventory-agents" title="Agents (derived from instance telemetry)">
-      <p className="text-muted-foreground mb-3 text-sm">
-        pglens has no separate list of agents: each row is worked out from the instance&apos;s last
-        report and any open &apos;Agent down&apos; alert.
-      </p>
+    <Section
+      actions={<HelpLink anchor="settings#agents" label={t('settings.views.agents')} />}
+      captionId="settings.inventory-agents"
+      title={t('settings.inventory.agentsTitle')}
+    >
+      <p className="text-muted-foreground mb-3 text-sm">{t('settings.inventory.agentsIntro')}</p>
       <DataTable
-        ariaLabel="Derived agent inventory"
+        ariaLabel={t('settings.inventory.agentsTable')}
         captionId="settings.inventory-agents-table"
         tableId="derived-agent-inventory"
-        toolbar={AGENT_TOOLBAR}
+        toolbar={toolbar}
         columns={[
-          { accessorKey: 'agent_id', header: 'Agent' },
-          { accessorKey: 'address', header: 'Instance address' },
+          { accessorKey: 'agent_id', header: t('settings.inventory.colAgent') },
+          { accessorKey: 'address', header: t('settings.inventory.colInstanceAddress') },
           {
             accessorKey: 'last_seen',
-            header: 'Last seen',
+            header: t('settings.inventory.colLastSeen'),
             cell: ({ row }: { row: { original: AgentRow } }) => (
               <time dateTime={row.original.last_seen}>
-                {formatTimestamp(row.original.last_seen, 'UTC')}
+                {formatTimestamp(row.original.last_seen)}
               </time>
             ),
           },
           {
             accessorKey: 'state',
-            header: 'State',
+            header: t('settings.inventory.colState'),
             meta: { help: 'settings.agent-state' as const },
+            cell: ({ row }: { row: { original: AgentRow } }) =>
+              t(
+                row.original.state === 'Down'
+                  ? 'settings.inventory.down'
+                  : 'settings.inventory.reporting',
+              ),
           },
-          { accessorKey: 'reason', header: 'Reason' },
+          { accessorKey: 'reason', header: t('settings.inventory.colReason') },
         ]}
         data={rows}
         emptyState={
           <EmptyState
-            description="No monitored instances are available to derive an agent view from."
-            title="No agent telemetry"
+            description={t('settings.inventory.emptyAgentsDescription')}
+            title={t('settings.inventory.emptyAgentsTitle')}
           />
         }
         scope="agents"
@@ -472,11 +528,13 @@ function AgentInventory({ instances, alerts }: Pick<InventoryTablesProps, 'insta
 }
 
 export function InventoryTables({ alerts, clusters, instances, rules }: InventoryTablesProps) {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   const query = searchParams.get(INSTANCE_SEARCH_PARAM) ?? ''
   // Built once. Fresh column definitions on each render give the host cell a
   // new component type, so every render remounts it and refetches its metrics.
-  const instanceTableColumns = useMemo(() => instanceColumns(), [])
+  const instanceTableColumns = useMemo(() => instanceColumns(t), [t])
+  const instanceTableToolbar = useMemo(() => instanceToolbar(t), [t])
   const clusterByInstance = useMemo(() => {
     const result = new Map<string, Cluster>()
     for (const cluster of clusters) {
@@ -521,20 +579,27 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
   return (
     // One table per view, in the URL (11.1); Instances is the default.
     <Tabs className="gap-4" onValueChange={showView} value={view}>
-      <InstanceViewTabs label="Inventory views" views={INVENTORY_VIEWS} />
+      <InstanceViewTabs
+        label={t('settings.page.inventoryViews')}
+        views={INVENTORY_VIEWS.map((entry) => ({ id: entry.id, label: t(entry.labelKey) }))}
+      />
       <TabsContent value="instances">
-        <Section captionId="settings.inventory-instances" title="Instances">
+        <Section
+          actions={<HelpLink anchor="settings#instances" label={t('settings.views.instances')} />}
+          captionId="settings.inventory-instances"
+          title={t('settings.views.instances')}
+        >
           <DataTable
-            ariaLabel="Monitored instances"
+            ariaLabel={t('settings.inventory.instancesTable')}
             captionId="settings.inventory-instances-table"
             tableId="monitored-instances"
-            toolbar={INSTANCE_TOOLBAR}
+            toolbar={instanceTableToolbar}
             columns={instanceTableColumns}
             data={rows}
             emptyState={
               <EmptyState
-                description="Install and configure the pglens agent on a PostgreSQL host to add the first instance."
-                title="No monitored instances"
+                description={t('settings.inventory.noInstancesDescription')}
+                title={t('settings.inventory.noInstancesTitle')}
               />
             }
             scope="instances"
@@ -553,31 +618,34 @@ export function InventoryTables({ alerts, clusters, instances, rules }: Inventor
       <TabsContent value="databases">
         <Section
           actions={
-            <InstancePicker
-              instances={matching}
-              label="Databases instance"
-              onPick={pickDatabases}
-              picked={pickedDatabases}
-            />
+            <>
+              <InstancePicker
+                instances={matching}
+                label={t('settings.inventory.databasesInstance')}
+                onPick={pickDatabases}
+                picked={pickedDatabases}
+              />
+              <HelpLink anchor="settings#databases" label={t('settings.views.databases')} />
+            </>
           }
           captionId="settings.inventory-databases"
-          title="Databases by instance"
+          title={t('settings.views.databases')}
         >
           {query !== '' ? (
             // The search box is in the Instances view; say so here, where it still filters.
             <Callout className="mb-4" role="status">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span>Filtered by the Instances search “{query}”.</span>
+                <span>{t('settings.inventory.filteredBy', { query })}</span>
                 <Button onClick={clearInstanceSearch} size="xs" type="button" variant="outline">
-                  Clear filter
+                  {t('settings.inventory.clearFilter')}
                 </Button>
               </div>
             </Callout>
           ) : null}
           {rows.length > 0 && matching.length === 0 ? (
             <EmptyState
-              description="Try a different address, cluster, role, tier, or instance ID."
-              title="No instances match this filter"
+              description={t('settings.inventory.noMatchDescription')}
+              title={t('settings.inventory.noMatchTitle')}
             />
           ) : pickedDatabases ? (
             <DatabaseInventory instance={pickedDatabases} key={pickedDatabases.instance_id} />

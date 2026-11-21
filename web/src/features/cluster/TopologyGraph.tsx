@@ -3,11 +3,13 @@ import { Background, Controls, ReactFlow, type Edge, type Node, type OnInit } fr
 import '@xyflow/react/dist/style.css'
 import { useNavigate } from 'react-router-dom'
 
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { Button } from '@/components/ui/button'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import type { ReplicationGraphEdge, ReplicationInstance, TopologyEdge } from '@/lib/replication'
+import { useT, type Translate } from '@/i18n/react'
 import { buildGraph, detectAnomalies, layoutGraph } from '@/lib/replication'
 
 import {
@@ -35,8 +37,8 @@ type TopologyFlowEdge = Edge<TopologyGraphEdgeData, 'default'>
 const NODE_X_SPACING = 280
 const NODE_Y_SPACING = 190
 
-function syncLabel(syncState: string | null): string {
-  return syncState === null || syncState.trim() === '' ? 'Unknown' : syncState
+function syncLabel(syncState: string | null, t: Translate): string {
+  return syncState === null || syncState.trim() === '' ? t('cluster.common.unknown') : syncState
 }
 
 function getReplayLag(
@@ -48,21 +50,31 @@ function getReplayLag(
   return (source as Readonly<Record<string, number | null>>)[instanceID]
 }
 
-function nodeLabel(node: TopologyNodeData | undefined, fallback: string): string {
+function nodeLabel(node: TopologyNodeData | undefined, fallback: string, t: Translate): string {
   if (!node) return fallback
-  if (node.unresolved) return `Unresolved endpoint ${node.id.replace(/^unresolved:/, '')}`
+  if (node.unresolved) {
+    return t('cluster.topology.unresolved', { id: node.id.replace(/^unresolved:/, '') })
+  }
   if (node.name) return node.name
-  return `${node.address ?? node.id}:${node.port ?? 'Unknown'}`
+  return `${node.address ?? node.id}:${node.port ?? t('cluster.common.unknown')}`
 }
 
 function edgeDescription(
   edge: ReplicationGraphEdge,
   nodes: ReadonlyMap<string, TopologyNodeData>,
+  t: Translate,
 ): string {
-  const from = nodeLabel(nodes.get(edge.from), edge.from)
-  const to = nodeLabel(nodes.get(edge.to), edge.to)
-  const note = edge.note ? ` Note: ${edge.note}` : ''
-  return `${from} to ${to}, ${edge.type}, ${syncLabel(edge.sync_state)}, ${edge.confidence}.${note}`
+  const from = nodeLabel(nodes.get(edge.from), edge.from, t)
+  const to = nodeLabel(nodes.get(edge.to), edge.to, t)
+  const note = edge.note ? t('cluster.topology.note', { note: edge.note }) : ''
+  return t('cluster.topology.edgeDescription', {
+    from,
+    to,
+    type: edge.type,
+    sync: syncLabel(edge.sync_state, t),
+    confidence: edge.confidence,
+    note,
+  })
 }
 
 function EdgeTable({
@@ -74,39 +86,40 @@ function EdgeTable({
   nodes: ReadonlyMap<string, TopologyNodeData>
   visible: boolean
 }) {
+  const t = useT()
   return (
     <div className={visible ? 'overflow-x-auto' : 'sr-only'} data-topology-edge-table>
-      <table aria-label="Replication topology edges" className="w-full text-left text-sm">
-        <caption className="sr-only">Every replication topology edge and its confidence.</caption>
+      <table aria-label={t('cluster.topology.tableLabel')} className="w-full text-left text-sm">
+        <caption className="sr-only">{t('cluster.topology.tableCaption')}</caption>
         <thead>
           <tr className="border-b text-xs uppercase">
             <th className="px-3 py-2" scope="col">
-              From
+              {t('cluster.topology.colFrom')}
             </th>
             <th className="px-3 py-2" scope="col">
-              To
+              {t('cluster.topology.colTo')}
             </th>
             <th className="px-3 py-2" scope="col">
-              Type
+              {t('cluster.topology.colType')}
             </th>
             <th className="px-3 py-2" scope="col">
-              Sync state
+              {t('cluster.topology.colSync')}
             </th>
             <th className="px-3 py-2" scope="col">
-              Confidence
+              {t('cluster.topology.colConfidence')}
             </th>
             <th className="px-3 py-2" scope="col">
-              Note
+              {t('cluster.topology.colNote')}
             </th>
           </tr>
         </thead>
         <tbody>
           {edges.map((edge) => (
             <tr className="border-b" data-edge-row={edge.id} key={edge.id}>
-              <td className="px-3 py-2">{nodeLabel(nodes.get(edge.from), edge.from)}</td>
-              <td className="px-3 py-2">{nodeLabel(nodes.get(edge.to), edge.to)}</td>
+              <td className="px-3 py-2">{nodeLabel(nodes.get(edge.from), edge.from, t)}</td>
+              <td className="px-3 py-2">{nodeLabel(nodes.get(edge.to), edge.to, t)}</td>
               <td className="px-3 py-2">{edge.type}</td>
-              <td className="px-3 py-2">{syncLabel(edge.sync_state)}</td>
+              <td className="px-3 py-2">{syncLabel(edge.sync_state, t)}</td>
               <td className="px-3 py-2">{edge.confidence}</td>
               <td className="px-3 py-2">{edge.note ?? '—'}</td>
             </tr>
@@ -123,37 +136,61 @@ interface EdgeRow {
   to: string
 }
 
-const EDGE_TOOLBAR: TableToolbarSpec<EdgeRow> = {
-  searchFields: [(row) => row.from, (row) => row.to, (row) => row.edge.note],
-  filters: [
-    { id: 'type', label: 'Type', kind: 'select', accessor: (row) => row.edge.type },
-    {
-      id: 'sync',
-      label: 'Sync state',
-      kind: 'select',
-      accessor: (row) => syncLabel(row.edge.sync_state),
-    },
-  ],
+function edgeToolbar(t: Translate): TableToolbarSpec<EdgeRow> {
+  return {
+    searchFields: [(row) => row.from, (row) => row.to, (row) => row.edge.note],
+    filters: [
+      {
+        id: 'type',
+        label: t('cluster.topology.colType'),
+        kind: 'select',
+        accessor: (row) => row.edge.type,
+      },
+      {
+        id: 'sync',
+        label: t('cluster.topology.colSync'),
+        kind: 'select',
+        accessor: (row) => syncLabel(row.edge.sync_state, t),
+      },
+    ],
+  }
 }
 
-const EDGE_COLUMNS: readonly SimpleColumn<EdgeRow>[] = [
-  { id: 'from', header: 'From', sortValue: (row) => row.from, cell: (row) => row.from },
-  { id: 'to', header: 'To', sortValue: (row) => row.to, cell: (row) => row.to },
-  { id: 'type', header: 'Type', sortValue: (row) => row.edge.type, cell: (row) => row.edge.type },
-  {
-    id: 'sync',
-    header: 'Sync state',
-    sortValue: (row) => syncLabel(row.edge.sync_state),
-    cell: (row) => syncLabel(row.edge.sync_state),
-  },
-  {
-    id: 'confidence',
-    header: 'Confidence',
-    sortValue: (row) => row.edge.confidence,
-    cell: (row) => row.edge.confidence,
-  },
-  { id: 'note', header: 'Note', cell: (row) => row.edge.note ?? '—' },
-]
+function edgeColumns(t: Translate): readonly SimpleColumn<EdgeRow>[] {
+  return [
+    {
+      id: 'from',
+      header: t('cluster.topology.colFrom'),
+      sortValue: (row) => row.from,
+      cell: (row) => row.from,
+    },
+    {
+      id: 'to',
+      header: t('cluster.topology.colTo'),
+      sortValue: (row) => row.to,
+      cell: (row) => row.to,
+    },
+    {
+      id: 'type',
+      header: t('cluster.topology.colType'),
+      sortValue: (row) => row.edge.type,
+      cell: (row) => row.edge.type,
+    },
+    {
+      id: 'sync',
+      header: t('cluster.topology.colSync'),
+      sortValue: (row) => syncLabel(row.edge.sync_state, t),
+      cell: (row) => syncLabel(row.edge.sync_state, t),
+    },
+    {
+      id: 'confidence',
+      header: t('cluster.topology.colConfidence'),
+      sortValue: (row) => row.edge.confidence,
+      cell: (row) => row.edge.confidence,
+    },
+    { id: 'note', header: t('cluster.topology.colNote'), cell: (row) => row.edge.note ?? '—' },
+  ]
+}
 
 /**
  * The edge table the toggle reveals: searchable, filterable, paged (D12, D23).
@@ -166,27 +203,30 @@ function VisibleEdgeTable({
   edges: readonly ReplicationGraphEdge[]
   nodes: ReadonlyMap<string, TopologyNodeData>
 }) {
+  const t = useT()
+  const columns = useMemo(() => edgeColumns(t), [t])
+  const toolbar = useMemo(() => edgeToolbar(t), [t])
   const rows = useMemo(
     () =>
       edges.map((edge) => ({
         edge,
-        from: nodeLabel(nodes.get(edge.from), edge.from),
-        to: nodeLabel(nodes.get(edge.to), edge.to),
+        from: nodeLabel(nodes.get(edge.from), edge.from, t),
+        to: nodeLabel(nodes.get(edge.to), edge.to, t),
       })),
-    [edges, nodes],
+    [edges, nodes, t],
   )
   return (
     <SimpleTable
-      ariaLabel="Replication topology edges"
-      caption="Every replication topology edge and its confidence."
+      ariaLabel={t('cluster.topology.tableLabel')}
+      caption={t('cluster.topology.tableCaption')}
       captionId="topology.edges"
-      columns={EDGE_COLUMNS}
-      emptyState={<p className="text-muted-foreground text-sm">No replication edges.</p>}
+      columns={columns}
+      emptyState={<p className="text-muted-foreground text-sm">{t('cluster.topology.noEdges')}</p>}
       rowKey={(row) => row.edge.id}
       rows={rows}
       scope="edges"
       tableId="topology-edges"
-      toolbar={EDGE_TOOLBAR}
+      toolbar={toolbar}
     />
   )
 }
@@ -199,6 +239,7 @@ export function TopologyGraph({
   onEdgeSelect,
 }: TopologyGraphProps) {
   const navigate = useNavigate()
+  const t = useT()
   const [showTable, setShowTable] = useState(false)
   const [selectedEdgeID, setSelectedEdgeID] = useState<string | null>(null)
   const fitted = useRef(false)
@@ -242,10 +283,10 @@ export function TopologyGraph({
   const flowEdges = useMemo<TopologyFlowEdge[]>(
     () =>
       positionedGraph.edges.map((edge) => ({
-        ariaLabel: edgeDescription(edge, nodeData),
+        ariaLabel: edgeDescription(edge, nodeData, t),
         data: edge as TopologyGraphEdgeData,
         id: edge.id,
-        label: syncLabel(edge.sync_state),
+        label: syncLabel(edge.sync_state, t),
         labelShowBg: true,
         source: edge.from,
         style: {
@@ -254,7 +295,7 @@ export function TopologyGraph({
         },
         target: edge.to,
       })),
-    [nodeData, positionedGraph.edges],
+    [nodeData, positionedGraph.edges, t],
   )
 
   const handleInit = useCallback<OnInit<TopologyFlowNode, TopologyFlowEdge>>((instance) => {
@@ -301,23 +342,25 @@ export function TopologyGraph({
   return (
     <Section
       actions={
-        <Button
-          aria-controls="topology-edge-table"
-          aria-expanded={showTable}
-          onClick={() => setShowTable((current) => !current)}
-          type="button"
-          variant="outline"
-        >
-          {showTable ? 'Hide accessible edge table' : 'Show accessible edge table'}
-        </Button>
+        <>
+          <Button
+            aria-controls="topology-edge-table"
+            aria-expanded={showTable}
+            onClick={() => setShowTable((current) => !current)}
+            type="button"
+            variant="outline"
+          >
+            {showTable ? t('cluster.topology.hideTable') : t('cluster.topology.showTable')}
+          </Button>
+          <HelpLink anchor="cluster#topology" label={t('cluster.topology.heading')} />
+        </>
       }
       captionId="topology.graph"
-      title="Replication topology"
+      title={t('cluster.topology.heading')}
     >
       <div className="space-y-4">
         <p className="text-muted-foreground text-sm">
-          {nodeCount} instance{nodeCount === 1 ? '' : 's'}, {edgeCount} replication edge
-          {edgeCount === 1 ? '' : 's'}.
+          {t('cluster.topology.summary', { nodes: nodeCount, edges: edgeCount })}
         </p>
 
         {hasCritical ? (
@@ -326,10 +369,10 @@ export function TopologyGraph({
             className="border-destructive bg-destructive/10 rounded-lg border-2 p-3"
             role="alert"
           >
-            <strong>Critical replication anomaly.</strong>{' '}
+            <strong>{t('cluster.topology.anomalyTitle')}</strong>{' '}
             {anomalies.multiplePrimary.length > 0
-              ? 'Split brain: more than one primary is reported.'
-              : 'No primary is reported.'}
+              ? t('cluster.topology.splitBrain')
+              : t('cluster.topology.noPrimary')}
           </div>
         ) : null}
         {hasWarning ? (
@@ -338,19 +381,17 @@ export function TopologyGraph({
             className="border-warning bg-warning/10 rounded-lg border p-3"
             role="status"
           >
-            <strong>Replication topology warning.</strong>{' '}
-            {anomalies.orphanStandbys.length > 0 ? 'One or more standbys have no upstream.' : null}
+            <strong>{t('cluster.topology.warningTitle')}</strong>{' '}
+            {anomalies.orphanStandbys.length > 0 ? t('cluster.topology.orphanStandbys') : null}
             {anomalies.orphanStandbys.length > 0 && anomalies.lowConfidenceEdges.length > 0
               ? ' '
               : null}
-            {anomalies.lowConfidenceEdges.length > 0
-              ? 'One or more edges have low confidence.'
-              : null}
+            {anomalies.lowConfidenceEdges.length > 0 ? t('cluster.topology.lowConfidence') : null}
           </div>
         ) : null}
 
         <div
-          aria-label="Replication topology graph"
+          aria-label={t('cluster.topology.graphLabel')}
           className="h-[32rem] rounded-lg border"
           data-topology-graph
           role="region"
@@ -374,7 +415,7 @@ export function TopologyGraph({
         </div>
 
         <div className="sr-only" id="topology-edge-table">
-          <p id="topology-edge-table-description">Equivalent text table for the topology graph.</p>
+          <p id="topology-edge-table-description">{t('cluster.topology.tableIntro')}</p>
           <EdgeTable edges={positionedGraph.edges} nodes={nodeData} visible={showTable} />
         </div>
         {showTable ? (
@@ -382,7 +423,9 @@ export function TopologyGraph({
             <VisibleEdgeTable edges={positionedGraph.edges} nodes={nodeData} />
           </div>
         ) : null}
-        {selectedEdgeID ? <p className="sr-only">Selected edge {selectedEdgeID}.</p> : null}
+        {selectedEdgeID ? (
+          <p className="sr-only">{t('cluster.topology.selectedEdge', { id: selectedEdgeID })}</p>
+        ) : null}
       </div>
     </Section>
   )

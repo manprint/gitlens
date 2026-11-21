@@ -3,11 +3,13 @@ import { useMemo } from 'react'
 import type { Schemas } from '@/api/types'
 import { REFRESH } from '@/api/policy'
 import { useInstanceCommandAudit } from '@/api/queries'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
-import { formatTimestamp } from '@/lib/format'
+import { useT, type Translate } from '@/i18n/react'
+import { TIMESTAMP_COLUMN_WIDTH, formatTimestamp } from '@/lib/format'
 import { instanceLabel } from '@/lib/names'
 
 import { InstancePicker } from './InstancePicker'
@@ -84,17 +86,19 @@ function Timestamp({ label, value }: { label: string; value: string | undefined 
   return (
     <span className="mr-3">
       <span className="text-muted-foreground">{label}: </span>
-      <time dateTime={value}>{formatTimestamp(value, 'UTC')}</time>
+      <time dateTime={value}>{formatTimestamp(value)}</time>
     </span>
   )
 }
 
 // One line per entry (GAP-9): the full text is the cell's title.
-function timingText(entry: CommandAuditEntry): string {
-  const parts: string[] = timingFields(entry)
+function timingText(entry: CommandAuditEntry, t: Translate): string {
+  const parts: string[] = timingFields(entry, t)
     .filter(([, value]) => value)
-    .map(([label, value]) => `${label}: ${formatTimestamp(value ?? '', 'UTC')}`)
-  if (entryState(entry).toLowerCase() === 'expired' && !entry.expires_at) parts.push('Expired')
+    .map(([label, value]) => `${label}: ${formatTimestamp(value ?? '')}`)
+  if (entryState(entry).toLowerCase() === 'expired' && !entry.expires_at) {
+    parts.push(t('settings.audit.expired'))
+  }
   const detail = entry.detail ?? entry.error
   if (detail) parts.push(detail)
   return parts.join('; ')
@@ -102,102 +106,122 @@ function timingText(entry: CommandAuditEntry): string {
 
 // The time of the entry itself is in the Time column: an audit entry is one
 // event (the request, the result or the expiry), recorded when it happened.
-function timingFields(entry: CommandAuditEntry) {
+function timingFields(entry: CommandAuditEntry, t: Translate): [string, string | undefined][] {
   return [
-    ['Requested', entry.requested_at ?? entry.created_at],
-    ['Claimed', entry.claimed_at],
-    ['Expires', entry.expires_at],
-  ] as const
+    [t('settings.audit.requested'), entry.requested_at ?? entry.created_at],
+    [t('settings.audit.claimed'), entry.claimed_at],
+    [t('settings.audit.expires'), entry.expires_at],
+  ]
 }
 
-const AUDIT_TOOLBAR: TableToolbarSpec<CommandAuditEntry> = {
-  searchFields: [
-    (entry) => entry.kind,
-    (entry) => displayValue(entry.args),
-    (entry) => displayValue(entry.requested_by),
-    (entry) => entry.detail ?? entry.error,
-  ],
-  filters: [
-    { id: 'state', label: 'State', kind: 'select', accessor: entryState },
-    { id: 'kind', label: 'Command', kind: 'select', accessor: (entry) => entry.kind ?? 'unknown' },
-  ],
+function auditToolbar(t: Translate): TableToolbarSpec<CommandAuditEntry> {
+  return {
+    searchFields: [
+      (entry) => entry.kind,
+      (entry) => displayValue(entry.args),
+      (entry) => displayValue(entry.requested_by),
+      (entry) => entry.detail ?? entry.error,
+    ],
+    filters: [
+      { id: 'state', label: t('settings.audit.colState'), kind: 'select', accessor: entryState },
+      {
+        id: 'kind',
+        label: t('settings.audit.colCommand'),
+        kind: 'select',
+        accessor: (entry) => entry.kind ?? 'unknown',
+      },
+    ],
+  }
 }
 
-const AUDIT_COLUMNS: readonly SimpleColumn<CommandAuditEntry>[] = [
-  {
-    id: 'time',
-    header: 'Time',
-    width: '17rem',
-    className: 'whitespace-nowrap',
-    sortValue: (entry) => Date.parse(entryTime(entry) ?? '') || null,
-    cell: (entry) => <Timestamp label="Recorded" value={entryTime(entry)} />,
-  },
-  {
-    id: 'command',
-    header: 'Command',
-    width: '7rem',
-    sortValue: (entry) => entry.kind ?? 'unknown',
-    cell: (entry) => entry.kind ?? 'unknown',
-  },
-  {
-    id: 'args',
-    header: 'Arguments',
-    truncate: (entry) => displayValue(entry.args),
-    cell: (entry) => <code>{displayValue(entry.args)}</code>,
-  },
-  {
-    id: 'requested-by',
-    header: 'Requested by',
-    truncate: (entry) => displayValue(entry.requested_by),
-    cell: (entry) => displayValue(entry.requested_by),
-    help: 'settings.audit-requested-by',
-  },
-  {
-    id: 'state',
-    header: 'State',
-    width: '7rem',
-    sortValue: entryState,
-    cell: entryState,
-    help: 'settings.audit-state',
-  },
-  {
-    id: 'timing',
-    header: 'Timing and detail',
-    truncate: timingText,
-    cell: (entry) => {
-      const state = entryState(entry)
-      const detail = entry.detail ?? entry.error
-      return (
-        <>
-          {timingFields(entry).map(([timingLabel, timingValue]) => (
-            <Timestamp key={timingLabel} label={timingLabel} value={timingValue} />
-          ))}
-          {state.toLowerCase() === 'expired' && !entry.expires_at ? (
-            <span className="mr-3">Expired</span>
-          ) : null}
-          {detail ? <span>{detail}</span> : null}
-        </>
-      )
+function auditColumns(t: Translate): readonly SimpleColumn<CommandAuditEntry>[] {
+  return [
+    {
+      id: 'time',
+      header: t('settings.audit.colTime'),
+      width: TIMESTAMP_COLUMN_WIDTH,
+      className: 'whitespace-nowrap',
+      sortValue: (entry) => Date.parse(entryTime(entry) ?? '') || null,
+      // The column says Time: the entry's own moment, without a label that would clip it.
+      cell: (entry) => {
+        const value = entryTime(entry)
+        return value ? <time dateTime={value}>{formatTimestamp(value)}</time> : null
+      },
     },
-  },
-]
+    {
+      id: 'command',
+      header: t('settings.audit.colCommand'),
+      width: '7rem',
+      sortValue: (entry) => entry.kind ?? 'unknown',
+      cell: (entry) => entry.kind ?? 'unknown',
+    },
+    {
+      id: 'args',
+      header: t('settings.audit.colArgs'),
+      truncate: (entry) => displayValue(entry.args),
+      cell: (entry) => <code>{displayValue(entry.args)}</code>,
+    },
+    {
+      id: 'requested-by',
+      header: t('settings.audit.colRequestedBy'),
+      truncate: (entry) => displayValue(entry.requested_by),
+      cell: (entry) => displayValue(entry.requested_by),
+      help: 'settings.audit-requested-by',
+    },
+    {
+      id: 'state',
+      header: t('settings.audit.colState'),
+      width: '7rem',
+      sortValue: entryState,
+      cell: entryState,
+      help: 'settings.audit-state',
+    },
+    {
+      id: 'timing',
+      header: t('settings.audit.colTiming'),
+      truncate: (entry) => timingText(entry, t),
+      cell: (entry) => {
+        const state = entryState(entry)
+        const detail = entry.detail ?? entry.error
+        return (
+          <>
+            {timingFields(entry, t).map(([timingLabel, timingValue]) => (
+              <Timestamp key={timingLabel} label={timingLabel} value={timingValue} />
+            ))}
+            {state.toLowerCase() === 'expired' && !entry.expires_at ? (
+              <span className="mr-3">{t('settings.audit.expired')}</span>
+            ) : null}
+            {detail ? <span>{detail}</span> : null}
+          </>
+        )
+      },
+    },
+  ]
+}
 
 function auditKey(entry: CommandAuditEntry): string {
   return String(entry.audit_id ?? entry.command_id ?? JSON.stringify(entry))
 }
 
 function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
+  const t = useT()
   const query = useInstanceCommandAudit(instance.instance_id, REFRESH.inventory)
   const label = instanceLabel(instance)
   const entries = useMemo(
     () => sortNewestFirst((query.data ?? []).filter(isCommandAuditEntry)),
     [query.data],
   )
+  const columns = useMemo(() => auditColumns(t), [t])
+  const toolbar = useMemo(() => auditToolbar(t), [t])
 
   if (query.isPending) {
     return (
-      <section aria-busy="true" aria-label={`Loading command audit for ${label}`} role="status">
-        Loading command audit…
+      <section
+        aria-busy="true"
+        aria-label={t('settings.audit.loadingLabel', { instance: label })}
+        role="status"
+      >
+        {t('settings.audit.loading')}
       </section>
     )
   }
@@ -205,7 +229,7 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
   if (query.error) {
     return (
       <ErrorState
-        endpoint={`command audit for ${label}`}
+        endpoint={t('settings.audit.endpoint', { instance: label })}
         failure={query.error}
         onRetry={() => void query.refetch()}
       />
@@ -215,8 +239,8 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
   if (entries.length === 0) {
     return (
       <EmptyState
-        description="No command requests, results, expirations, or rejections have been recorded for this instance."
-        title="No command activity"
+        description={t('settings.audit.emptyDescription')}
+        title={t('settings.audit.emptyTitle')}
       />
     )
   }
@@ -224,41 +248,45 @@ function InstanceCommandAudit({ instance }: { instance: InstanceSummary }) {
   return (
     <Section captionId="settings.command-audit-instance" title={label}>
       <SimpleTable
-        ariaLabel={`Command audit for ${label}`}
+        ariaLabel={t('settings.audit.tableLabel', { instance: label })}
         captionId="settings.command-audit-table"
-        columns={AUDIT_COLUMNS}
+        columns={columns}
         emptyState={null}
         rowKey={auditKey}
         rows={entries}
         scope="entries"
         tableId={`command-audit-${instance.instance_id}`}
-        toolbar={AUDIT_TOOLBAR}
+        toolbar={toolbar}
       />
     </Section>
   )
 }
 
 export function CommandAudit({ instances }: CommandAuditProps) {
+  const t = useT()
   const [picked, pick] = usePickedInstance('auditInstance', instances)
   return (
     <Section
       actions={
-        <InstancePicker
-          instances={instances}
-          label="Command audit instance"
-          onPick={pick}
-          picked={picked}
-        />
+        <>
+          <InstancePicker
+            instances={instances}
+            label={t('settings.audit.pickerLabel')}
+            onPick={pick}
+            picked={picked}
+          />
+          <HelpLink anchor="settings#command-audit" label={t('settings.audit.title')} />
+        </>
       }
       captionId="settings.command-audit"
-      title="Command audit"
+      title={t('settings.audit.title')}
     >
       {picked ? (
         <InstanceCommandAudit instance={picked} key={picked.instance_id} />
       ) : (
         <EmptyState
-          description="Add a monitored PostgreSQL instance to see command activity."
-          title="No command audit"
+          description={t('settings.audit.emptyPickDescription')}
+          title={t('settings.audit.emptyPickTitle')}
         />
       )}
     </Section>

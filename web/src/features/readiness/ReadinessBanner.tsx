@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { useReadiness } from '@/api/queries'
 import { Callout } from '@/components/ui/callout'
+import { useT } from '@/i18n/react'
 import { readinessBadgeText, readinessLevel } from '@/lib/readiness'
 
 /**
@@ -18,6 +19,7 @@ export function ReadinessBanner({
   instanceId: string
 }) {
   const readiness = useReadiness(instanceId)
+  const t = useT()
   const report = readiness.data
   if (report === undefined || readinessLevel(report) === 'full') return null
   const text = readinessBadgeText('partial', report.counts.warning)
@@ -35,17 +37,13 @@ export function ReadinessBanner({
       variant="warning"
     >
       <Link
-        aria-label={`${text}. Open the readiness tab.`}
+        aria-label={t('readiness.banner.open', { text })}
         className="font-medium whitespace-nowrap underline"
         to={`/instances/${encodeURIComponent(instanceId)}?section=readiness`}
       >
         {text}
       </Link>
-      {compact ? null : (
-        <span className="text-muted-foreground">
-          Some features have less data than they could. See what is missing and how to fix it.
-        </span>
-      )}
+      {compact ? null : <span className="text-muted-foreground">{t('readiness.banner.body')}</span>}
     </Callout>
   )
 }

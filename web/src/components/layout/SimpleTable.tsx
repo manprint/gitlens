@@ -15,6 +15,7 @@ import type { TableDefaults } from '@/hooks/useTableState'
 import type { CaptionId, ColumnHelpId } from '@/lib/captions'
 import { PAGE_SIZES, type Accessor, type SortDirection } from '@/lib/tableControls'
 import { cn } from '@/lib/utils'
+import { useT } from '@/i18n/react'
 
 import {
   FULLHD_CELL,
@@ -123,10 +124,10 @@ export function SimpleTable<T>({
   toolbar,
   defaultSort,
   emptyState,
-  scope = 'rows',
+  scope: scopeProp,
   caption = ariaLabel,
   renderDetail,
-  detailLabel = (_row, expanded) => (expanded ? 'Hide details' : 'Show details'),
+  detailLabel: detailLabelProp,
   total,
   budget,
   compare,
@@ -135,6 +136,12 @@ export function SimpleTable<T>({
   focusKey,
   onFocusDone,
 }: SimpleTableProps<T>) {
+  const t = useT()
+  const scope = scopeProp ?? t('shell.table.rows')
+  const detailLabel =
+    detailLabelProp ??
+    ((_row: T, expanded: boolean) =>
+      t(expanded ? 'shell.table.hideDetails' : 'shell.table.showDetails'))
   const accessors = useMemo(() => {
     const byId: Record<string, Accessor<T>> = {}
     for (const column of columns) if (column.sortValue) byId[column.id] = column.sortValue
@@ -277,7 +284,7 @@ export function SimpleTable<T>({
               <tr>
                 {renderDetail ? (
                   <th scope="col" className="w-8 border-b px-2">
-                    <span className="sr-only">Details</span>
+                    <span className="sr-only">{t('shell.table.details')}</span>
                   </th>
                 ) : null}
                 {columns.map((column) => {

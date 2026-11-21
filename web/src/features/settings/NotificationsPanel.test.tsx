@@ -506,4 +506,53 @@ describe('NotificationsPanel', () => {
     const dialog = await screen.findByRole('dialog')
     await expectNoA11yViolations(dialog)
   }, 20000)
+
+  it('NOTI-UI-009 each channel sets the language of its messages, server default first, and shows a refusal', async () => {
+    let rows = base.map((row) => ({ ...row }))
+    const bodies: { kind: string; body: unknown }[] = []
+    let refuse = false
+    server.use(
+      http.get('*/api/v1/notification-channels', () => HttpResponse.json(rows)),
+      http.put('*/api/v1/notification-channels/:kind/language', async ({ params, request }) => {
+        const kind = String(params.kind)
+        const body = (await request.json()) as { language: string | null }
+        bodies.push({ kind, body })
+        if (refuse) {
+          return HttpResponse.json({ error: 'store unavailable', detail: '' }, { status: 503 })
+        }
+        rows = rows.map((row) => (row.kind === kind ? { ...row, language: body.language } : row))
+        return HttpResponse.json(rows.find((row) => row.kind === kind))
+      }),
+    )
+    await renderPanel()
+    const select = within(channelRow('Slack')).getByLabelText<HTMLSelectElement>(
+      'Message language of Slack',
+    )
+    expect(select.value).toBe('')
+    expect(Array.from(select.options, (option) => option.text)).toEqual([
+      'Server default (English)',
+      'English',
+      'Italiano',
+    ])
+
+    fireEvent.change(select, { target: { value: 'it' } })
+    await flushNetwork(2)
+    expect(screen.getByTestId('notification-language-result-slack')).toHaveTextContent(
+      'Saved. The next alert uses this language.',
+    )
+    expect(select.value).toBe('it')
+
+    fireEvent.change(select, { target: { value: '' } })
+    await flushNetwork(2)
+    expect(bodies).toEqual([
+      { kind: 'slack', body: { language: 'it' } },
+      { kind: 'slack', body: { language: null } },
+    ])
+    expect(select.value).toBe('')
+
+    refuse = true
+    fireEvent.change(select, { target: { value: 'it' } })
+    await flushNetwork(2)
+    expect(screen.getByTestId('notification-language-result-slack')).toHaveTextContent(/^Not saved/)
+  })
 })

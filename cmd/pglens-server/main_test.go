@@ -130,3 +130,11 @@ func TestHealthcheckURL(t *testing.T) {
 		require.Equal(t, tt.want, healthcheckURL(tt.listen, "/readyz"), "listen %s", tt.listen)
 	}
 }
+
+func TestNotificationLocation(t *testing.T) {
+	require.Equal(t, time.UTC, notificationLocation(""))
+	require.Equal(t, time.UTC, notificationLocation("Mars/Base"))
+	rome := notificationLocation("Europe/Rome")
+	require.Equal(t, "Europe/Rome", rome.String())
+	require.Equal(t, "17:02 CET", time.Date(2026, 11, 20, 16, 2, 0, 0, time.UTC).In(rome).Format("15:04 MST"))
+}

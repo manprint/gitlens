@@ -7,9 +7,20 @@ import testingLibrary from 'eslint-plugin-testing-library'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
+import noLiteralString from './eslint-rules/no-literal-string.js'
+
 const typedFiles = ['**/*.{ts,tsx}']
 const testFiles = ['src/**/*.test.{ts,tsx}']
 const componentTestFiles = ['src/**/*.test.tsx']
+// I18N-002 (plan 006): areas whose visible text comes from the catalog only.
+const i18nMigrated = [
+  'src/components/**/*.tsx',
+  'src/hooks/useFreshness.ts',
+  'src/features/**/*.tsx',
+  'src/routes/**/*.tsx',
+  'src/App.tsx',
+  'src/main.tsx',
+]
 
 export default tseslint.config(
   {
@@ -96,6 +107,12 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    files: i18nMigrated,
+    ignores: testFiles,
+    plugins: { pglens: { rules: { 'no-literal-string': noLiteralString } } },
+    rules: { 'pglens/no-literal-string': 'error' },
   },
   {
     files: ['src/lib/format/**/*.{ts,tsx}'],

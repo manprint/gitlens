@@ -6,6 +6,7 @@
  */
 
 import type { ApiFailure } from '@/api/client'
+import { translate } from '@/i18n/store'
 
 /** The longest name the server accepts, counted in Unicode code points. */
 export const NAME_MAX_LENGTH = 64
@@ -79,10 +80,10 @@ export function validateDisplayName(text: string): NameValidation {
   const trimmed = trimName(text)
   if (trimmed === '') return { ok: true, value: null }
   if ([...trimmed].length > NAME_MAX_LENGTH) {
-    return { ok: false, error: `Use at most ${NAME_MAX_LENGTH} characters.` }
+    return { ok: false, error: translate('settings.rename.errorTooLong', { max: NAME_MAX_LENGTH }) }
   }
   if (REFUSED_CHARACTERS.test(trimmed)) {
-    return { ok: false, error: 'Remove tabs, line breaks and other invisible characters.' }
+    return { ok: false, error: translate('settings.rename.errorInvisible') }
   }
   return { ok: true, value: trimmed }
 }
@@ -96,19 +97,23 @@ function isApiFailure(error: unknown): error is ApiFailure {
 
 /** The server's answer in words: 409 is a duplicate, other statuses carry the server message. */
 export function renameErrorMessage(error: unknown, kind: RenameKind): string {
-  if (!isApiFailure(error)) return 'The name could not be saved. Try again.'
+  if (!isApiFailure(error)) return translate('settings.rename.errorUnsaved')
   switch (error.kind) {
     case 'server':
-      if (error.status === 409) return 'That name is already used. Choose another one.'
+      if (error.status === 409) return translate('settings.rename.errorDuplicate')
       return error.detail ? `${error.error}: ${error.detail}` : error.error
     case 'unprocessable':
       return error.detail ? `${error.error}: ${error.detail}` : error.error
     case 'not_found':
-      return `The ${kind} no longer exists. Reload the page.`
+      return translate(
+        kind === 'cluster'
+          ? 'settings.rename.errorGoneCluster'
+          : 'settings.rename.errorGoneInstance',
+      )
     case 'unauthorized':
-      return 'Your session has expired. Sign in again to rename.'
+      return translate('settings.rename.errorExpired')
     case 'forbidden':
-      return 'The server refused the change.'
+      return translate('settings.rename.errorRefused')
     case 'network':
     case 'malformed':
     case 'client':

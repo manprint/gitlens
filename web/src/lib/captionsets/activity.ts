@@ -237,6 +237,15 @@ export const activityCaptions = {
     howToRead:
       'A wait shorter than the sampling interval can be missed. A root blocker is not waiting itself. A cycle means sessions block each other.',
   },
+  'locks.captured-incidents': {
+    what: 'Deadlocks, lock waits, long or idle transactions and long queries the agent captured on this server, with every session involved.',
+    source:
+      'getEvents of type *_captured for this instance: the agent watcher reads pg_locks and pg_stat_activity read-only when ASH sees a lock wait or a long transaction, and pg_stat_database.deadlocks.',
+    unit: 'incidents; sessions per incident',
+    window: 'Last 7 days, at most 100 captures, newest first.',
+    howToRead:
+      'Select a capture to read its table, row, lock mode, who waited for whom and each statement. A rebuilt deadlock was broken before the agent saw the cycle: its sessions are those seen waiting in that database just before.',
+  },
   'readiness.severity': {
     what: 'A warning means a pglens feature is lost or degraded on this server; a note means something is off by design or optional.',
     source: 'getReadiness: the severity of the pglens readiness rule that raised the item.',

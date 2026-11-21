@@ -43,8 +43,9 @@ var errUndelivered = errors.New("notification not delivered")
 func UndeliveredNotifications() int64 { return undelivered.Load() }
 
 type channelNotifier struct {
-	store    Store
-	channels []notify.Channel
+	store     Store
+	channels  []notify.Channel
+	describer Describer
 
 	mu      sync.Mutex
 	passes  int               // completed Retry passes
@@ -76,6 +77,50 @@ func NewChannelNotifier(store Store, channels ...notify.Channel) Notifier {
 	return &channelNotifier{store: store, channels: channels}
 }
 
+// Describer writes the detail of a notification: what the alert means, where
+// it is, the data that shows it and what to do, in the reader's language. It
+// reads the store, so it must return within its context; whatever it cannot
+// find it leaves out. A nil detail sends the summary alone.
+type Describer interface {
+	Describe(ctx context.Context, a Alert, phase string) *notify.Detail
+}
+
+// LocaleDescriber is a Describer that also writes in the language a channel
+// asks for (notify.LocaleOf); "" is its own default.
+type LocaleDescriber interface {
+	DescribeIn(ctx context.Context, a Alert, phase, locale string) *notify.Detail
+}
+
+// describeTimeout bounds one Describe. It runs inside the evaluation cycle, so
+// it is a part of the cycle's 10 seconds, not an addition to them.
+var describeTimeout = 2 * time.Second
+
+// NewChannelNotifierWith is NewChannelNotifier whose messages carry the detail
+// d writes.
+func NewChannelNotifierWith(store Store, d Describer, channels ...notify.Channel) Notifier {
+	return &channelNotifier{store: store, channels: channels, describer: d}
+}
+
+// describe asks the describer for a's detail. A describer that panics costs
+// the message its detail, not the delivery.
+func (n *channelNotifier) describe(ctx context.Context, a Alert, phase, locale string) (detail *notify.Detail) {
+	if n.describer == nil {
+		return nil
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("alert: describe %s: %v", a.Key, r)
+			detail = nil
+		}
+	}()
+	dctx, cancel := context.WithTimeout(ctx, describeTimeout)
+	defer cancel()
+	if ld, ok := n.describer.(LocaleDescriber); ok && locale != "" {
+		return ld.DescribeIn(dctx, a, phase, locale)
+	}
+	return n.describer.Describe(dctx, a, phase)
+}
+
 func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 	phase := "fire"
 	if a.State == StateResolved {
@@ -91,6 +136,8 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 	// Every channel gets its attempt. One channel that is down must not keep
 	// the others from delivering the same transition.
 	var errs []error
+	// One detail per language: channels that read the same language share it.
+	details := map[string]*notify.Detail{}
 	for _, ch := range n.channels {
 		// A channel without an address, such as one whose address the console
 		// removed (11.5b), gets no claim and no send.
@@ -112,7 +159,14 @@ func (n *channelNotifier) Notify(ctx context.Context, a Alert) error {
 		if !won {
 			continue
 		}
+		locale := notify.LocaleOf(ch)
+		detail, described := details[locale]
+		if !described {
+			detail = n.describe(ctx, a, phase, locale)
+			details[locale] = detail
+		}
 		d.message = newMessage(a, phase)
+		d.message.Detail = detail
 		if err := n.deliver(ctx, d); err != nil {
 			errs = append(errs, err)
 		}
@@ -200,6 +254,11 @@ func (n *channelNotifier) Retry(ctx context.Context) error {
 			}
 			d.unclaimed = false
 			d.message = newMessage(d.alert, d.phase)
+		}
+		// A detail the first try could not write, the cycle's time spent, is
+		// tried again.
+		if d.message.Detail == nil {
+			d.message.Detail = n.describe(ctx, d.alert, d.phase, notify.LocaleOf(d.channel))
 		}
 		if err := n.deliver(ctx, d); err != nil {
 			errs = append(errs, err)

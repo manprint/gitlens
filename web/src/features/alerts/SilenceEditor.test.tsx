@@ -6,21 +6,25 @@ import { assertMatchesContract } from '@/test/contract'
 import { server } from '@/test/msw/server'
 import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
+import { resetPreferences, updatePreferences } from '@/lib/preferences'
+import { setServerTimeZone } from '@/lib/timezone'
 import { NOW } from '@/test/time'
 
 import { SilenceEditor } from './SilenceEditor'
 
-// The suite pins TZ=UTC, where browser-local and UTC wall-clock text are the
-// same, so an offset bug in the default window cannot show there. This file
-// runs in Rome time: at the fixed clock the operator's local hour is 04:00,
-// while the instant is 02:00Z.
+// The suite pins TZ=UTC, where every wall clock reads the same, so an offset
+// bug in the default window cannot show there. This file runs with the console
+// (server default) and the browser in Rome: at the fixed clock the hour there
+// is 04:00, while the instant is 02:00Z.
 const originalTimeZone = process.env.TZ
 
 beforeAll(() => {
   process.env.TZ = 'Europe/Rome'
+  setServerTimeZone('Europe/Rome')
 })
 
 afterAll(() => {
+  setServerTimeZone('UTC')
   if (originalTimeZone === undefined) delete process.env.TZ
   else process.env.TZ = originalTimeZone
 })
@@ -32,13 +36,21 @@ function renderEditor() {
 }
 
 describe('SilenceEditor default window', () => {
-  it('UI-ALERT-038 shows the default window in the operator local time', () => {
+  it('UI-ALERT-038 shows the default window in the console time zone', () => {
     expect(new Date(NOW).getTimezoneOffset()).toBe(-120)
 
-    renderEditor()
+    const { unmount } = renderEditor()
 
     expect(screen.getByLabelText('Start')).toHaveValue('2026-08-27T04:00')
     expect(screen.getByLabelText('End')).toHaveValue('2026-08-27T05:00')
+    expect(screen.getByText(/read in the console’s time zone \(Europe\/Rome\)/)).toBeInTheDocument()
+    unmount()
+
+    // UTC chosen in Settings › Preferences wins over the server default.
+    updatePreferences({ timeZone: 'UTC' })
+    renderEditor()
+    expect(screen.getByLabelText('Start')).toHaveValue('2026-08-27T02:00')
+    resetPreferences()
   })
 
   it('UI-ALERT-039 submits the default window as the instant it shows', async () => {

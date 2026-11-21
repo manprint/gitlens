@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { niceCeil, subtractSeries, toPercent, usedRatio } from './hostSeries'
+import { subtractSeries, toPercent, usedRatio } from './hostSeries'
 
 const at = (minute: number) => `2026-10-29T10:${String(minute).padStart(2, '0')}:00Z`
 
@@ -93,15 +93,5 @@ describe('host series', () => {
       { ts: '2026-10-29T10:00:00Z', value: 1 },
     ]
     expect(subtractSeries(total, part, 15_000)).toEqual([{ ts: total[0]?.ts, value: 9 }])
-  })
-
-  it('rounds an axis top up to a 1, 2, 2.5 or 5 tick', () => {
-    expect(niceCeil(8.8)).toBe(10)
-    expect(niceCeil(3.3)).toBe(5)
-    expect(niceCeil(22)).toBe(25)
-    expect(niceCeil(1.5)).toBe(2)
-    expect(niceCeil(100)).toBe(100)
-    expect(niceCeil(0)).toBe(1)
-    expect(niceCeil(Number.NaN)).toBe(1)
   })
 })

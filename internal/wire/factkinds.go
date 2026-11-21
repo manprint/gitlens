@@ -82,10 +82,13 @@ type FactKind struct {
 // drops a fact Validate refuses before sending it: a check that reports a
 // new kind must add it here.
 var factKinds = map[string]FactKind{
-	"index_def":                 {Check: "index_stats", Replace: true},
-	"setting":                   {Check: "settings", Replace: true},
-	"lock_tree":                 {Check: "locks"},
-	"plan":                      {},
+	"index_def": {Check: "index_stats", Replace: true},
+	"setting":   {Check: "settings", Replace: true},
+	"lock_tree": {Check: "locks"},
+	"plan":      {},
+	// incident is a capture of the agent's watcher (internal/watch): the
+	// server files it as an event, not as an object fact.
+	"incident":                  {},
 	"check_skip":                {},
 	"monitoring_role":           {Check: "monitoring_role", Replace: true},
 	"trigger":                   {Check: "trigger_inventory", Replace: true},

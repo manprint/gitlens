@@ -49,6 +49,10 @@ type Finding struct {
 	Remediation    string
 	Evidence       map[string]any
 	DegradedReason string
+	// Message names the catalog texts Title, Detail and Remediation come
+	// from, so the API can render them in another language; nil for a rule
+	// whose texts are not in the catalog yet.
+	Message *Message
 }
 
 // ID is stable across evaluations for the same rule and subject. An object

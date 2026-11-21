@@ -6,12 +6,15 @@ import { useAsh, useInstanceSettings } from '@/api/queries'
 import { Caption } from '@/components/layout/Caption'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { InfoHint } from '@/components/layout/InfoHint'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Degraded, Disabled, ErrorState } from '@/components/state'
+import { displayName } from '@/components/charts/ash.options'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { totalSamples } from '@/lib/ash'
 import type { AshGroupBy } from '@/lib/ash'
-import { queryWindowOf } from '@/lib/timerange'
+import { useT } from '@/i18n/react'
+import { queryWindowOf, rangeLabelKey } from '@/lib/timerange'
 
 import { AshBreakdown } from './AshBreakdown'
 import { AshTopQueries } from './AshTopQueries'
@@ -27,12 +30,10 @@ const DEFAULT_GROUP: DrillGroup = 'wait_event_type'
 const ASH_ROW_LIMIT = 5_000
 
 function AshFootnote() {
+  const t = useT()
   return (
     <p className="text-muted-foreground text-xs" data-testid="ash-sampling-footnote">
-      ASH uses 1 s statistical sampling; sub-second queries are under-represented. At most 100 wait
-      keys are retained per 10 s window; the remainder is folded into “other” and the total is
-      conserved. The chart plots the largest groups of the range and folds the rest into “other”
-      too.
+      {t('ash.footnote')}
     </p>
   )
 }
@@ -57,16 +58,20 @@ interface ChartLayoutToggleProps {
   onChange: (view: ChartView) => void
 }
 
-const LAYOUTS: readonly { value: ChartView; label: string }[] = [
-  { value: 'separate', label: 'Separate' },
-  { value: 'stacked', label: 'Stacked' },
+const LAYOUTS: readonly {
+  value: ChartView
+  label: 'ash.layout.separate' | 'ash.layout.stacked'
+}[] = [
+  { value: 'separate', label: 'ash.layout.separate' },
+  { value: 'stacked', label: 'ash.layout.stacked' },
 ]
 
 function ChartLayoutToggle({ onChange, view }: ChartLayoutToggleProps) {
+  const t = useT()
   return (
     <div className="inline-flex items-center gap-1" data-caption-id="ash.chart-layout">
       <div
-        aria-label="Chart layout"
+        aria-label={t('ash.layout.label')}
         className="bg-muted/40 inline-flex items-center gap-1 rounded-lg border p-1 text-sm"
         role="radiogroup"
       >
@@ -86,11 +91,11 @@ function ChartLayoutToggle({ onChange, view }: ChartLayoutToggleProps) {
               type="radio"
               value={value}
             />
-            {label}
+            {t(label)}
           </label>
         ))}
       </div>
-      <InfoHint id="ash.chart-layout" label="Chart layout" />
+      <InfoHint id="ash.chart-layout" label={t('ash.layout.label')} />
     </div>
   )
 }
@@ -121,15 +126,16 @@ interface DrillBreadcrumbProps {
 }
 
 function DrillBreadcrumb({ groupBy, onNavigate, waitEvent, waitEventType }: DrillBreadcrumbProps) {
+  const t = useT()
   return (
-    <nav aria-label="ASH drill path">
+    <nav aria-label={t('ash.drill.label')}>
       <ol className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
         <li>
           {groupBy === DEFAULT_GROUP ? (
-            <span aria-current="page">Wait event types</span>
+            <span aria-current="page">{t('ash.drill.types')}</span>
           ) : (
             <button className="underline" onClick={() => onNavigate(DEFAULT_GROUP)} type="button">
-              Wait event types
+              {t('ash.drill.types')}
             </button>
           )}
         </li>
@@ -138,14 +144,16 @@ function DrillBreadcrumb({ groupBy, onNavigate, waitEvent, waitEventType }: Dril
             <li aria-hidden="true">/</li>
             <li>
               {groupBy === 'wait_event' ? (
-                <span aria-current="page">Wait events: {waitEventType ?? 'all'}</span>
+                <span aria-current="page">
+                  {t('ash.drill.events', { value: waitEventType ?? t('ash.drill.all') })}
+                </span>
               ) : (
                 <button
                   className="underline"
                   onClick={() => onNavigate('wait_event')}
                   type="button"
                 >
-                  Wait events: {waitEvent ?? 'all'}
+                  {t('ash.drill.events', { value: waitEvent ?? t('ash.drill.all') })}
                 </button>
               )}
             </li>
@@ -154,7 +162,7 @@ function DrillBreadcrumb({ groupBy, onNavigate, waitEvent, waitEventType }: Dril
         {groupBy === 'queryid' ? (
           <>
             <li aria-hidden="true">/</li>
-            <li aria-current="page">Queries</li>
+            <li aria-current="page">{t('ash.group.queryid')}</li>
           </>
         ) : null}
       </ol>
@@ -173,6 +181,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const redirectedForUnauthorized = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
+  const t = useT()
   const { range } = useTimeRange()
   const timeWindow = queryWindowOf(range)
   const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
@@ -243,17 +252,16 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   }
 
   function selectSeries(name: string) {
-    const cleanName = name.replace(/ \(folded\)$/u, '')
-    if (cleanName.toLocaleLowerCase('en-US') === 'other') return
+    if (name === displayName('other') || name.toLocaleLowerCase('en-US') === 'other') return
     const next = new URLSearchParams(searchParams)
     if (groupBy === DEFAULT_GROUP) {
       next.set('group', 'wait_event')
-      next.set('wait_event_type', cleanName)
+      next.set('wait_event_type', name)
       next.delete('wait_event')
       next.delete('queryid')
     } else if (groupBy === 'wait_event') {
       next.set('group', 'queryid')
-      next.set('wait_event', cleanName)
+      next.set('wait_event', name)
       next.delete('queryid')
     }
     setSearchParams(next)
@@ -275,8 +283,8 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   if (ashQuery.isPending || ashQuery.data === undefined) {
     return (
       <div className="space-y-4">
-        <section aria-busy="true" aria-label="Loading ASH and wait analysis" role="status">
-          Loading ASH and wait analysis…
+        <section aria-busy="true" aria-label={t('ash.page.loadingLabel')} role="status">
+          {t('ash.page.loading')}
         </section>
         <AshFootnote />
       </div>
@@ -286,22 +294,20 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="wait-events" label={t('ash.page.helpLabel')} />}
         icon={Activity}
-        eyebrow="Wait events"
+        eyebrow={t('ash.page.eyebrow')}
         freshness={<FreshnessBadge dataUpdatedAt={ashQuery.dataUpdatedAt} policy="ash" />}
         {...(groupBy === 'queryid'
           ? {}
           : { actions: <ChartLayoutToggle onChange={changeView} view={view} /> })}
-        title="ASH and wait analysis"
-        subtitle={
-          <span>
-            Instance <code>{instanceId}</code> · {range.label}
-          </span>
-        }
+        title={t('ash.page.title')}
+        // The breadcrumb names the instance; its id stays out of the title area.
+        subtitle={<span>{t(rangeLabelKey(range))}</span>}
       />
       <div className="flex w-full min-w-0 items-center gap-1">
         <Caption className="text-xs" id="ash.page" oneLine />
-        <InfoHint className="shrink-0" id="ash.page" label="ASH and wait analysis" />
+        <InfoHint className="shrink-0" id="ash.page" label={t('ash.page.title')} />
       </div>
       {groupBy === DEFAULT_GROUP ? null : (
         <DrillBreadcrumb
@@ -313,50 +319,43 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
       )}
       {ashQuery.data.enabled === false ? (
         <>
-          <Disabled
-            feature="ASH sampling"
-            configKey="checks.ash.enabled in the agent configuration file"
-          />
-          <p className="text-muted-foreground text-sm">
-            Keeping ASH disabled avoids its sampling cost but removes wait-analysis visibility.
-          </p>
+          <Disabled feature={t('ash.disabled.feature')} configKey={t('ash.disabled.configKey')} />
+          <p className="text-muted-foreground text-sm">{t('ash.disabled.note')}</p>
         </>
       ) : (
         <>
           {ashQuery.data.warning ? (
             <Callout role="status" variant="warning">
-              <strong>ASH sampling warning:</strong> {ashQuery.data.warning} {sampleCount} samples
-              were collected in this range; conclusions are unreliable.
+              <strong>{t('ash.warning.title')}</strong>{' '}
+              {t('ash.warning.body', { warning: ashQuery.data.warning, samples: sampleCount })}
             </Callout>
           ) : null}
           {queryIdsUnavailable ? (
             <div className="space-y-2">
               <Degraded
-                reason={
-                  queryIdSetting === 'off'
-                    ? 'No non-null query_id was observed in this ASH range, and the instance setting compute_query_id is off.'
-                    : 'No non-null query_id was observed in this ASH range. Under compute_query_id = auto, query IDs are computed only when a module such as pg_stat_statements is loaded.'
-                }
+                reason={t(
+                  queryIdSetting === 'off' ? 'ash.queryId.reasonOff' : 'ash.queryId.reasonAuto',
+                )}
                 requires="compute_query_id=on"
               />
               <p className="text-muted-foreground text-sm">
                 {queryIdSetting === 'off' ? (
                   <>
-                    The{' '}
+                    {t('ash.queryId.readinessBefore')}
                     <Link
                       className="underline"
                       to={`/instances/${encodeURIComponent(instanceId)}?section=readiness`}
                     >
-                      Readiness tab
-                    </Link>{' '}
-                    lists the item for compute_query_id and its fix.{' '}
+                      {t('ash.queryId.readinessLink')}
+                    </Link>
+                    {t('ash.queryId.readinessAfter')}
                   </>
                 ) : null}
-                See the{' '}
+                {t('ash.queryId.seeBefore')}
                 <a className="underline" href="/README.md#agent-configuration">
-                  agent configuration in the README
-                </a>{' '}
-                to enable query attribution.
+                  {t('ash.queryId.readmeLink')}
+                </a>
+                {t('ash.queryId.seeAfter')}
               </p>
             </div>
           ) : (
@@ -377,7 +376,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
           )}
           {groupBy === 'queryid' ? (
             <p className="text-muted-foreground text-sm" data-testid="ash-queryid-note">
-              Queries are plotted in one stacked chart: each series is a query, not a wait group.
+              {t('ash.queryId.note')}
             </p>
           ) : null}
           {groupBy === 'queryid' && !queryIdsUnavailable ? (

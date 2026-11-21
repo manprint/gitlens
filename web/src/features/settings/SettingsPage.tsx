@@ -5,12 +5,14 @@ import { useSearchParams } from 'react-router-dom'
 import { useAlerts, useAdvisorRules, useClusters, useInstances } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Callout } from '@/components/ui/callout'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { InstanceViewTabs } from '@/features/instance/InstancePanel'
 import { INSTANCE_VIEW_PARAM, useInstanceView } from '@/features/instance/instanceViews'
+import { useT } from '@/i18n/react'
 
 import { AdvisorPanel } from './AdvisorPanel'
 import { CommandAudit } from './CommandAudit'
@@ -40,12 +42,16 @@ const TAB_VIEWS: Partial<Record<SettingsTabId, readonly { id: string }[]>> = {
 
 /** The Audit & server tab: one view each for the command audit and the server information. */
 function AuditTab({ instances }: { instances: Schemas['InstanceSummary'][] }) {
+  const t = useT()
   const [view = 'commands', showView] = useInstanceView(AUDIT_VIEWS)
 
   return (
     // Command audit is the default view and is never written to the URL.
     <Tabs className="gap-4" onValueChange={showView} value={view}>
-      <InstanceViewTabs label="Audit views" views={AUDIT_VIEWS} />
+      <InstanceViewTabs
+        label={t('settings.page.auditViews')}
+        views={AUDIT_VIEWS.map((view) => ({ id: view.id, label: t(view.labelKey) }))}
+      />
       <TabsContent value="commands">
         <CommandAudit instances={instances} />
       </TabsContent>
@@ -57,6 +63,7 @@ function AuditTab({ instances }: { instances: Schemas['InstanceSummary'][] }) {
 }
 
 export function SettingsPage() {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = readSettingsTab(searchParams.get(SETTINGS_TAB_PARAM))
   const rawTab = searchParams.get(SETTINGS_TAB_PARAM)
@@ -115,8 +122,8 @@ export function SettingsPage() {
     rulesQuery.isPending
   ) {
     return (
-      <section aria-busy="true" aria-label="Loading settings and inventory" role="status">
-        Loading settings and inventory…
+      <section aria-busy="true" aria-label={t('settings.page.loadingLabel')} role="status">
+        {t('settings.page.loading')}
       </section>
     )
   }
@@ -132,8 +139,8 @@ export function SettingsPage() {
       <>
         {instances.length === 0 ? (
           <EmptyState
-            description="Install and configure the pglens agent on a PostgreSQL host to populate the fleet inventory."
-            title="The fleet is empty"
+            description={t('settings.page.emptyFleetBody')}
+            title={t('settings.page.emptyFleetTitle')}
           />
         ) : null}
         <AlertListTruncated truncated={alertsQuery.truncated} />
@@ -151,27 +158,25 @@ export function SettingsPage() {
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="settings" label={t('settings.page.helpLabel')} />}
         icon={Settings}
-        eyebrow="System"
+        eyebrow={t('settings.page.eyebrow')}
         freshness={<FreshnessBadge dataUpdatedAt={instancesQuery.dataUpdatedAt} policy="fleet" />}
-        subtitle="What pglens monitors and with which permissions, one tab per area: the instance inventory, console preferences, data retention, advisor rules, notification channels, cluster and instance names, and the command audit with the server build."
-        title="Settings and inventory"
+        subtitle={t('settings.page.subtitle')}
+        title={t('settings.page.title')}
       />
       {clustersQuery.error || alertsQuery.error || rulesQuery.error ? (
         <Callout role="status" variant="warning">
-          <strong>Some inventory details are unavailable.</strong>
-          <p>
-            The instance list is current, but cluster links, firing alerts, or advisor rules may be
-            incomplete. Retry the affected surface from its owning page.
-          </p>
+          <strong>{t('settings.page.unavailableTitle')}</strong>
+          <p>{t('settings.page.unavailableBody')}</p>
         </Callout>
       ) : null}
       {/* One tab per area (11.1); every query above stays in the page. */}
       <Tabs onValueChange={(value) => showTab(readSettingsTab(value))} value={tab}>
-        <TabsList aria-label="Settings sections" className="h-auto flex-wrap">
+        <TabsList aria-label={t('settings.page.sectionsLabel')} className="h-auto flex-wrap">
           {SETTINGS_TABS.map((entry) => (
             <TabsTrigger key={entry.id} value={entry.id}>
-              {entry.label}
+              {t(entry.labelKey)}
             </TabsTrigger>
           ))}
         </TabsList>

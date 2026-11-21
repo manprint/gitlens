@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import type { EChartsOption } from 'echarts'
 import EChartsReact from 'echarts-for-react/esm/core'
-import { useTimeRange } from '@/hooks/useTimeRange'
+
+import { useT } from '@/i18n/react'
 
 import { buildChartTheme, resolveTokens, useTokenReader } from './chartTheme'
 import { echarts } from './echarts'
@@ -25,63 +26,21 @@ export interface TimeSeriesChartProps {
   valueLabel?: string
   /** Chart height in pixels (default 300). */
   height?: number
-  /** Charts of one group share their tooltip pointer and zoom (`echarts.connect`). */
-  group?: string
 }
 
-interface DataZoomWindow {
-  startValue?: unknown
-  endValue?: unknown
-}
-
-function isDataZoomWindow(value: unknown): value is DataZoomWindow {
-  return typeof value === 'object' && value !== null
-}
-
-function dateFromValue(value: unknown): Date | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const date = new Date(value)
-    return Number.isFinite(date.getTime()) ? date : null
-  }
-  if (typeof value === 'string') {
-    const date = new Date(value)
-    return Number.isFinite(date.getTime()) ? date : null
-  }
-  return null
-}
-
-function dataZoomWindow(event: unknown): DataZoomWindow | null {
-  if (typeof event !== 'object' || event === null) return null
-  const record = event as Record<string, unknown>
-  const batch = record.batch
-  if (Array.isArray(batch) && batch.length > 0) {
-    const first: unknown = batch[0] as unknown
-    if (isDataZoomWindow(first)) return first
-  }
-  return isDataZoomWindow(record) ? record : null
-}
-
-function rangeFromDataZoom(event: unknown): { from: Date; to: Date } | null {
-  const window = dataZoomWindow(event)
-  if (!window) return null
-  const from = dateFromValue(window.startValue)
-  const to = dateFromValue(window.endValue)
-  if (!from || !to || from.getTime() > to.getTime()) return null
-  return { from, to }
-}
-
-/** Thin, accessible ECharts wrapper with a URL-backed brush selection. */
+/** Thin, accessible ECharts wrapper; each chart's tooltip and zoom are its own. */
 export function TimeSeriesChart({
   ariaLabel,
-  dataTableLabel = `${ariaLabel} data`,
-  group,
+  dataTableLabel: dataTableLabelProp,
   height = 300,
   onSeriesSelect,
   option,
   series,
-  valueLabel = 'Value (seconds)',
+  valueLabel: valueLabelProp,
 }: TimeSeriesChartProps) {
-  const { setRange } = useTimeRange()
+  const t = useT()
+  const dataTableLabel = dataTableLabelProp ?? t('shell.chart.dataTable', { chart: ariaLabel })
+  const valueLabel = valueLabelProp ?? t('shell.chart.valueSeconds')
   const read = useTokenReader()
   // A theme change gives a new reader, and a new theme makes the chart library
   // rebuild the chart with the other palette.
@@ -89,18 +48,6 @@ export function TimeSeriesChart({
     () => ({ option: resolveTokens(option, read), theme: buildChartTheme(read) }),
     [option, read],
   )
-
-  function handleDataZoom(event: unknown) {
-    const range = rangeFromDataZoom(event)
-    if (!range) return
-    setRange({ from: range.from, kind: 'absolute', label: 'Custom range', to: range.to })
-  }
-
-  function handleChartReady(instance: { group: string }) {
-    if (group === undefined) return
-    instance.group = group
-    echarts.connect(group)
-  }
 
   function handleSeriesClick(event: unknown) {
     if (typeof event !== 'object' || event === null) return
@@ -115,11 +62,8 @@ export function TimeSeriesChart({
       <div aria-label={ariaLabel} role="img">
         <EChartsReact
           echarts={echarts}
-          {...(group === undefined ? {} : { onChartReady: handleChartReady })}
-          onEvents={{
-            datazoom: handleDataZoom,
-            ...(onSeriesSelect === undefined ? {} : { click: handleSeriesClick }),
-          }}
+          // Each chart stands alone: no shared tooltip, and its zoom stays local.
+          onEvents={onSeriesSelect === undefined ? {} : { click: handleSeriesClick }}
           option={themed.option}
           style={{ height, width: '100%' }}
           theme={themed.theme}
@@ -127,12 +71,12 @@ export function TimeSeriesChart({
       </div>
       {/* Tables ignore a 1px width, so the wrapper hides the data table instead. */}
       <div className="sr-only">
-        <table aria-label={dataTableLabel}>
+        <table aria-label={dataTableLabel} data-chart-data="">
           <caption>{dataTableLabel}</caption>
           <thead>
             <tr>
-              <th scope="col">Metric</th>
-              <th scope="col">Timestamp (UTC)</th>
+              <th scope="col">{t('shell.chart.metric')}</th>
+              <th scope="col">{t('shell.chart.timestamp')}</th>
               <th scope="col">{valueLabel}</th>
             </tr>
           </thead>
@@ -142,7 +86,7 @@ export function TimeSeriesChart({
                 <tr key={`${metric.name}-${point.ts}`}>
                   <th scope="row">{metric.name}</th>
                   <td>{point.ts}</td>
-                  <td>{point.value ?? 'Unknown'}</td>
+                  <td>{point.value ?? t('shell.topology.unknown')}</td>
                 </tr>
               )),
             )}

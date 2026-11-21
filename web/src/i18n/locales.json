@@ -1,0 +1,4 @@
+[
+  { "code": "en", "name": "English", "intl": "en-US", "status": "stable" },
+  { "code": "it", "name": "Italiano", "intl": "it-IT", "status": "stable" }
+]

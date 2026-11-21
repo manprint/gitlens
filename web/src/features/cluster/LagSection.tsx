@@ -6,8 +6,10 @@ import { Unknown } from '@/components/state/Unknown'
 import { ChartCard } from '@/components/charts/ChartCard'
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 import { buildLagOption } from '@/components/charts/lag.options'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { EmptyCaptioned } from './EmptyCaptioned'
+import { useT, type Translate } from '@/i18n/react'
 import { formatBytes } from '@/lib/format/bytes'
 import {
   alignSeries,
@@ -85,8 +87,14 @@ function edgeHasGaps(aligned: AlignedReplicationSeries): boolean {
 // The ends used to be printed as raw instance IDs. The standby end is an
 // instance ID only when it resolves to a monitored instance; otherwise it is
 // the application_name the primary reports, shown as is.
-function edgeHeading(group: EdgeGroup, instances: readonly ReplicationInstance[]): string {
-  const sync = group.metrics.find((edge) => edge.sync_state !== undefined)?.sync_state ?? 'Unknown'
+function edgeHeading(
+  group: EdgeGroup,
+  instances: readonly ReplicationInstance[],
+  t: Translate,
+): string {
+  const sync =
+    group.metrics.find((edge) => edge.sync_state !== undefined)?.sync_state ??
+    t('cluster.common.unknown')
   return `${replicationInstanceLabel(instances, group.from)} → ${replicationInstanceLabel(instances, group.to)} (${sync})`
 }
 
@@ -95,30 +103,34 @@ export function LagSection({
   instances = NO_INSTANCES,
   range: controlledRange,
 }: LagSectionProps) {
+  const t = useT()
   const { range: urlRange } = useTimeRange()
   const range = controlledRange ?? urlRange
   const groups = useMemo(() => groupEdges(edges), [edges])
   const exceedsRetention = range.to.getTime() - range.from.getTime() > 30 * 24 * 60 * 60 * 1_000
 
   if (exceedsRetention) {
-    return <Degraded reason="Selected range exceeds the 30-day raw retention window." />
+    return <Degraded reason={t('cluster.lag.retention')} />
   }
 
   return (
     <section aria-labelledby="replication-lag-heading">
-      <h2 id="replication-lag-heading">Replication lag</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id="replication-lag-heading">{t('cluster.tabs.lag')}</h2>
+        <HelpLink anchor="cluster#lag" label={t('cluster.tabs.lag')} />
+      </div>
       {groups.length === 0 ? (
-        <EmptyCaptioned ariaLabel="Replication lag" captionId="lag.edge">
+        <EmptyCaptioned ariaLabel={t('cluster.tabs.lag')} captionId="lag.edge">
           <EmptyState
-            title="No replication lag"
-            description="No replication lag data in this range, so there is nothing to chart. Lag is recorded for each standby that copies changes from a primary of this cluster."
+            title={t('cluster.lag.noneTitle')}
+            description={t('cluster.lag.noneDescription')}
           />
         </EmptyCaptioned>
       ) : (
         <div className="space-y-6">
           {groups.map((group) => {
             const aligned = alignSeries(group.metrics)
-            const heading = edgeHeading(group, instances)
+            const heading = edgeHeading(group, instances, t)
             const hasData = aligned.timestamps.length > 0
             // The chart keeps seconds; the byte lag now is printed apart (no mixed units).
             const bytes = replayBytesNow(group)
@@ -134,26 +146,23 @@ export function LagSection({
                   {hasData ? (
                     <>
                       <TimeSeriesChart
-                        ariaLabel={`Replication lag for ${heading}`}
+                        ariaLabel={t('cluster.lag.chartLabel', { heading })}
                         option={buildLagOption(aligned)}
                         series={tableSeries(aligned)}
                       />
-                      {edgeHasGaps(aligned) ? (
-                        <p role="note">Gaps in this range indicate missing, unmeasured samples.</p>
-                      ) : null}
+                      {edgeHasGaps(aligned) ? <p role="note">{t('cluster.lag.gaps')}</p> : null}
                     </>
                   ) : (
                     <p role="status">
-                      <Unknown reason="No replication lag sample was returned for this edge." /> No
-                      data in this range.
+                      <Unknown reason={t('cluster.lag.noSample')} /> {t('cluster.lag.noData')}
                     </p>
                   )}
                 </ChartCard>
                 <dl className="mt-2 flex gap-2 text-sm">
-                  <dt className="text-muted-foreground">Replay lag (bytes)</dt>
+                  <dt className="text-muted-foreground">{t('cluster.lag.replayBytes')}</dt>
                   <dd className="tabular-nums">
                     {bytes === null ? (
-                      <Unknown reason="No fresh byte lag sample: the primary has not reported this standby in the last 60 seconds." />
+                      <Unknown reason={t('cluster.lag.noFreshBytes')} />
                     ) : (
                       formatBytes(bytes)
                     )}

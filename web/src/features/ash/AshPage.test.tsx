@@ -494,7 +494,7 @@ describe('AshPage', () => {
       .find((element) => element.textContent?.includes('ASH sampling warning'))
     const chart = screen.getByTestId('mock-echarts')
     if (!warning) throw new Error('ASH sampling warning was not rendered')
-    expect(warning).toHaveTextContent('25 samples')
+    expect(warning).toHaveTextContent('25 backend samples')
     expect(warning.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     view.unmount()
   })

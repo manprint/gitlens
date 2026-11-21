@@ -4,8 +4,10 @@ import {
   useDeleteNotificationChannel,
   useNotificationChannels,
   useSetNotificationChannel,
+  useSetNotificationLanguage,
   useTestNotificationChannel,
 } from '@/api/queries'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -20,9 +22,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
+import { localeCodes, localeInfo, PSEUDO_LOCALE } from '@/i18n/locales'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT } from '@/i18n/react'
+import { resolveLocale } from '@/i18n/store'
 import {
   channelChangeFailureMessage,
   channelInstructions,
+  channelLabel,
   channelSourceLabel,
   notificationChannelInfo,
   testFailureMessage,
@@ -34,47 +42,61 @@ import {
 import { cn } from '@/lib/utils'
 
 /** What Send test does (I-16), referenced by every Send test button. */
-const SEND_TEST_HELP =
-  'Send test posts the message “pglens test notification” through the channel the alerts use and shows whether it was delivered within 10 s. Nothing is stored.'
+const SEND_TEST_HELP = 'settings.notifications.sendTestHelp' satisfies MessageKey
 
 /** What the URL form does (I-16), referenced by every URL field. */
-const URL_HELP =
-  'A URL set here is stored in the pglens database, overrides the server environment and applies to the next alert and test at once. It is write-only: the console never shows it again. It is stored without encryption, so database backups hold it.'
+const URL_HELP = 'settings.notifications.urlHelp' satisfies MessageKey
 
 /** The last test send of one channel. */
 type TestState = { phase: 'pending' } | { phase: 'done'; ok: boolean; text: string }
 
-/** The last change of one channel's stored URL. */
+/** The last change of one channel's stored URL or language. */
 type ChangeState = { phase: 'pending' } | { phase: 'done'; ok: boolean; text: string }
+
+/** The languages a channel can write in; the server knows no pseudo-language. */
+function channelLanguages(): string[] {
+  return localeCodes().filter((code) => code !== PSEUDO_LOCALE)
+}
+
+/** The select's value for the server default. */
+const SERVER_LANGUAGE = ''
 
 function ChannelRow({
   channel,
   state,
   change,
+  languageChange,
   onTest,
   onSave,
   onRemove,
+  onLanguage,
   helpId,
   urlHelpId,
 }: {
   channel: NotificationChannel
   state: TestState | undefined
   change: ChangeState | undefined
+  languageChange: ChangeState | undefined
   onTest: () => void
+  /** Sets the language of the channel's messages; null is the server default. */
+  onLanguage: (language: string | null) => void
   /** Stores the URL; resolves true when the server stored it. */
   onSave: (url: string) => Promise<boolean>
   onRemove: () => void
   helpId: string
   urlHelpId: string
 }) {
+  const t = useT()
   const info = notificationChannelInfo(channel.kind)
   const id = useId().replaceAll(':', '')
   const ids = {
-    title: `${id}-title`,
     instructions: `${id}-instructions`,
     result: `${id}-result`,
     url: `${id}-url`,
     change: `${id}-change`,
+    language: `${id}-language`,
+    languageChange: `${id}-language-change`,
+    chanHead: `${id}-h3`,
   }
   const pending = state?.phase === 'pending'
   const changing = change?.phase === 'pending'
@@ -92,21 +114,31 @@ function ChannelRow({
     if (await onSave(url)) setDraft('')
   }
 
-  const changeText = problem ?? (change?.phase === 'done' ? change.text : changing ? 'Saving…' : '')
+  const changeText =
+    problem ??
+    (change?.phase === 'done' ? change.text : changing ? t('settings.notifications.saving') : '')
   const changeFailed = problem !== null || (change?.phase === 'done' && !change.ok)
+  const languageText =
+    languageChange?.phase === 'done'
+      ? languageChange.text
+      : languageChange?.phase === 'pending'
+        ? t('settings.notifications.saving')
+        : ''
 
   return (
     <li
-      aria-labelledby={ids.title}
+      aria-labelledby={ids.chanHead}
       className="grid gap-2 border-b py-3 first:pt-0 last:border-b-0 last:pb-0 min-[1600px]:grid-cols-[19rem_14rem_minmax(0,1fr)_minmax(0,22rem)] min-[1600px]:items-center min-[1600px]:gap-x-4"
       data-testid={`notification-channel-${channel.kind}`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-foreground text-sm font-medium" id={ids.title}>
-          {info.label}
+        <h3 className="text-foreground text-sm font-medium" id={ids.chanHead}>
+          {channelLabel(info)}
         </h3>
         <Badge variant={channel.configured ? 'secondary' : 'outline'}>
-          {channel.configured ? 'configured' : 'not configured'}
+          {channel.configured
+            ? t('settings.notifications.configured')
+            : t('settings.notifications.notConfigured')}
         </Badge>
         {channel.configured ? (
           <Badge data-testid={`notification-source-${channel.kind}`} variant="outline">
@@ -115,9 +147,9 @@ function ChannelRow({
         ) : null}
       </div>
       <div className="min-w-0 text-sm">
-        <span className="text-muted-foreground">Host </span>
+        <span className="text-muted-foreground">{t('settings.notifications.host')} </span>
         {channel.host === null ? (
-          <span className="text-muted-foreground">none</span>
+          <span className="text-muted-foreground">{t('settings.notifications.none')}</span>
         ) : (
           <span className="font-mono break-all">{channel.host}</span>
         )}
@@ -125,22 +157,30 @@ function ChannelRow({
       <div className="min-w-0 text-sm">
         {stored ? (
           <>
-            <span className="text-muted-foreground">Stored from the console; overrides </span>
+            <span className="text-muted-foreground">
+              {t('settings.notifications.storedFromConsole')}{' '}
+            </span>
             <code className="break-all">{info.variable}</code>
           </>
         ) : channel.configured ? (
           <>
-            <span className="text-muted-foreground">Set by </span>
+            <span className="text-muted-foreground">{t('settings.notifications.setBy')} </span>
             <code className="break-all">{info.variable}</code>
             {info.fileVariable === undefined ? null : (
-              <span className="text-muted-foreground"> (or _FILE)</span>
+              <span className="text-muted-foreground"> {t('settings.notifications.orFile')}</span>
             )}
             {info.aliases.length === 0 ? null : (
               <>
-                <span className="text-muted-foreground">, or the older </span>
+                <span className="text-muted-foreground">
+                  {t('settings.notifications.orOlder')}{' '}
+                </span>
                 {info.aliases.map((alias, index) => (
                   <span key={alias}>
-                    {index === 0 ? null : <span className="text-muted-foreground">, </span>}
+                    {index === 0 ? null : (
+                      <span className="text-muted-foreground">
+                        {t('settings.notifications.separator')}{' '}
+                      </span>
+                    )}
                     <code className="break-all">{alias}</code>
                   </span>
                 ))}
@@ -158,14 +198,14 @@ function ChannelRow({
           aria-describedby={[helpId, channel.configured ? null : ids.instructions]
             .filter(Boolean)
             .join(' ')}
-          aria-label={`Send test to ${info.label}`}
+          aria-label={t('settings.notifications.sendTestLabel', { channel: channelLabel(info) })}
           disabled={!channel.configured || pending}
           onClick={onTest}
           size="xs"
           type="button"
           variant="outline"
         >
-          {pending ? 'Sending…' : 'Send test'}
+          {pending ? t('settings.notifications.sending') : t('settings.notifications.sendTest')}
         </Button>
         {/* The result is announced when it arrives (role status). */}
         <span
@@ -180,16 +220,59 @@ function ChannelRow({
           {state?.phase === 'done' ? state.text : ''}
         </span>
       </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 min-[1600px]:col-start-1">
+        <label className="text-muted-foreground text-sm" htmlFor={ids.language}>
+          {t('settings.notifications.language')}
+        </label>
+        <NativeSelect
+          aria-describedby={languageText === '' ? undefined : ids.languageChange}
+          aria-label={t('settings.notifications.languageOf', { channel: channelLabel(info) })}
+          className="h-7 w-auto"
+          data-testid={`notification-language-${channel.kind}`}
+          disabled={languageChange?.phase === 'pending'}
+          id={ids.language}
+          onChange={(event) =>
+            onLanguage(event.target.value === SERVER_LANGUAGE ? null : event.target.value)
+          }
+          value={channel.language ?? SERVER_LANGUAGE}
+        >
+          <option value={SERVER_LANGUAGE}>
+            {t('settings.notifications.languageServer', {
+              language: localeInfo(resolveLocale('server')).name,
+            })}
+          </option>
+          {channelLanguages().map((code) => (
+            <option key={code} value={code}>
+              {localeInfo(code).name}
+            </option>
+          ))}
+        </NativeSelect>
+        <span
+          className={cn(
+            'min-w-0 text-sm break-words',
+            languageChange?.phase === 'done' && !languageChange.ok ? 'text-destructive' : null,
+          )}
+          data-testid={`notification-language-result-${channel.kind}`}
+          id={ids.languageChange}
+          role="status"
+        >
+          {languageText}
+        </span>
+      </div>
       {/* A group, not a form, and a masked text field, not a password one: a
           password manager offers to save a form's password field, and this URL
           must not end up in one. Enter in the field stores it. */}
       <div
-        aria-label={`URL form of ${info.label}`}
+        aria-label={t('settings.notifications.urlFormLabel', { channel: channelLabel(info) })}
         className="flex min-w-0 flex-wrap items-center gap-2 min-[1600px]:col-span-3 min-[1600px]:col-start-2"
         role="group"
       >
         <label className="text-muted-foreground text-sm" htmlFor={ids.url}>
-          Console URL<span className="sr-only"> of {info.label}</span>
+          {t('settings.notifications.consoleUrl')}
+          <span className="sr-only">
+            {' '}
+            {t('settings.notifications.urlOf', { channel: channelLabel(info) })}
+          </span>
         </label>
         <Input
           aria-describedby={[urlHelpId, changeText === '' ? null : ids.change]
@@ -214,7 +297,11 @@ function ChannelRow({
               void save()
             }
           }}
-          placeholder={stored ? 'A new URL replaces the stored one' : 'https://…'}
+          placeholder={
+            stored
+              ? t('settings.notifications.urlPlaceholderStored')
+              : t('settings.notifications.urlPlaceholder')
+          }
           spellCheck={false}
           type="text"
           value={draft}
@@ -226,18 +313,18 @@ function ChannelRow({
           type="button"
           variant="outline"
         >
-          {stored ? 'Replace URL' : 'Set URL'}
+          {stored ? t('settings.notifications.replaceUrl') : t('settings.notifications.setUrl')}
         </Button>
         {stored ? (
           <Button
-            aria-label={`Remove stored URL of ${info.label}`}
+            aria-label={t('settings.notifications.removeUrlLabel', { channel: channelLabel(info) })}
             disabled={changing}
             onClick={onRemove}
             size="xs"
             type="button"
             variant="outline"
           >
-            Remove stored URL
+            {t('settings.notifications.removeUrl')}
           </Button>
         ) : null}
         <span
@@ -261,12 +348,17 @@ function ChannelRow({
  * address never reaches the browser from the server (I-10).
  */
 export function NotificationsPanel() {
+  const t = useT()
   const channelsQuery = useNotificationChannels()
   const testChannel = useTestNotificationChannel()
   const setChannel = useSetNotificationChannel()
   const deleteChannel = useDeleteNotificationChannel()
+  const setLanguage = useSetNotificationLanguage()
   const [tests, setTests] = useState<Partial<Record<NotificationChannelKind, TestState>>>({})
   const [changes, setChanges] = useState<Partial<Record<NotificationChannelKind, ChangeState>>>({})
+  const [languageChanges, setLanguageChanges] = useState<
+    Partial<Record<NotificationChannelKind, ChangeState>>
+  >({})
   const [removing, setRemoving] = useState<NotificationChannelKind | null>(null)
   const baseId = useId().replaceAll(':', '')
   const helpId = `${baseId}-send-test-help`
@@ -292,7 +384,7 @@ export function NotificationsPanel() {
     let next: ChangeState
     try {
       await setChannel.mutateAsync({ kind, url })
-      next = { phase: 'done', ok: true, text: 'Saved. The next alert and test use this URL.' }
+      next = { phase: 'done', ok: true, text: t('settings.notifications.saved') }
     } catch (error) {
       next = { phase: 'done', ok: false, text: channelChangeFailureMessage(error, 'save') }
     } finally {
@@ -302,6 +394,18 @@ export function NotificationsPanel() {
     }
     setChanges((current) => ({ ...current, [kind]: next }))
     return next.phase === 'done' && next.ok
+  }
+
+  async function saveLanguage(kind: NotificationChannelKind, language: string | null) {
+    setLanguageChanges((current) => ({ ...current, [kind]: { phase: 'pending' } }))
+    let next: ChangeState
+    try {
+      await setLanguage.mutateAsync({ kind, language })
+      next = { phase: 'done', ok: true, text: t('settings.notifications.languageSaved') }
+    } catch (error) {
+      next = { phase: 'done', ok: false, text: channelChangeFailureMessage(error, 'save') }
+    }
+    setLanguageChanges((current) => ({ ...current, [kind]: next }))
   }
 
   async function removeUrl() {
@@ -316,8 +420,8 @@ export function NotificationsPanel() {
         phase: 'done',
         ok: true,
         text: row.configured
-          ? 'Removed. The channel uses the server environment’s URL again.'
-          : 'Removed. The channel is not configured.',
+          ? t('settings.notifications.removedEnv')
+          : t('settings.notifications.removedNone'),
       }
     } catch (error) {
       next = { phase: 'done', ok: false, text: channelChangeFailureMessage(error, 'remove') }
@@ -328,32 +432,40 @@ export function NotificationsPanel() {
   }
 
   return (
-    <Section captionId="settings.notifications" id="settings-notifications" title="Notifications">
+    <Section
+      actions={
+        <HelpLink anchor="settings#notifications" label={t('settings.notifications.title')} />
+      }
+      captionId="settings.notifications"
+      id="settings-notifications"
+      title={t('settings.notifications.title')}
+    >
       <div className="space-y-4 px-5 py-4">
         <p className="text-muted-foreground text-sm leading-relaxed">
-          A webhook address comes from the server environment or is stored from the console; the
-          console shows its host and never the address. <span id={urlHelpId}>{URL_HELP}</span>{' '}
-          <span id={helpId}>{SEND_TEST_HELP}</span>
+          {t('settings.notifications.intro')} <span id={urlHelpId}>{t(URL_HELP)}</span>{' '}
+          <span id={helpId}>{t(SEND_TEST_HELP)}</span>
         </p>
         {channelsQuery.error ? (
           <ErrorState
-            endpoint="notification channels"
+            endpoint={t('settings.notifications.endpoint')}
             failure={channelsQuery.error}
             onRetry={() => void channelsQuery.refetch()}
           />
         ) : channelsQuery.isPending ? (
           <p aria-busy="true" role="status">
-            Loading notification channels…
+            {t('settings.notifications.loading')}
           </p>
         ) : (
           <>
-            <ul aria-label="Notification channels">
+            <ul aria-label={t('settings.notifications.listLabel')}>
               {channels.map((channel) => (
                 <ChannelRow
                   change={changes[channel.kind]}
                   channel={channel}
                   helpId={helpId}
                   key={channel.kind}
+                  languageChange={languageChanges[channel.kind]}
+                  onLanguage={(language) => void saveLanguage(channel.kind, language)}
                   onRemove={() => setRemoving(channel.kind)}
                   onSave={(url) => saveUrl(channel.kind, url)}
                   onTest={() => void sendTest(channel.kind)}
@@ -364,8 +476,11 @@ export function NotificationsPanel() {
             </ul>
             <p className="text-sm" data-testid="notification-channels-summary">
               {configured === 0
-                ? 'No channel is configured: alerts are stored but not delivered.'
-                : `${configured} of ${channels.length} channels configured.`}
+                ? t('settings.notifications.noneConfigured')
+                : t('settings.notifications.countConfigured', {
+                    configured,
+                    total: channels.length,
+                  })}
             </p>
           </>
         )}
@@ -380,22 +495,27 @@ export function NotificationsPanel() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Remove the stored URL of {removingInfo?.label ?? 'this channel'}?
+              {t('settings.notifications.removeTitle', {
+                channel:
+                  removingInfo === null
+                    ? t('settings.notifications.thisChannel')
+                    : channelLabel(removingInfo),
+              })}
             </DialogTitle>
             <DialogDescription>
-              The URL stored from the console is deleted from the pglens database. The channel falls
-              back to the server environment’s URL ({removingInfo?.variable ?? 'its variable'}) if
-              one is set; without one it is not configured and alerts are not delivered to it.
+              {t('settings.notifications.removeBody', {
+                variable: removingInfo?.variable ?? t('settings.notifications.itsVariable'),
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t('settings.notifications.cancel')}
               </Button>
             </DialogClose>
             <Button onClick={() => void removeUrl()} type="button" variant="destructive">
-              Remove stored URL
+              {t('settings.notifications.removeUrl')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -142,20 +142,37 @@ describe('ExplainPanel', () => {
     expect(screen.getByRole('button', { name: 'Plan with ANALYZE' })).toBeDisabled()
   })
 
-  it('UI-QRY-025 renders plan node types, estimated and actual rows, and costs', async () => {
+  it('UI-QRY-025 renders the plan as a tree with rows, time and the psql text', async () => {
     commandHandlers({
       command_id: COMMAND_ID,
-      result: [
-        {
-          Plan: {
-            'Actual Rows': 4,
-            'Node Type': 'Nested Loop',
-            'Plan Rows': 8,
-            Plans: [{ 'Node Type': 'Index Scan', 'Total Cost': 12.5 }],
-            'Total Cost': 34.5,
+      result: {
+        plan: [
+          {
+            'Execution Time': 2.5,
+            Plan: {
+              'Actual Loops': 1,
+              'Actual Rows': 4,
+              'Actual Total Time': 2.4,
+              'Node Type': 'Nested Loop',
+              'Plan Rows': 8,
+              Plans: [
+                {
+                  'Actual Loops': 4,
+                  'Actual Rows': 1,
+                  'Actual Total Time': 0.3,
+                  'Index Name': 'orders_pkey',
+                  'Node Type': 'Index Scan',
+                  'Plan Rows': 1,
+                  'Relation Name': 'orders',
+                  'Total Cost': 12.5,
+                },
+              ],
+              'Total Cost': 34.5,
+            },
           },
-        },
-      ],
+        ],
+        values_from: 'recent_execution',
+      },
       state: 'done',
     })
 
@@ -163,19 +180,54 @@ describe('ExplainPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /Run plan only/i }))
     vi.useRealTimers()
 
-    await waitFor(() => expect(screen.getByText('Nested Loop')).toBeInTheDocument())
-    expect(screen.getByText('Index Scan')).toBeInTheDocument()
-    expect(screen.getByText('Estimated rows')).toBeInTheDocument()
-    expect(screen.getByText('Actual rows')).toBeInTheDocument()
-    expect(screen.getAllByText('34.5').length).toBeGreaterThan(0)
-    expect(screen.getByText('Raw JSON')).toBeInTheDocument()
+    const tree = await screen.findByRole('table', { name: 'Query plan tree' })
+    expect(within(tree).getByText('Nested Loop')).toBeInTheDocument()
+    expect(within(tree).getByText(/Index Scan/)).toBeInTheDocument()
+    expect(
+      within(tree).getByRole('columnheader', { name: 'Rows (actual / est.)' }),
+    ).toBeInTheDocument()
+    expect(within(tree).getByRole('columnheader', { name: 'Time in node' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Plan summary')).toHaveTextContent('recent execution')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Text' }))
+    expect(screen.getByLabelText('Plan as text')).toHaveTextContent('Nested Loop')
+    fireEvent.click(screen.getByRole('button', { name: 'JSON' }))
+    expect(screen.getByLabelText('Plan as JSON')).toHaveTextContent('"Node Type": "Nested Loop"')
   })
 
-  it('UI-QRY-026 warns that normalised placeholders can change the plan', () => {
-    renderPanel({ normalized: true })
+  it('UI-QRY-026 asks one value per placeholder and sends them only when all are given', async () => {
+    let requestBody: unknown
+    server.use(
+      http.post('*/api/v1/instances/:id/commands', async ({ request }) => {
+        requestBody = await request.json()
+        return HttpResponse.json({ command_id: COMMAND_ID })
+      }),
+    )
 
-    expect(screen.getByRole('note')).toHaveTextContent('normalised with placeholders')
-    expect(screen.getByRole('note')).toHaveTextContent('parameter-sensitive')
+    renderPanel({ statementText: 'SELECT * FROM orders WHERE id = $1 AND note = $2' })
+
+    expect(screen.getByRole('group', { name: 'Parameter values' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('$1'), { target: { value: '42' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter a value or NULL for each of $1…$2')
+    expect(screen.getByRole('button', { name: /Run plan only/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Plan with ANALYZE' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '$2 is NULL' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Run plan only/i }))
+    vi.useRealTimers()
+
+    await waitFor(() => expect(requestBody).toBeDefined())
+    expect(requestBody).toEqual({
+      args: { analyze: false, datname: 'app', params: ['42', null], queryid: '123' },
+      kind: 'explain',
+    })
+  })
+
+  it('UI-QRY-027 offers no parameter inputs for a truncated statement', () => {
+    renderPanel({ statementText: 'SELECT * FROM orders WHERE id = $1 AND note = $2… [truncated]' })
+
+    expect(screen.queryByRole('group', { name: 'Parameter values' })).not.toBeInTheDocument()
   })
 
   it('gates ANALYZE at T2 and preserves the disabled control', () => {

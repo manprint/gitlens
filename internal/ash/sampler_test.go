@@ -561,3 +561,64 @@ func TestComputeQueryIDSetting(t *testing.T) {
 		t.Fatalf("scan error: got (%q, %v), want (\"\", error)", setting, err)
 	}
 }
+
+// mockQuerierFresh answers every tick with a new cursor over the same rows.
+type mockQuerierFresh struct {
+	rows [][5]any
+	err  atomic.Pointer[error]
+}
+
+func (m *mockQuerierFresh) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	if e := m.err.Load(); e != nil {
+		return nil, *e
+	}
+	return &mockRows{rows: m.rows}, nil
+}
+
+// TestSampler_BatchCallback_GetsRowsOfSuccessfulTicksOnly proves onBatch
+// receives every row of a successful tick and is not called for a failed one.
+func TestSampler_BatchCallback_GetsRowsOfSuccessfulTicksOnly(t *testing.T) {
+	clk := clock.NewFake(time.Unix(0, 0))
+	q := &mockQuerierFresh{rows: [][5]any{
+		{"app", "active", "Lock", "transactionid", ptrInt64(7)},
+		{"app", "active", "", "", (*int64)(nil)},
+	}}
+	s := NewSampler(q, clk, nil)
+	batches := make(chan []SampleRow, 16)
+	var ticks atomic.Int32
+	s.SetTickCallback(func(bool) { ticks.Add(1) })
+	s.SetBatchCallback(func(rows []SampleRow) { batches <- rows })
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	var got []SampleRow
+	deadline := time.Now().Add(2 * time.Second)
+	for got == nil && time.Now().Before(deadline) {
+		clk.Advance(time.Second)
+		select {
+		case got = <-batches:
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if len(got) != 2 || got[0].WaitEventType != "Lock" || got[0].WaitEvent != "transactionid" || *got[0].QueryID != 7 || got[1].QueryID != nil {
+		t.Fatalf("batch = %+v", got)
+	}
+
+	failed := errors.New("connection reset")
+	q.err.Store(&failed)
+	for len(batches) > 0 {
+		<-batches
+	}
+	before := ticks.Load()
+	for ticks.Load() < before+3 && time.Now().Before(deadline.Add(2*time.Second)) {
+		clk.Advance(time.Second)
+		time.Sleep(time.Millisecond)
+	}
+	// A batch already in flight when the error was set may still land.
+	time.Sleep(10 * time.Millisecond)
+	if len(batches) > 1 {
+		t.Fatalf("onBatch called for failed ticks: %d batches", len(batches))
+	}
+}

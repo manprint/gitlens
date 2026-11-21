@@ -2,14 +2,17 @@
  * The tabs of the cluster page (15.3, D26): one view per tab so each holds
  * one primary table. The registry is used by the page, the Full HD route
  * inventory and the tests; `charts` tabs are exempt from the vertical fit only.
+ * `labelKey` is a catalog key, translated at render (never at import).
  */
 
+import type { MessageKey } from '@/i18n/messages/en'
+
 export const CLUSTER_SECTIONS = [
-  { id: 'topology', label: 'Topology', kind: 'table' },
-  { id: 'lag', label: 'Replication lag', kind: 'charts' },
-  { id: 'slots', label: 'Replication slots', kind: 'table' },
-  { id: 'drift', label: 'Configuration drift', kind: 'table' },
-  { id: 'events', label: 'Events', kind: 'table' },
+  { id: 'topology', labelKey: 'cluster.tabs.topology' satisfies MessageKey, kind: 'table' },
+  { id: 'lag', labelKey: 'cluster.tabs.lag' satisfies MessageKey, kind: 'charts' },
+  { id: 'slots', labelKey: 'cluster.tabs.slots' satisfies MessageKey, kind: 'table' },
+  { id: 'drift', labelKey: 'cluster.tabs.drift' satisfies MessageKey, kind: 'table' },
+  { id: 'events', labelKey: 'cluster.tabs.events' satisfies MessageKey, kind: 'table' },
 ] as const
 
 export type ClusterSectionId = (typeof CLUSTER_SECTIONS)[number]['id']

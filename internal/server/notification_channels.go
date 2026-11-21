@@ -240,7 +240,7 @@ func (a *API) LoadNotificationChannels(ctx context.Context) error {
 		n.apply(k, address)
 		log.Printf("notifications: notification channel %s uses the URL stored from the console; host %s", k.Kind, hostForLog(address))
 	}
-	return nil
+	return a.loadNotificationLanguages(ctx)
 }
 
 // notificationState is the API's configuration. An API built without NewAPI
@@ -385,11 +385,15 @@ func (n *notificationChannels) row(k notificationKind) notificationChannelJSON {
 	n.mu.Lock()
 	stored, ok := n.stored[k.Kind]
 	n.mu.Unlock()
+	var language *string
+	if code := n.slots[k.Kind].Locale(); code != "" {
+		language = &code
+	}
 	if ok {
-		return notificationChannelJSON{Kind: k.Kind, Configured: true, Source: "ui", Host: webhookHost(stored)}
+		return notificationChannelJSON{Kind: k.Kind, Configured: true, Source: "ui", Host: webhookHost(stored), Language: language}
 	}
 	address := k.url(n.cfg)
-	return notificationChannelJSON{Kind: k.Kind, Configured: address != "", Source: "env", Host: webhookHost(address)}
+	return notificationChannelJSON{Kind: k.Kind, Configured: address != "", Source: "env", Host: webhookHost(address), Language: language}
 }
 
 type notificationChannelJSON struct {
@@ -397,6 +401,9 @@ type notificationChannelJSON struct {
 	Configured bool    `json:"configured"`
 	Source     string  `json:"source"`
 	Host       *string `json:"host"`
+	// Language is the language of the channel's messages, nil for the server
+	// default (plan 006 F7).
+	Language *string `json:"language"`
 }
 
 type notificationTestJSON struct {
@@ -410,6 +417,7 @@ func (a *API) registerNotificationChannelRoutes(r chi.Router) {
 	r.Post("/api/v1/notification-channels/{kind}/test", a.handleTestNotificationChannel)
 	r.Put("/api/v1/notification-channels/{kind}", a.handleSetNotificationChannel)
 	r.Delete("/api/v1/notification-channels/{kind}", a.handleDeleteNotificationChannel)
+	r.Put("/api/v1/notification-channels/{kind}/language", a.handleSetNotificationLanguage)
 }
 
 // webhookHost is the host name of a webhook address, nil when there is no

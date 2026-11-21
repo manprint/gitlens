@@ -12,7 +12,7 @@ GOVULNCHECK_VERSION ?= v1.9.0
 
 .PHONY: pgext-image build fmt fmt-check lint vet-tags vuln tidy-check stress test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration ci-local-security coverage coverage-gate generate golden clean build-images build-images-multiarch test-e2e-unit \
-        web-install web-gen-api web-typecheck web-lint web-build web-budget web-test web-coverage web-coverage-gate test-ui-e2e
+        web-install web-gen-api web-typecheck web-lint web-build web-budget web-test web-coverage web-coverage-gate test-ui-e2e i18n-check
 
 build:
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o bin/pglens-agent  ./cmd/pglens-agent
@@ -172,6 +172,14 @@ web-typecheck:
 web-gen-api:
 	cd $(WEB) && $(PNPM) run gen:api
 	git diff --exit-code -- web/src/api/generated.ts
+
+# Every language check in one run (plan 006): Go catalogs (parity, strict
+# messages, shared format cases) and the console catalogs, domain texts and
+# help skeletons. CI runs the same tests inside `test` and `web-coverage-gate`;
+# the literal-string guard I18N-002 runs in `web-lint`.
+i18n-check:
+	$(GO) test ./internal/i18n/... ./internal/advisor/... ./internal/readiness/... ./internal/server/ -run 'Catalog|Parity|Shared|Locale|Message|Fixed|Describe|NOTI013|NOTI014'
+	cd $(WEB) && TZ=UTC $(PNPM) exec vitest run src/i18n src/lib/help src/features/help
 
 web-lint: web-gen-api
 	cd $(WEB) && $(PNPM) run lint && $(PNPM) run format:check

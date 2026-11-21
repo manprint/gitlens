@@ -1,5 +1,7 @@
 import type { Schemas } from '@/api/types'
-import { formatBytes, formatMilliseconds, formatRate } from '@/lib/format'
+import type { MessageKey } from '@/i18n/messages/en'
+import { translate } from '@/i18n/store'
+import { formatBytes, formatDecimal, formatMilliseconds, formatRate } from '@/lib/format'
 import type { SortDirection } from '@/lib/tableControls'
 
 export type IndexSuggestion = Schemas['IndexSuggestion']
@@ -17,43 +19,43 @@ export function readSuggestionWindow(value: string | null): SuggestionWindow {
   return SUGGESTION_WINDOWS.find((window) => window === value) ?? DEFAULT_SUGGESTION_WINDOW
 }
 
-export const ESTIMATE_CALLOUT =
-  'Suggestions are estimates from statement statistics; pglens never creates an index.'
-
-const NOTE_LABELS: Readonly<Record<string, string>> = {
-  small_table:
-    'The table has fewer than 1,000 rows: a sequential scan is usually as fast as an index.',
-  low_selectivity:
-    'The first key column has few distinct values, so the index narrows little: the verdict is one step lower.',
-  width_assumed:
-    'Some column widths are not reported: 32 bytes were assumed for each, so the size is rougher.',
-  size_unknown: 'The table size is not reported, so no size estimate is given.',
-  column_unknown: 'A column of the statement is not in the reported table columns.',
-  type_not_btree: 'A column type cannot be indexed with a btree and was left out of the key.',
-  selectivity_unknown:
-    'Column statistics are not available, so selectivity is unknown and the confidence is lowered.',
-  writes_unknown:
-    'No write rates are reported for the table: the read/write ratio is not known and the verdict is capped.',
+export function estimateCallout(): string {
+  return translate('indexes.lib.suggestions.estimateCallout')
 }
+
+// Maps, not objects: a code such as `constructor` must not read an inherited property.
+const NOTE_KEYS = new Map<string, MessageKey>([
+  ['small_table', 'indexes.lib.suggestions.note.smallTable'],
+  ['low_selectivity', 'indexes.lib.suggestions.note.lowSelectivity'],
+  ['width_assumed', 'indexes.lib.suggestions.note.widthAssumed'],
+  ['size_unknown', 'indexes.lib.suggestions.note.sizeUnknown'],
+  ['column_unknown', 'indexes.lib.suggestions.note.columnUnknown'],
+  ['type_not_btree', 'indexes.lib.suggestions.note.typeNotBtree'],
+  ['selectivity_unknown', 'indexes.lib.suggestions.note.selectivityUnknown'],
+  ['writes_unknown', 'indexes.lib.suggestions.note.writesUnknown'],
+])
 
 /** The sentence for a note code; a code this build does not know is shown as it is. */
 export function noteLabel(code: string): string {
-  return NOTE_LABELS[code] ?? code
+  const key = NOTE_KEYS.get(code)
+  return key === undefined ? code : translate(key)
 }
 
-const VERDICT_LABELS: Readonly<Record<string, string>> = {
-  strong: 'Strong',
-  moderate: 'Moderate',
-  write_heavy: 'Write-heavy',
-}
+const VERDICT_KEYS = new Map<string, MessageKey>([
+  ['strong', 'indexes.lib.suggestions.verdict.strong'],
+  ['moderate', 'indexes.lib.suggestions.verdict.moderate'],
+  ['write_heavy', 'indexes.lib.suggestions.verdict.writeHeavy'],
+])
 
 export function verdictLabel(verdict: string): string {
-  return VERDICT_LABELS[verdict] ?? verdict
+  const key = VERDICT_KEYS.get(verdict)
+  return key === undefined ? verdict : translate(key)
 }
 
 /** The rule behind the verdict, shown as help (a documented heuristic, not a measurement). */
-export const VERDICT_RULE =
-  'Verdict is read/write ratio of the table: calls per second of the statements that use the key divided by the row changes per second that must touch an index (inserts, deletes, and updates that are not heap-only). 10 or more is strong, 1 or more is moderate, below 1 is write-heavy. A table that takes no index writes is never write-heavy: at least moderate.'
+export function verdictRule(): string {
+  return translate('indexes.lib.suggestions.verdictRule')
+}
 
 export function verdictVariant(verdict: string): 'success' | 'warning' | 'secondary' {
   if (verdict === 'strong') return 'success'
@@ -63,7 +65,8 @@ export function verdictVariant(verdict: string): 'success' | 'warning' | 'second
 
 /** The estimated index size with a `~` prefix: it is a planner-based estimate (I-5). */
 export function estimateLabel(bytes: number | null): string {
-  return bytes === null ? 'Unknown' : `~${formatBytes(bytes)}`
+  if (bytes === null) return translate('indexes.lib.suggestions.unknown')
+  return translate('indexes.lib.suggestions.estimate', { size: formatBytes(bytes) })
 }
 
 export function keyText(columns: IndexSuggestion['columns']): string {
@@ -91,20 +94,25 @@ export function costText(msPerSecond: number): string {
 }
 
 export function weightText(weightPct: number): string {
-  return `${weightPct.toFixed(weightPct >= 10 ? 0 : 1)}%`
+  return `${formatDecimal(weightPct, weightPct >= 10 ? 0 : 1)}%`
 }
 
-const SKIP_LABELS: Readonly<Record<string, string>> = {
-  no_text: 'no stored text',
-  or_group: 'OR condition',
-  expression: 'column inside an expression',
-  unresolved_alias: 'unresolved alias',
-  parse_error: 'could not be parsed',
-  unsupported_statement: 'not a query on a table',
-  catalog: 'system catalogs only',
-  not_table: 'not an ordinary table',
-  index_unparsed: 'index definition not readable',
-  small_table: 'small table',
+const SKIP_KEYS = new Map<string, MessageKey>([
+  ['no_text', 'indexes.lib.suggestions.skip.noText'],
+  ['or_group', 'indexes.lib.suggestions.skip.orGroup'],
+  ['expression', 'indexes.lib.suggestions.skip.expression'],
+  ['unresolved_alias', 'indexes.lib.suggestions.skip.unresolvedAlias'],
+  ['parse_error', 'indexes.lib.suggestions.skip.parseError'],
+  ['unsupported_statement', 'indexes.lib.suggestions.skip.unsupportedStatement'],
+  ['catalog', 'indexes.lib.suggestions.skip.catalog'],
+  ['not_table', 'indexes.lib.suggestions.skip.notTable'],
+  ['index_unparsed', 'indexes.lib.suggestions.skip.indexUnparsed'],
+  ['small_table', 'indexes.lib.suggestions.skip.smallTable'],
+])
+
+function skipLabel(reason: string): string {
+  const key = SKIP_KEYS.get(reason)
+  return key === undefined ? reason : translate(key)
 }
 
 /** `Analysed N of M statements. Skipped (a statement can have several reasons): 3 small table, 1 OR condition.` */
@@ -112,10 +120,14 @@ export function coverageText(coverage: SuggestionCoverage): string {
   const skipped = Object.entries(coverage.skipped)
     .filter(([, count]) => count > 0)
     .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
-  const head = `Analysed ${coverage.statements_analysed} of ${coverage.statements_considered} ${coverage.statements_considered === 1 ? 'statement' : 'statements'}.`
+  const head = translate('indexes.lib.suggestions.coverage.head', {
+    count: coverage.statements_considered,
+    analysed: String(coverage.statements_analysed),
+    considered: String(coverage.statements_considered),
+  })
   if (skipped.length === 0) return head
-  const reasons = skipped.map(([reason, count]) => `${count} ${SKIP_LABELS[reason] ?? reason}`)
-  return `${head} Skipped (a statement can have several reasons): ${reasons.join(', ')}.`
+  const reasons = skipped.map(([reason, count]) => `${count} ${skipLabel(reason)}`)
+  return `${head} ${translate('indexes.lib.suggestions.coverage.skipped', { reasons: reasons.join(', ') })}`
 }
 
 /** No statement in the window: the statistics are not collected, as opposed to nothing to suggest. */

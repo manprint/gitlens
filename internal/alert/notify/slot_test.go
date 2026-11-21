@@ -70,3 +70,16 @@ func TestNOTI010_SlotSwapUnderConcurrentSends(t *testing.T) {
 	wg.Wait()
 	require.True(t, slot.Configured())
 }
+
+// NOTI-014 (slot): a Slot keeps its language across a change of channel; ""
+// is the server default, and a channel that is not a Slot has none.
+func TestNOTI014_SlotLanguage(t *testing.T) {
+	s := NewSlot("slack", &recordingChannel{name: "slack"})
+	require.Equal(t, "", s.Locale())
+	s.SetLocale("it")
+	s.Store(&recordingChannel{name: "slack"})
+	require.Equal(t, "it", LocaleOf(s))
+	s.SetLocale("")
+	require.Equal(t, "", LocaleOf(s))
+	require.Equal(t, "", LocaleOf(&recordingChannel{name: "slack"}))
+}

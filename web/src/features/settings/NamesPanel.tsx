@@ -3,8 +3,10 @@ import { useMemo } from 'react'
 import { useRenameCluster, useRenameInstance } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { DataTable, type DataTableToolbar } from '@/components/layout/DataTable'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { EmptyState } from '@/components/state'
+import { useT, type Translate } from '@/i18n/react'
 import { clusterLabel } from '@/lib/names'
 
 import { nameRows, type NameRow } from './nameRows'
@@ -13,35 +15,38 @@ import { RenameDialog } from './RenameDialog'
 type Cluster = Schemas['Cluster']
 type InstanceSummary = Schemas['InstanceSummary']
 
-const NAMES_TOOLBAR: DataTableToolbar<NameRow> = {
-  searchFields: [
-    (row) => row.cluster_name,
-    (row) => row.cluster_id,
-    (row) => row.instance_name,
-    (row) => row.address,
-    (row) => row.role,
-  ],
-  filters: [
-    {
-      id: 'kind',
-      label: 'Row',
-      kind: 'select',
-      options: [
-        { value: 'cluster', label: 'Clusters' },
-        { value: 'instance', label: 'Instances' },
-      ],
-      accessor: (row) => row.kind,
-    },
-  ],
+function namesToolbar(t: Translate): DataTableToolbar<NameRow> {
+  return {
+    searchFields: [
+      (row) => row.cluster_name,
+      (row) => row.cluster_id,
+      (row) => row.instance_name,
+      (row) => row.address,
+      (row) => row.role,
+    ],
+    filters: [
+      {
+        id: 'kind',
+        label: t('settings.names.filterRow'),
+        kind: 'select',
+        options: [
+          { value: 'cluster', label: t('settings.names.filterClusters') },
+          { value: 'instance', label: t('settings.names.filterInstances') },
+        ],
+        accessor: (row) => row.kind,
+      },
+    ],
+  }
 }
 
 /** A name, or the default label the console shows in its place, marked as such. */
 function NameCell({ name, fallback }: { name: string | null; fallback: string }) {
+  const t = useT()
   if (name !== null) return <span title={name}>{name}</span>
   return (
-    <span className="text-muted-foreground" title={`No name: shown as ${fallback}`}>
+    <span className="text-muted-foreground" title={t('settings.names.noNameTitle', { fallback })}>
       {fallback}
-      <span className="sr-only"> (default)</span>
+      <span className="sr-only">{t('settings.names.defaultMark')}</span>
     </span>
   )
 }
@@ -87,11 +92,11 @@ function rowTitle(title: (row: NameRow) => string): (row: unknown) => string {
   return (row) => title(row as NameRow)
 }
 
-function nameColumns() {
+function nameColumns(t: Translate) {
   return [
     {
       accessorKey: 'cluster_label',
-      header: 'Cluster name',
+      header: t('settings.names.colClusterName'),
       meta: {
         width: '16rem',
         truncate: true,
@@ -104,7 +109,7 @@ function nameColumns() {
     },
     {
       accessorKey: 'cluster_id',
-      header: 'Cluster id',
+      header: t('settings.names.colClusterId'),
       meta: {
         width: '13rem',
         truncate: true,
@@ -117,7 +122,7 @@ function nameColumns() {
     },
     {
       accessorKey: 'instance_label',
-      header: 'Instance name',
+      header: t('settings.names.colInstanceName'),
       meta: { width: '16rem', truncate: true, title: rowTitle((row) => row.instance_label ?? '') },
       cell: ({ row }: { row: { original: NameRow } }) =>
         row.original.kind === 'instance' && row.original.address !== null ? (
@@ -126,19 +131,19 @@ function nameColumns() {
     },
     {
       accessorKey: 'address',
-      header: 'Address',
+      header: t('settings.names.colAddress'),
       meta: { width: '16rem', truncate: true },
       cell: ({ row }: { row: { original: NameRow } }) => row.original.address ?? '',
     },
     {
       accessorKey: 'role',
-      header: 'Role',
+      header: t('settings.names.colRole'),
       meta: { width: '7rem' },
       cell: ({ row }: { row: { original: NameRow } }) => row.original.role ?? '',
     },
     {
       id: 'rename',
-      header: 'Rename',
+      header: t('settings.names.colRename'),
       enableSorting: false,
       enableHiding: false,
       meta: { width: '7rem' },
@@ -157,13 +162,19 @@ export interface NamesPanelProps {
  * 11.1 moves it into the `names` tab.
  */
 export function NamesPanel({ clusters, instances }: NamesPanelProps) {
+  const t = useT()
   const rows = useMemo(() => nameRows(clusters, instances), [clusters, instances])
-  const columns = useMemo(() => nameColumns(), [])
+  const columns = useMemo(() => nameColumns(t), [t])
+  const toolbar = useMemo(() => namesToolbar(t), [t])
 
   return (
-    <Section captionId="settings.names" title="Names">
+    <Section
+      actions={<HelpLink anchor="settings#names" label={t('settings.names.title')} />}
+      captionId="settings.names"
+      title={t('settings.names.title')}
+    >
       <DataTable
-        ariaLabel="Cluster and instance names"
+        ariaLabel={t('settings.names.tableLabel')}
         captionId="settings.names-table"
         columns={columns}
         data={rows}
@@ -171,13 +182,13 @@ export function NamesPanel({ clusters, instances }: NamesPanelProps) {
         getRowId={(row) => row.key}
         emptyState={
           <EmptyState
-            description="Clusters and instances appear here once an agent reports them."
-            title="Nothing to name yet"
+            description={t('settings.names.emptyDescription')}
+            title={t('settings.names.emptyTitle')}
           />
         }
         scope="names"
         tableId="names"
-        toolbar={NAMES_TOOLBAR}
+        toolbar={toolbar}
         total={rows.length}
       />
     </Section>

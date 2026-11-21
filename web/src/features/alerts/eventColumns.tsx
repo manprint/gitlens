@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
 
 import type { SimpleColumn } from '@/components/layout/SimpleTable'
+import type { Translate } from '@/i18n/react'
+import { translate } from '@/i18n/store'
 import {
   counterResetCount,
   counterResetScope,
@@ -9,9 +11,10 @@ import {
   type ClusterEvent,
   type EventSeverity,
 } from '@/lib/events'
-import { formatTimestamp } from '@/lib/format'
+import { TIMESTAMP_COLUMN_WIDTH, formatTimestamp } from '@/lib/format'
 import { nameLookup, type NameLookup } from '@/lib/names'
 
+import { severityText } from './AlertRow'
 import { clusterCell, clusterTitle, instanceCell, instanceTitle } from './nameCells'
 
 const NO_NAMES = nameLookup(undefined)
@@ -23,34 +26,34 @@ const SEVERITY_PILL: Record<EventSeverity, string> = {
 }
 
 // A counter_reset_detected event carries the number of counters that reset.
-function counterResetText(event: ClusterEvent): string | null {
+function counterResetText(event: ClusterEvent, t: Translate): string | null {
   const count = counterResetCount(event)
   if (count === null) return null
-  return `${count} ${count === 1 ? 'counter' : 'counters'} reset${counterResetScope(event)}.`
+  return t('alerts.events.counterReset', { count, scope: counterResetScope(event) })
 }
-
-const CARDINALITY_TEXT =
-  'Some metrics were dropped because the instance sent more distinct series than the configured limit.'
 
 // The shared title names the internal budget; this list says what happened.
-function eventTitle(event: ClusterEvent): string {
-  return event.type === 'cardinality_truncated' ? CARDINALITY_TEXT : describeEvent(event.type).title
+function eventTitle(event: ClusterEvent, t: Translate): string {
+  return event.type === 'cardinality_truncated'
+    ? t('alerts.events.cardinality')
+    : describeEvent(event.type).title
 }
 
-const INVARIANT_TEXT = 'Critical invariant violation I-1: cluster identity must never change.'
-
 /** The full text of the details cell, for its `title` when the cell is cut to one line. */
-function detailsText(event: ClusterEvent): string {
+function detailsText(event: ClusterEvent, t: Translate): string {
   const { whatToCheck } = describeEvent(event.type)
+  const unknown = t('shell.topology.unknown')
   if (event.type === 'failover_detected') {
-    return `Old primary: ${payloadInstance(event, 'old_primary') ?? 'Unknown'}; New primary: ${payloadInstance(event, 'new_primary') ?? 'Unknown'}. ${whatToCheck}`
+    const oldPrimary = payloadInstance(event, 'old_primary') ?? unknown
+    const newPrimary = payloadInstance(event, 'new_primary') ?? unknown
+    return `${t('alerts.events.oldPrimary')} ${oldPrimary}; ${t('alerts.events.newPrimary')} ${newPrimary}. ${whatToCheck}`
   }
-  if (event.type === 'cluster_id_changed') return INVARIANT_TEXT
-  const resets = event.type === 'counter_reset_detected' ? counterResetText(event) : null
+  if (event.type === 'cluster_id_changed') return t('alerts.events.invariant')
+  const resets = event.type === 'counter_reset_detected' ? counterResetText(event, t) : null
   return resets ? `${resets} ${whatToCheck}` : whatToCheck
 }
 
-function instanceLink(id: string | null) {
+function instanceLink(id: string | null, t: Translate) {
   return id ? (
     <Link
       className="text-primary font-mono text-xs hover:underline"
@@ -59,16 +62,16 @@ function instanceLink(id: string | null) {
       {id}
     </Link>
   ) : (
-    'Unknown'
+    t('shell.topology.unknown')
   )
 }
 
-function detailsCell(event: ClusterEvent) {
+function detailsCell(event: ClusterEvent, t: Translate) {
   if (event.type === 'failover_detected') {
     return (
       <>
-        Old primary: {instanceLink(payloadInstance(event, 'old_primary'))}; New primary:{' '}
-        {instanceLink(payloadInstance(event, 'new_primary'))}.{' '}
+        {t('alerts.events.oldPrimary')} {instanceLink(payloadInstance(event, 'old_primary'), t)};{' '}
+        {t('alerts.events.newPrimary')} {instanceLink(payloadInstance(event, 'new_primary'), t)}.{' '}
         <span className="text-muted-foreground">{describeEvent(event.type).whatToCheck}</span>
       </>
     )
@@ -76,39 +79,43 @@ function detailsCell(event: ClusterEvent) {
   if (event.type === 'cluster_id_changed') {
     return (
       <span className="text-destructive font-semibold" role="alert">
-        {INVARIANT_TEXT}
+        {t('alerts.events.invariant')}
       </span>
     )
   }
-  return <span className="text-muted-foreground">{detailsText(event)}</span>
+  return <span className="text-muted-foreground">{detailsText(event, t)}</span>
 }
 
 /**
  * The columns of the fleet event list: one line per event from 1600 px (D26),
  * newest first, the raw type always shown so an unknown type stays visible.
  */
-export function eventColumns(names: NameLookup = NO_NAMES): SimpleColumn<ClusterEvent>[] {
+export function eventColumns(
+  names: NameLookup = NO_NAMES,
+  t: Translate = translate,
+): SimpleColumn<ClusterEvent>[] {
+  const unknown = t('shell.topology.unknown')
   return [
     {
       id: 'time',
-      header: 'Time',
-      width: '12.5rem',
+      header: t('alerts.column.time'),
+      width: TIMESTAMP_COLUMN_WIDTH,
       className: 'whitespace-nowrap',
       sortValue: (event) => Date.parse(event.ts),
       firstDirection: 'desc',
-      cell: (event) => <time dateTime={event.ts}>{formatTimestamp(event.ts, 'UTC')}</time>,
+      cell: (event) => <time dateTime={event.ts}>{formatTimestamp(event.ts)}</time>,
     },
     {
       id: 'event',
-      header: 'Event',
+      header: t('alerts.column.event'),
       rowHeader: true,
       width: '16rem',
-      truncate: eventTitle,
-      cell: eventTitle,
+      truncate: (event) => eventTitle(event, t),
+      cell: (event) => eventTitle(event, t),
     },
     {
       id: 'severity',
-      header: 'Severity',
+      header: t('alerts.column.severity'),
       width: '6.5rem',
       cell: (event) => {
         const { severity } = describeEvent(event.type)
@@ -116,14 +123,14 @@ export function eventColumns(names: NameLookup = NO_NAMES): SimpleColumn<Cluster
           <span
             className={`rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold tracking-wide uppercase ${SEVERITY_PILL[severity]}`}
           >
-            {severity}
+            {severityText(severity, t)}
           </span>
         )
       },
     },
     {
       id: 'type',
-      header: 'Type',
+      header: t('alerts.column.type'),
       width: '14rem',
       sortValue: (event) => event.type,
       truncate: (event) => event.type,
@@ -131,24 +138,24 @@ export function eventColumns(names: NameLookup = NO_NAMES): SimpleColumn<Cluster
     },
     {
       id: 'cluster',
-      header: 'Cluster',
+      header: t('alerts.column.cluster'),
       width: '10rem',
-      truncate: (event) => clusterTitle(event.cluster_id, 'Unknown'),
-      cell: (event) => clusterCell(names, event.cluster_id, 'Unknown'),
+      truncate: (event) => clusterTitle(event.cluster_id, unknown),
+      cell: (event) => clusterCell(names, event.cluster_id, unknown),
     },
     {
       id: 'instance',
-      header: 'Instance',
+      header: t('alerts.column.instance'),
       width: '12rem',
       truncate: (event) => instanceTitle(names, event.instance_id, '—'),
       cell: (event) => instanceCell(names, event.instance_id, '—'),
     },
     {
       id: 'details',
-      header: 'Details',
+      header: t('alerts.column.details'),
       help: 'events.details',
-      truncate: detailsText,
-      cell: detailsCell,
+      truncate: (event) => detailsText(event, t),
+      cell: (event) => detailsCell(event, t),
     },
   ]
 }

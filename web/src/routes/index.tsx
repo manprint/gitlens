@@ -5,6 +5,8 @@ import type { RouteObject } from 'react-router-dom'
 import App from '@/App'
 import LoginPage from '@/features/auth/LoginPage'
 import RequireSession from '@/features/auth/RequireSession'
+import { messages as english, type MessageKey } from '@/i18n/messages/en'
+import { useT } from '@/i18n/react'
 
 import { NotFoundPage, RouteErrorBoundary } from './eager-pages'
 
@@ -42,6 +44,7 @@ const RulesPage = lazy(() => import('./pages').then(({ RulesPage: Page }) => ({ 
 const SilencesPage = lazy(() =>
   import('./pages').then(({ SilencesPage: Page }) => ({ default: Page })),
 )
+const HelpPage = lazy(() => import('./pages').then(({ HelpPage: Page }) => ({ default: Page })))
 const SettingsPage = lazy(() =>
   import('./pages').then(({ SettingsPage: Page }) => ({ default: Page })),
 )
@@ -51,8 +54,13 @@ interface PageSkeletonProps {
 }
 
 function PageSkeleton({ surface }: PageSkeletonProps) {
+  const t = useT()
   return (
-    <section aria-busy="true" aria-label={`Loading ${surface}`} className="animate-pulse space-y-6">
+    <section
+      aria-busy="true"
+      aria-label={t('auth.route.loading', { surface })}
+      className="animate-pulse space-y-6"
+    >
       <div className="space-y-2">
         <div className="bg-muted h-7 w-64 rounded-md" />
         <div className="bg-muted h-4 w-96 max-w-full rounded-md" />
@@ -63,14 +71,15 @@ function PageSkeleton({ surface }: PageSkeletonProps) {
         ))}
       </div>
       <div className="bg-muted h-80 rounded-xl" />
-      <p className="sr-only">Loading {surface}…</p>
+      <p className="sr-only">{t('auth.route.loadingDots', { surface })}</p>
     </section>
   )
 }
 
-function LazyRoute({ page: Page, surface }: { page: LazyPage; surface: string }) {
+function LazyRoute({ page: Page, surfaceKey }: { page: LazyPage; surfaceKey: MessageKey }) {
+  const t = useT()
   return (
-    <Suspense fallback={<PageSkeleton surface={surface} />}>
+    <Suspense fallback={<PageSkeleton surface={t(surfaceKey)} />}>
       <Page />
     </Suspense>
   )
@@ -79,45 +88,52 @@ function LazyRoute({ page: Page, surface }: { page: LazyPage; surface: string })
 interface RouteDefinition {
   element: ReactElement
   path: string
+  /** English name, for route tests; the console shows `surfaceKey`. */
   surface: string
+  surfaceKey: MessageKey
 }
 
-function lazyRoute(path: string, surface: string, page: LazyPage): RouteDefinition {
-  return { element: <LazyRoute page={page} surface={surface} />, path, surface }
+function lazyRoute(path: string, surfaceKey: MessageKey, page: LazyPage): RouteDefinition {
+  return {
+    element: <LazyRoute page={page} surfaceKey={surfaceKey} />,
+    path,
+    surface: english[surfaceKey],
+    surfaceKey,
+  }
 }
 
 const loginRoute: RouteDefinition = {
   element: <LoginPage />,
   path: '/login',
-  surface: 'Sign in',
+  surface: english['auth.surface.signIn'],
+  surfaceKey: 'auth.surface.signIn',
 }
 
 const dataRoutes: RouteDefinition[] = [
-  lazyRoute('/', 'Fleet overview', FleetOverviewPage),
-  lazyRoute('/queries', 'Slowest queries', SlowQueriesPage),
-  lazyRoute('/indexes', 'Index analysis', IndexAnalysisPage),
-  lazyRoute('/clusters/:clusterId', 'Cluster detail', ClusterDetailPage),
-  lazyRoute('/instances/:instanceId', 'Instance detail', InstanceDetailPage),
-  lazyRoute('/instances/:instanceId/ash', 'ASH and wait analysis', AshPage),
-  lazyRoute('/instances/:instanceId/queries', 'Query inspector', QueryInspectorPage),
-  lazyRoute(
-    '/instances/:instanceId/queries/:queryid',
-    'Query detail and plan history',
-    QueryDetailPage,
-  ),
-  lazyRoute('/instances/:instanceId/locks', 'Locks and activity', LocksPage),
-  lazyRoute('/findings', 'Advisor findings', FindingsPage),
-  lazyRoute('/alerts', 'Alerts and events', AlertsPage),
-  lazyRoute('/events', 'Fleet event timeline', EventsPage),
-  lazyRoute('/alerts/rules', 'Alert rules', RulesPage),
-  lazyRoute('/alerts/silences', 'Alert silences', SilencesPage),
-  lazyRoute('/settings', 'Settings and inventory', SettingsPage),
+  lazyRoute('/', 'auth.surface.fleet', FleetOverviewPage),
+  lazyRoute('/queries', 'auth.surface.slowQueries', SlowQueriesPage),
+  lazyRoute('/indexes', 'auth.surface.indexes', IndexAnalysisPage),
+  lazyRoute('/clusters/:clusterId', 'auth.surface.cluster', ClusterDetailPage),
+  lazyRoute('/instances/:instanceId', 'auth.surface.instance', InstanceDetailPage),
+  lazyRoute('/instances/:instanceId/ash', 'auth.surface.ash', AshPage),
+  lazyRoute('/instances/:instanceId/queries', 'auth.surface.queryInspector', QueryInspectorPage),
+  lazyRoute('/instances/:instanceId/queries/:queryid', 'auth.surface.queryDetail', QueryDetailPage),
+  lazyRoute('/instances/:instanceId/locks', 'auth.surface.locks', LocksPage),
+  lazyRoute('/findings', 'auth.surface.findings', FindingsPage),
+  lazyRoute('/alerts', 'auth.surface.alerts', AlertsPage),
+  lazyRoute('/events', 'auth.surface.events', EventsPage),
+  lazyRoute('/alerts/rules', 'auth.surface.rules', RulesPage),
+  lazyRoute('/alerts/silences', 'auth.surface.silences', SilencesPage),
+  lazyRoute('/settings', 'auth.surface.settings', SettingsPage),
+  lazyRoute('/help', 'auth.surface.help', HelpPage),
+  lazyRoute('/help/:topicId', 'auth.surface.helpTopic', HelpPage),
 ]
 
 const notFoundRoute: RouteDefinition = {
   element: <NotFoundPage />,
   path: '*',
-  surface: 'Not found',
+  surface: english['auth.surface.notFound'],
+  surfaceKey: 'auth.surface.notFound',
 }
 
 /** The normative phase-7 route table; additions require a STATE deviation. */

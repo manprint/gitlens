@@ -1,4 +1,4 @@
-import { act, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { EChartsOption } from 'echarts'
@@ -34,7 +34,7 @@ beforeEach(() => {
 
 describe('AshChart', () => {
   it('UI-ASH-015 passes the built ASH option through the accessible wrapper', () => {
-    renderWithProviders(<AshChart cpuCount={4} foldedCount={2} series={series} />)
+    renderWithProviders(<AshChart foldedCount={2} series={series} />)
 
     const rendered = echartsMock.render.mock.calls[0]?.[0] as { option?: EChartsOption }
     expect(rendered.option).toEqual(
@@ -48,24 +48,19 @@ describe('AshChart', () => {
     ).toHaveTextContent('Average active backends')
   })
 
-  it('UI-ASH-016 writes an absolute range after brushing', () => {
+  it('UI-ASH-016 has no wheel zoom and leaves the page range alone', () => {
     const result = renderWithProviders(<AshChart series={series} />, {
       route: '/ash?range=1h',
     })
     const props = echartsMock.render.mock.calls[0]?.[0] as {
+      option?: EChartsOption
       onEvents?: Record<string, (event: unknown) => void>
     }
 
-    act(() => {
-      props.onEvents?.datazoom?.({
-        startValue: '2026-09-01T10:00:00Z',
-        endValue: '2026-09-01T10:01:00Z',
-      })
-    })
-
-    const params = new URLSearchParams(result.router.state.location.search)
-    expect(params.get('from')).toBe('2026-09-01T10:00:00.000Z')
-    expect(params.get('to')).toBe('2026-09-01T10:01:00.000Z')
-    expect(params.get('range')).toBeNull()
+    expect((props.option?.dataZoom as { type: string }[]).map((zoom) => zoom.type)).toEqual([
+      'slider',
+    ])
+    expect(props.onEvents?.datazoom).toBeUndefined()
+    expect(result.router.state.location.search).toBe('?range=1h')
   })
 })

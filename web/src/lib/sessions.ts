@@ -1,3 +1,5 @@
+import { translate } from '@/i18n/store'
+
 import { formatDuration } from './format'
 import { isWaiting, sessionKey, type LockNode, type LockPID } from './locks'
 import type { Accessor, Comparable, FilterSpec, SearchField } from './tableControls'
@@ -178,33 +180,40 @@ export const SESSION_SEARCH_FIELDS: readonly SearchField<Session>[] = [
   (session) => sessionQueryText(session)?.text ?? null,
 ]
 
-/** Filter specs of the toolbar; the two "only" switches keep the rows that match. */
-export const SESSION_FILTERS: readonly FilterSpec<Session>[] = [
-  { id: 'state', label: 'State', kind: 'select', accessor: sessionState },
-  {
-    id: 'wait',
-    label: 'Wait event type',
-    kind: 'select',
-    accessor: (s) => text(s.wait_event_type),
-  },
-  { id: 'database', label: 'Database', kind: 'select', accessor: sessionDatabase },
-  {
-    id: 'waiting',
-    label: 'Waiting',
-    kind: 'select',
-    options: [{ value: 'only', label: 'Waiting only' }],
-    accessor: (session) => isWaiting(session),
-    predicate: (session, value) => value !== 'only' || isWaiting(session),
-  },
-  {
-    id: 'idle-tx',
-    label: 'Idle in transaction',
-    kind: 'select',
-    options: [{ value: 'only', label: 'Idle in transaction only' }],
-    accessor: isIdleInTransaction,
-    predicate: (session, value) => value !== 'only' || isIdleInTransaction(session),
-  },
-]
+/** Filter specs of the toolbar, in the console language; the two "only" switches keep the rows that match. */
+export function sessionFilters(): readonly FilterSpec<Session>[] {
+  return [
+    { id: 'state', label: translate('locks.filter.state'), kind: 'select', accessor: sessionState },
+    {
+      id: 'wait',
+      label: translate('locks.filter.waitEventType'),
+      kind: 'select',
+      accessor: (s) => text(s.wait_event_type),
+    },
+    {
+      id: 'database',
+      label: translate('locks.filter.database'),
+      kind: 'select',
+      accessor: sessionDatabase,
+    },
+    {
+      id: 'waiting',
+      label: translate('locks.filter.waiting'),
+      kind: 'select',
+      options: [{ value: 'only', label: translate('locks.filter.waitingOnly') }],
+      accessor: (session) => isWaiting(session),
+      predicate: (session, value) => value !== 'only' || isWaiting(session),
+    },
+    {
+      id: 'idle-tx',
+      label: translate('locks.filter.idleInTransaction'),
+      kind: 'select',
+      options: [{ value: 'only', label: translate('locks.filter.idleInTransactionOnly') }],
+      accessor: isIdleInTransaction,
+      predicate: (session, value) => value !== 'only' || isIdleInTransaction(session),
+    },
+  ]
+}
 
 /** The count of one origin in a group list; 0 when the list does not name it. */
 export function countOf(rows: readonly ConnectionCount[], key: string): number {
@@ -242,7 +251,7 @@ export function withShare(rows: readonly ConnectionCount[]): ShareRow[] {
 
 /** The label of a key: the empty name of an application, user or database is stated. */
 export function connectionKeyLabel(key: string): string {
-  return key === '' ? '(empty name)' : key
+  return key === '' ? translate('locks.connections.emptyName') : key
 }
 
 export const CONNECTION_GROUPS: readonly { id: ConnectionGroupId; label: string; noun: string }[] =

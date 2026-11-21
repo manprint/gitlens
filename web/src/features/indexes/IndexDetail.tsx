@@ -7,19 +7,17 @@ import { buildMetricOption, type MetricUnit } from '@/components/charts/metric.o
 import { TimeSeriesChart } from '@/components/charts/TimeSeriesChart'
 import { Badge } from '@/components/ui/badge'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { useT, type Translate } from '@/i18n/react'
 import { SAMPLE_SECONDS, stepFor, stepParam } from '@/lib/chartStep'
 import { formatRelative } from '@/lib/format'
 import type { IndexRow } from '@/lib/indexAnalysis'
 import { queryWindowOf } from '@/lib/timerange'
 
-/** Both charts of an index share their pointer and zoom. */
-const INDEX_CHART_GROUP = 'index-history'
-
 /** The index statistics are sampled every 5 minutes: a bucket is never narrower than two samples. */
 const HISTORY_STEP_FLOOR = 2 * SAMPLE_SECONDS.indexes!
 
 interface ChartSpec {
-  title: string
+  titleKey: 'indexes.indexDetail.indexScans' | 'indexes.indexDetail.indexSize'
   unitHint: string
   unit: MetricUnit
   value: 'idx_scan_rate' | 'index_bytes'
@@ -27,27 +25,27 @@ interface ChartSpec {
 
 const CHARTS: readonly ChartSpec[] = [
   {
-    title: 'Index scans',
+    titleKey: 'indexes.indexDetail.indexScans',
     unitHint: 'per second',
     unit: 'count',
     value: 'idx_scan_rate',
   },
   {
-    title: 'Index size',
+    titleKey: 'indexes.indexDetail.indexSize',
     unitHint: 'bytes',
     unit: 'bytes',
     value: 'index_bytes',
   },
 ]
 
-function lastScanText(row: IndexRow): string {
+function lastScanText(row: IndexRow, t: Translate): string {
   if (row.lastScanStatus === 'scanned' && row.lastScanAt !== null) {
-    return `Last scan ${formatRelative(row.lastScanAt, new Date())}.`
+    return t('indexes.indexDetail.lastScan', { when: formatRelative(row.lastScanAt, new Date()) })
   }
   if (row.lastScanStatus === 'never_since_reset') {
-    return 'No scan since the statistics were last reset.'
+    return t('indexes.indexDetail.noScanSinceReset')
   }
-  return 'The last scan time is not available (PostgreSQL 16 or later reports it).'
+  return t('indexes.indexDetail.lastScanUnavailable')
 }
 
 /**
@@ -56,6 +54,8 @@ function lastScanText(row: IndexRow): string {
  * range, which never exceeds the 30 days the endpoint answers.
  */
 export function IndexDetail({ instanceId, row }: { instanceId: string; row: IndexRow }) {
+  const t = useT()
+
   const { range } = useTimeRange()
   const window = useMemo(() => queryWindowOf(range), [range])
   const stepSeconds = Math.max(
@@ -78,7 +78,7 @@ export function IndexDetail({ instanceId, row }: { instanceId: string; row: Inde
 
   const seriesOf = (chart: ChartSpec) => [
     {
-      name: chart.title,
+      name: t(chart.titleKey),
       points: (points ?? []).map((point) => ({ ts: point.ts, value: point[chart.value] })),
     },
   ]
@@ -95,7 +95,7 @@ export function IndexDetail({ instanceId, row }: { instanceId: string; row: Inde
       range,
       state,
       stepSeconds: query.data?.step_seconds ?? stepSeconds,
-      title: `${chart.title} of ${row.name}`,
+      title: t('indexes.indexDetail.chartTitle', { title: t(chart.titleKey), name: row.name }),
       unitHint: chart.unitHint,
       ...(failure === null ? {} : { error: failure, onRetry: () => void query.refetch() }),
     }
@@ -104,12 +104,16 @@ export function IndexDetail({ instanceId, row }: { instanceId: string; row: Inde
     const named = seriesOf(chart)
     return (
       <TimeSeriesChart
-        ariaLabel={`${chart.title} of ${row.name}`}
-        dataTableLabel={`${chart.title} of ${row.name} data`}
-        group={INDEX_CHART_GROUP}
+        ariaLabel={t('indexes.indexDetail.chartTitle', {
+          title: t(chart.titleKey),
+          name: row.name,
+        })}
+        dataTableLabel={t('indexes.indexDetail.chartDataTitle', {
+          title: t(chart.titleKey),
+          name: row.name,
+        })}
         height={220}
         option={buildMetricOption(named, {
-          annotateResets: false,
           unit: chart.unit,
           stepSeconds,
         })}
@@ -122,14 +126,18 @@ export function IndexDetail({ instanceId, row }: { instanceId: string; row: Inde
     <div className="space-y-3" data-testid="index-detail">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Badge variant={row.valid ? 'outline' : 'destructive'}>
-          {row.valid ? 'Valid' : 'Invalid'}
+          {row.valid ? t('indexes.indexDetail.valid') : t('indexes.indexDetail.invalid')}
         </Badge>
-        {row.primary ? <Badge variant="outline">Primary key</Badge> : null}
-        {row.unique && !row.primary ? <Badge variant="outline">Unique</Badge> : null}
-        <span className="text-muted-foreground">{lastScanText(row)}</span>
+        {row.primary ? (
+          <Badge variant="outline">{t('indexes.indexDetail.primaryKey')}</Badge>
+        ) : null}
+        {row.unique && !row.primary ? (
+          <Badge variant="outline">{t('indexes.indexDetail.unique')}</Badge>
+        ) : null}
+        <span className="text-muted-foreground">{lastScanText(row, t)}</span>
       </div>
       {noHistory ? (
-        <p className="text-muted-foreground text-sm">No history yet (collected every 5 min).</p>
+        <p className="text-muted-foreground text-sm">{t('indexes.indexDetail.noHistory')}</p>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           <ChartCard captionId="index.history-scans" {...cardProps(CHARTS[0]!)}>

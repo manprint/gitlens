@@ -2,6 +2,7 @@ import { createContext, useContext, useId, useMemo, useState } from 'react'
 
 import { useRetention, useRetentionPreview, useSetRetention } from '@/api/queries'
 import { DataTable } from '@/components/layout/DataTable'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -17,12 +18,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT, type Translate } from '@/i18n/react'
 import {
   confirmationText,
   isShortening,
   previewSummary,
-  RETENTION_FAMILY_LABELS,
   retentionErrorMessage,
+  retentionFamilyLabel,
   validateRetentionDays,
   type RetentionFamily,
   type RetentionFamilyName,
@@ -31,12 +34,10 @@ import {
 
 /** What each control of a row changes (I-16), referenced by its `aria-describedby`. */
 const RETENTION_HELP = {
-  days: 'How many days of history each metrics family keeps. History older than this is deleted by the policy; a longer value keeps more.',
-  preview:
-    'Preview counts the chunks and bytes this value would delete now. It changes nothing; Apply is enabled once the preview matches the value typed.',
-  apply:
-    'Apply changes the retention of the policy, which keeps its daily schedule. A longer retention applies at once; a shorter one asks for confirmation. Deletion is not immediate: the policy drops whole chunks older than its retention at its next daily run, up to a day later.',
-} as const
+  days: 'settings.retention.help.days',
+  preview: 'settings.retention.help.preview',
+  apply: 'settings.retention.help.apply',
+} as const satisfies Record<string, MessageKey>
 
 /** A preview, with the live retention it was computed against. */
 interface RowPreview {
@@ -89,37 +90,45 @@ function initialState(row: RetentionFamily): RowState {
 function FamilyCell({ row }: { row: RetentionFamily }) {
   return (
     <span className="block truncate font-medium" title={row.hypertable}>
-      {RETENTION_FAMILY_LABELS[row.family]}
+      {retentionFamilyLabel(row.family)}
     </span>
   )
 }
 
 function CurrentCell({ row }: { row: RetentionFamily }) {
+  const t = useT()
   if (row.unsupported_policy !== undefined) {
     return (
       <span className="flex flex-wrap items-center gap-2" title={row.unsupported_policy}>
-        <span>Set outside pglens</span>
-        <Badge variant="outline">custom</Badge>
+        <span>{t('settings.retention.setOutside')}</span>
+        <Badge variant="outline">{t('settings.retention.sourceCustom')}</Badge>
       </span>
     )
   }
   if (row.days === null) {
     return (
       <span className="flex flex-wrap items-center gap-2">
-        <span>No policy: keeps all history</span>
-        <Badge variant="outline">custom</Badge>
+        <span>{t('settings.retention.noPolicy')}</span>
+        <Badge variant="outline">{t('settings.retention.sourceCustom')}</Badge>
       </span>
     )
   }
   return (
     <span className="flex flex-wrap items-center gap-2">
-      <span className="tabular-nums">{row.days} days</span>
-      <Badge variant={row.source === 'default' ? 'secondary' : 'outline'}>{row.source}</Badge>
+      <span className="tabular-nums">{t('settings.retention.days', { days: row.days })}</span>
+      <Badge variant={row.source === 'default' ? 'secondary' : 'outline'}>
+        {t(
+          row.source === 'default'
+            ? 'settings.retention.sourceDefault'
+            : 'settings.retention.sourceCustom',
+        )}
+      </Badge>
     </span>
   )
 }
 
 function DaysCell({ row }: { row: RetentionFamily }) {
+  const t = useT()
   const actions = useRetentionActions()
   const state = actions.state(row)
   const id = useId().replaceAll(':', '')
@@ -136,7 +145,7 @@ function DaysCell({ row }: { row: RetentionFamily }) {
             .filter(Boolean)
             .join(' ')}
           aria-invalid={validation.ok ? undefined : true}
-          aria-label={`New retention of ${row.family} in days`}
+          aria-label={t('settings.retention.newDaysLabel', { family: row.family })}
           autoComplete="off"
           className="h-8 w-24"
           disabled={state.pending === 'apply' || row.unsupported_policy !== undefined}
@@ -145,7 +154,7 @@ function DaysCell({ row }: { row: RetentionFamily }) {
           value={state.draft}
         />
         <span className="text-muted-foreground text-xs whitespace-nowrap" id={rangeId}>
-          {row.min_days}–{row.max_days} days
+          {t('settings.retention.range', { min: row.min_days, max: row.max_days })}
         </span>
       </div>
     </div>
@@ -153,6 +162,7 @@ function DaysCell({ row }: { row: RetentionFamily }) {
 }
 
 function PreviewCell({ row }: { row: RetentionFamily }) {
+  const t = useT()
   const actions = useRetentionActions()
   const state = actions.state(row)
   const validation = validateRetentionDays(state.draft, row.min_days, row.max_days)
@@ -162,14 +172,16 @@ function PreviewCell({ row }: { row: RetentionFamily }) {
     <div className="flex min-w-0 items-center gap-3">
       <Button
         aria-describedby={actions.helpIds.preview}
-        aria-label={`Preview ${row.family}`}
+        aria-label={t('settings.retention.previewLabel', { family: row.family })}
         disabled={!validation.ok || state.pending !== null || unsupported}
         onClick={() => actions.preview(row)}
         size="xs"
         type="button"
         variant="outline"
       >
-        {state.pending === 'preview' ? 'Previewing…' : 'Preview'}
+        {state.pending === 'preview'
+          ? t('settings.retention.previewing')
+          : t('settings.retention.preview')}
       </Button>
       <div className="min-w-0 text-sm">
         {/* The days' validation message sits here, not under the input, so a
@@ -183,7 +195,7 @@ function PreviewCell({ row }: { row: RetentionFamily }) {
         </span>
         {unsupported ? (
           <span className="text-muted-foreground">
-            {row.unsupported_policy}: change it with TimescaleDB.
+            {t('settings.retention.unsupportedChange', { policy: row.unsupported_policy ?? '' })}
           </span>
         ) : null}
         {state.preview ? (
@@ -203,6 +215,7 @@ function PreviewCell({ row }: { row: RetentionFamily }) {
 }
 
 function ApplyCell({ row }: { row: RetentionFamily }) {
+  const t = useT()
   const actions = useRetentionActions()
   const state = actions.state(row)
   const validation = validateRetentionDays(state.draft, row.min_days, row.max_days)
@@ -216,58 +229,71 @@ function ApplyCell({ row }: { row: RetentionFamily }) {
   return (
     <Button
       aria-describedby={actions.helpIds.apply}
-      aria-label={`Apply ${row.family}`}
+      aria-label={t('settings.retention.applyLabel', { family: row.family })}
       disabled={!ready || state.pending !== null}
       onClick={() => actions.apply(row)}
       size="xs"
       type="button"
     >
-      {state.pending === 'apply' ? 'Applying…' : 'Apply'}
+      {state.pending === 'apply' ? t('settings.retention.applying') : t('settings.retention.apply')}
     </Button>
   )
 }
 
-const RETENTION_COLUMNS = [
-  {
-    accessorKey: 'family',
-    header: 'Family',
-    meta: { width: '17rem' },
-    cell: ({ row }: { row: { original: RetentionFamily } }) => <FamilyCell row={row.original} />,
-  },
-  {
-    accessorKey: 'days',
-    header: 'Retention now',
-    meta: { width: '13rem' },
-    cell: ({ row }: { row: { original: RetentionFamily } }) => <CurrentCell row={row.original} />,
-  },
-  {
-    id: 'new-days',
-    header: 'New retention',
-    enableSorting: false,
-    enableHiding: false,
-    meta: { width: '10rem' },
-    cell: ({ row }: { row: { original: RetentionFamily } }) => <DaysCell row={row.original} />,
-  },
-  {
-    id: 'preview',
-    header: 'Preview',
-    enableSorting: false,
-    enableHiding: false,
-    cell: ({ row }: { row: { original: RetentionFamily } }) => <PreviewCell row={row.original} />,
-  },
-  {
-    id: 'apply',
-    header: 'Apply',
-    enableSorting: false,
-    enableHiding: false,
-    meta: { width: '7rem' },
-    cell: ({ row }: { row: { original: RetentionFamily } }) => <ApplyCell row={row.original} />,
-  },
-]
+function retentionColumns(t: Translate) {
+  return [
+    {
+      accessorKey: 'family',
+      header: t('settings.retention.colFamily'),
+      meta: { width: '17rem' },
+      cell: ({ row }: { row: { original: RetentionFamily } }) => <FamilyCell row={row.original} />,
+    },
+    {
+      accessorKey: 'days',
+      header: t('settings.retention.colNow'),
+      meta: { width: '13rem' },
+      cell: ({ row }: { row: { original: RetentionFamily } }) => <CurrentCell row={row.original} />,
+    },
+    {
+      id: 'new-days',
+      header: t('settings.retention.colNew'),
+      enableSorting: false,
+      enableHiding: false,
+      meta: { width: '10rem' },
+      cell: ({ row }: { row: { original: RetentionFamily } }) => <DaysCell row={row.original} />,
+    },
+    {
+      id: 'preview',
+      header: t('settings.retention.colPreview'),
+      enableSorting: false,
+      enableHiding: false,
+      cell: ({ row }: { row: { original: RetentionFamily } }) => <PreviewCell row={row.original} />,
+    },
+    {
+      id: 'apply',
+      header: t('settings.retention.colApply'),
+      enableSorting: false,
+      enableHiding: false,
+      meta: { width: '7rem' },
+      cell: ({ row }: { row: { original: RetentionFamily } }) => <ApplyCell row={row.original} />,
+    },
+  ]
+}
 
 interface Confirming {
   row: RetentionFamily
   preview: RetentionPreview
+}
+
+/** The change the confirmation names: a first setting, or a move from one value to another. */
+function changeText(confirming: Confirming | null, t: Translate): string {
+  if (confirming?.row.days === null || confirming === null) {
+    return t('settings.retention.changeFirst')
+  }
+  return t('settings.retention.changeFromTo', {
+    from: confirming.row.days,
+    to: confirming.preview.days,
+  })
 }
 
 /** Whether the row's typed value still reads as `days`. */
@@ -284,6 +310,7 @@ function draftIs(row: RetentionFamily, state: RowState, days: number): boolean {
  * (I-11).
  */
 export function RetentionPanel() {
+  const t = useT()
   const retentionQuery = useRetention()
   const previewMutation = useRetentionPreview()
   const setMutation = useSetRetention()
@@ -300,6 +327,7 @@ export function RetentionPanel() {
     [baseId],
   )
   const confirmId = `${baseId}-confirm`
+  const columns = useMemo(() => retentionColumns(t), [t])
 
   const stateOf = (row: RetentionFamily) => rows[row.family] ?? initialState(row)
   const update = (row: RetentionFamily, patch: Partial<RowState>) =>
@@ -328,7 +356,7 @@ export function RetentionPanel() {
       })
       update(row, {
         ...initialState(saved),
-        saved: `Applied: ${saved.days ?? days} days.`,
+        saved: t('settings.retention.applied', { days: saved.days ?? days }),
       })
     } catch (error) {
       // The row keeps showing the live value and the typed one (I-11); the
@@ -377,31 +405,36 @@ export function RetentionPanel() {
   }
 
   return (
-    <Section captionId="settings.retention" id="settings-retention" title="Data retention">
+    <Section
+      actions={<HelpLink anchor="settings#retention" label={t('settings.retention.title')} />}
+      captionId="settings.retention"
+      id="settings-retention"
+      title={t('settings.retention.title')}
+    >
       <div className="space-y-4 min-[1600px]:space-y-3">
         <ul className="text-muted-foreground grid gap-1 text-sm leading-relaxed min-[1600px]:grid-cols-3 min-[1600px]:gap-4">
-          <li id={helpIds.days}>{RETENTION_HELP.days}</li>
-          <li id={helpIds.preview}>{RETENTION_HELP.preview}</li>
-          <li id={helpIds.apply}>{RETENTION_HELP.apply}</li>
+          <li id={helpIds.days}>{t(RETENTION_HELP.days)}</li>
+          <li id={helpIds.preview}>{t(RETENTION_HELP.preview)}</li>
+          <li id={helpIds.apply}>{t(RETENTION_HELP.apply)}</li>
         </ul>
         {retentionQuery.error ? (
           <ErrorState
-            endpoint="data retention"
+            endpoint={t('settings.retention.endpoint')}
             failure={retentionQuery.error}
             onRetry={() => void retentionQuery.refetch()}
           />
         ) : retentionQuery.isPending ? (
           <p aria-busy="true" role="status">
-            Loading data retention…
+            {t('settings.retention.loading')}
           </p>
         ) : (
           <RetentionContext.Provider value={actions}>
             <DataTable
-              ariaLabel="Data retention by metrics family"
+              ariaLabel={t('settings.retention.tableLabel')}
               captionId="settings.retention-table"
-              columns={RETENTION_COLUMNS}
+              columns={columns}
               data={retentionQuery.data}
-              emptyState={<p>No metrics family was reported.</p>}
+              emptyState={<p>{t('settings.retention.empty')}</p>}
               getRowId={(row) => row.family}
               scope="families"
             />
@@ -418,18 +451,16 @@ export function RetentionPanel() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Shorten the retention of {confirming?.row.family ?? 'this family'}?
+              {t('settings.retention.shortenTitle', {
+                family: confirming?.row.family ?? t('settings.retention.thisFamily'),
+              })}
             </DialogTitle>
             <DialogDescription>
               {confirming ? confirmationText(confirming.preview) : ''}
             </DialogDescription>
           </DialogHeader>
           <Callout variant="destructive">
-            Deleted history cannot be restored from pglens. Retention{' '}
-            {confirming?.row.days === null || confirming === null
-              ? 'is set for the first time'
-              : `goes from ${confirming.row.days} to ${confirming.preview.days} days`}
-            .
+            {t('settings.retention.deleteWarning', { change: changeText(confirming, t) })}
           </Callout>
           <label className="flex items-start gap-2 text-sm" htmlFor={confirmId}>
             <input
@@ -439,14 +470,12 @@ export function RetentionPanel() {
               onChange={(event) => setAcknowledged(event.target.checked)}
               type="checkbox"
             />
-            <span>
-              I understand that this history is deleted permanently at the next policy run.
-            </span>
+            <span>{t('settings.retention.acknowledge')}</span>
           </label>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t('settings.retention.cancel')}
               </Button>
             </DialogClose>
             <Button
@@ -455,7 +484,7 @@ export function RetentionPanel() {
               type="button"
               variant="destructive"
             >
-              Delete history and apply
+              {t('settings.retention.confirmDelete')}
             </Button>
           </DialogFooter>
         </DialogContent>

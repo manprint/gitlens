@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   clusterReadiness,
+  readinessFixPath,
   groupByChannel,
   readinessBadgeLabel,
   readinessBadgeText,
@@ -44,8 +45,19 @@ describe('readiness helpers', () => {
       { instance_id: 'a', level: 'full' as const, warnings: 0, infos: 1 },
       { instance_id: 'b', level: 'partial' as const, warnings: 2, infos: 0 },
     ]
-    expect(clusterReadiness(['a', 'b'], rows)).toEqual({ level: 'partial', warnings: 2, infos: 1 })
-    expect(clusterReadiness(['a'], rows)).toEqual({ level: 'full', warnings: 0, infos: 1 })
+    expect(clusterReadiness(['a', 'b'], rows)).toEqual({
+      level: 'partial',
+      warnings: 2,
+      infos: 1,
+      fixInstanceId: 'b',
+    })
+    expect(clusterReadiness(['a'], rows)).toEqual({
+      level: 'full',
+      warnings: 0,
+      infos: 1,
+      fixInstanceId: null,
+    })
+    expect(readinessFixPath('b/1')).toBe('/instances/b%2F1?section=readiness')
     expect(clusterReadiness(['z'], rows)).toBeNull()
     expect(clusterReadiness(['a'], undefined)).toBeNull()
   })

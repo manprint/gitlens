@@ -85,7 +85,8 @@ export const qk = {
     type: string | undefined,
     window: QueryWindow,
     limit?: number,
-  ) => ['getEvents', clusterId, type, queryWindowKey(window), limit] as const,
+    instanceId?: string,
+  ) => ['getEvents', clusterId, type, queryWindowKey(window), limit, instanceId] as const,
   statements: (
     instanceId: string,
     database: string | undefined,

@@ -14,22 +14,23 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 import { AuthRequestError, useSignIn } from '@/api/auth'
 import { Logo } from '@/components/layout/Logo'
+import { useT } from '@/i18n/react'
 
 const HIGHLIGHTS = [
   {
     icon: Gauge,
-    title: 'Slowest queries',
-    text: 'The 20 queries with the highest execution time, with plans and history.',
+    title: 'auth.highlight.queries.title',
+    text: 'auth.highlight.queries.text',
   },
   {
     icon: Activity,
-    title: 'Wait events and locks',
-    text: 'What sessions are waiting for and who blocks whom, as it happens.',
+    title: 'auth.highlight.waits.title',
+    text: 'auth.highlight.waits.text',
   },
   {
     icon: Lightbulb,
-    title: 'Automatic advice',
-    text: 'Missing indexes, bloat, vacuum and settings worth a second look.',
+    title: 'auth.highlight.advice.title',
+    text: 'auth.highlight.advice.text',
   },
 ] as const
 
@@ -40,35 +41,38 @@ function safeNext(value: string | null): string {
   return value
 }
 
+type Translate = ReturnType<typeof useT>
+
 // Only a rejected password is fixed by typing it again. A network or server
 // failure says nothing about the password, so it gets its own message.
-function tooManyAttempts(seconds: number | null): string {
+function tooManyAttempts(t: Translate, seconds: number | null): string {
   if (seconds === null || seconds === 0) {
-    return 'Too many sign-in attempts. Wait a few minutes and try again.'
+    return t('auth.error.tooManyWait')
   }
-  return `Too many sign-in attempts. Try again in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.`
+  return t('auth.error.tooManyRetry', { seconds })
 }
 
-function signInFailure(error: unknown): string {
+function signInFailure(t: Translate, error: unknown): string {
   if (error instanceof AuthRequestError) {
-    if (error.kind === 'unauthorized') return 'Invalid password.'
+    if (error.kind === 'unauthorized') return t('auth.error.invalid')
     if (error.failure.kind === 'server' && error.failure.status === 429) {
-      return tooManyAttempts(error.retryAfterSeconds)
+      return tooManyAttempts(t, error.retryAfterSeconds)
     }
     if (error.kind === 'network') {
-      return 'Cannot reach the server. Check the connection and try again.'
+      return t('auth.error.network')
     }
     if (error.kind === 'server') {
-      return 'The server could not complete the request. Try again shortly.'
+      return t('auth.error.server')
     }
   }
-  return 'Sign-in failed. Try again.'
+  return t('auth.error.generic')
 }
 
 export default function LoginPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const signIn = useSignIn()
+  const t = useT()
   const [password, setPassword] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
@@ -83,7 +87,7 @@ export default function LoginPage() {
       await signIn.mutateAsync(password)
       void navigate(safeNext(next), { replace: true })
     } catch (error) {
-      setFailure(signInFailure(error))
+      setFailure(signInFailure(t, error))
       passwordRef.current?.focus()
     }
   }
@@ -105,11 +109,10 @@ export default function LoginPage() {
         <div className="relative max-w-md space-y-8">
           <div className="space-y-3">
             <h2 className="text-3xl leading-tight font-semibold tracking-tight">
-              PostgreSQL monitoring, clear at a glance.
+              {t('auth.brand.hero')}
             </h2>
             <p className="text-sidebar-foreground text-base leading-relaxed">
-              Query performance, waits, locks, replication and tuning advice for your whole fleet,
-              in one place.
+              {t('auth.brand.heroBody')}
             </p>
           </div>
           <ul className="space-y-4 text-sm">
@@ -119,16 +122,16 @@ export default function LoginPage() {
                   <Icon className="text-sidebar-primary size-4" />
                 </span>
                 <span>
-                  <span className="text-sidebar-accent-foreground block font-medium">{title}</span>
-                  <span className="text-sidebar-foreground">{text}</span>
+                  <span className="text-sidebar-accent-foreground block font-medium">
+                    {t(title)}
+                  </span>
+                  <span className="text-sidebar-foreground">{t(text)}</span>
                 </span>
               </li>
             ))}
           </ul>
         </div>
-        <p className="text-sidebar-foreground/70 relative text-xs">
-          pglens · PostgreSQL observability
-        </p>
+        <p className="text-sidebar-foreground/70 relative text-xs">{t('auth.brand.tagline')}</p>
       </aside>
 
       <section
@@ -139,16 +142,14 @@ export default function LoginPage() {
           <Logo className="text-foreground mb-10 lg:hidden" />
           <div className="mb-8 space-y-2">
             <h1 id="login-title" className="text-foreground text-2xl font-semibold tracking-tight">
-              Sign in to pglens
+              {t('auth.login.title')}
             </h1>
-            <p className="text-muted-foreground text-sm">
-              Enter the interface password to continue.
-            </p>
+            <p className="text-muted-foreground text-sm">{t('auth.login.lead')}</p>
           </div>
           <form className="space-y-5" noValidate onSubmit={handleSubmit}>
             <div className="space-y-2">
               <label className="text-foreground text-sm font-medium" htmlFor="ui-password">
-                Password
+                {t('auth.login.password')}
               </label>
               <div className="relative">
                 <KeyRound
@@ -170,7 +171,7 @@ export default function LoginPage() {
                   value={password}
                 />
                 <button
-                  aria-label={visible ? 'Hide password' : 'Show password'}
+                  aria-label={visible ? t('auth.login.hide') : t('auth.login.show')}
                   aria-pressed={visible}
                   className="text-muted-foreground hover:text-foreground absolute top-1/2 right-1.5 flex size-8 -translate-y-1/2 items-center justify-center rounded-md transition-colors"
                   onClick={() => setVisible((current) => !current)}
@@ -202,19 +203,20 @@ export default function LoginPage() {
               {signIn.isPending ? (
                 <>
                   <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
-                  Signing in…
+                  {t('auth.login.signingIn')}
                 </>
               ) : (
                 <>
-                  Sign in
+                  {t('auth.login.submit')}
                   <ArrowRight aria-hidden="true" className="size-4" />
                 </>
               )}
             </button>
           </form>
           <p className="text-muted-foreground mt-10 text-xs leading-relaxed">
-            The password is set on the server with <code>PGLENS_UI_PASSWORD</code>. The session
-            stays active in this browser until you sign out.
+            {t('auth.login.keyBefore')}
+            <code>PGLENS_UI_PASSWORD</code>
+            {t('auth.login.keyAfter')}
           </p>
         </div>
       </section>

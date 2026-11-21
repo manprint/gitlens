@@ -2,8 +2,9 @@ import { Link } from 'react-router-dom'
 
 import { CopyButton } from '@/components/layout/CopyButton'
 import { Badge } from '@/components/ui/badge'
-import { CAPTIONS } from '@/lib/captions'
-import { CHANNEL_LABEL, groupByChannel, type ReadinessFix } from '@/lib/readiness'
+import { useT } from '@/i18n/react'
+import { captionOf } from '@/lib/captions'
+import { CHANNEL_LABEL_KEY, groupByChannel, type ReadinessFix } from '@/lib/readiness'
 
 /**
  * A fix's way to close a gap: the channel, the ordered steps, the snippet to
@@ -11,6 +12,7 @@ import { CHANNEL_LABEL, groupByChannel, type ReadinessFix } from '@/lib/readines
  * rendered as text, never as markup (RDY-UI-008).
  */
 function Fix({ fix }: { fix: ReadinessFix }) {
+  const t = useT()
   return (
     <li className="space-y-2 rounded-md border p-3" data-testid="readiness-fix">
       <div className="flex flex-wrap items-center gap-2">
@@ -18,10 +20,10 @@ function Fix({ fix }: { fix: ReadinessFix }) {
         {fix.requires_restart ? (
           <Badge
             data-caption-id="readiness.requires-restart"
-            title={CAPTIONS['readiness.requires-restart'].what}
+            title={captionOf('readiness.requires-restart').what}
             variant="warning"
           >
-            Requires restart
+            {t('readiness.fix.requiresRestart')}
           </Badge>
         ) : null}
       </div>
@@ -37,12 +39,15 @@ function Fix({ fix }: { fix: ReadinessFix }) {
           <pre className="bg-muted overflow-x-auto rounded-md p-2 font-mono text-xs whitespace-pre-wrap">
             {fix.snippet}
           </pre>
-          <CopyButton subject={`${fix.title} snippet`} text={fix.snippet} />
+          <CopyButton
+            subject={t('readiness.fix.snippet', { title: fix.title })}
+            text={fix.snippet}
+          />
         </div>
       ) : null}
       {fix.channel === 'console' && fix.route !== undefined && fix.route !== '' ? (
         <Link className="text-primary text-sm underline" to={fix.route}>
-          Open in the console
+          {t('readiness.fix.openConsole')}
         </Link>
       ) : null}
     </li>
@@ -51,6 +56,7 @@ function Fix({ fix }: { fix: ReadinessFix }) {
 
 /** The fixes of one item, grouped by channel. */
 export function FixPanel({ fixes }: { fixes: readonly ReadinessFix[] }) {
+  const t = useT()
   const groups = groupByChannel(fixes)
   if (groups.length === 0) return null
   return (
@@ -58,7 +64,7 @@ export function FixPanel({ fixes }: { fixes: readonly ReadinessFix[] }) {
       {groups.map((group) => (
         <div key={group.channel} className="space-y-2">
           <h4 className="text-muted-foreground text-xs font-semibold uppercase">
-            {CHANNEL_LABEL[group.channel]}
+            {t(CHANNEL_LABEL_KEY[group.channel])}
           </h4>
           <ul className="space-y-2">
             {group.fixes.map((fix, index) => (

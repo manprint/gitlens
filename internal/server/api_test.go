@@ -323,6 +323,10 @@ func TestAPI_Events_Validation(t *testing.T) {
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/events?instance_id=bad", http.NoBody)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
 	// invalid from/to
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/events?from=bad", http.NoBody)
 	w = httptest.NewRecorder()

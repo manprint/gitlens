@@ -9,20 +9,28 @@
 import type { ApiFailure } from '@/api/client'
 import type { Schemas } from '@/api/types'
 import { formatCount } from '@/lib/format'
+import { localizedNumber } from '@/lib/format/shared'
+import type { MessageKey } from '@/i18n/messages/en'
+import { activeIntl, translate } from '@/i18n/store'
 
 export type RetentionFamily = Schemas['RetentionFamily']
 export type RetentionPreview = Schemas['RetentionPreview']
 export type RetentionFamilyName = Schemas['RetentionFamilyName']
 
-/** What each family holds, in the words of the pages that show it. */
-export const RETENTION_FAMILY_LABELS: Record<RetentionFamilyName, string> = {
-  metrics: 'Instance and database metrics',
-  metrics_statements: 'Statement statistics',
-  metrics_ash: 'Active session history',
-  metrics_replication: 'Replication lag and slots',
-  metrics_tables: 'Table statistics',
-  metrics_indexes: 'Index statistics',
-  metrics_bloat: 'Bloat estimates',
+/** The message of what each family holds, in the words of the pages that show it. */
+export const RETENTION_FAMILY_KEYS = {
+  metrics: 'settings.lib.retention.family.metrics',
+  metrics_statements: 'settings.lib.retention.family.metricsStatements',
+  metrics_ash: 'settings.lib.retention.family.metricsAsh',
+  metrics_replication: 'settings.lib.retention.family.metricsReplication',
+  metrics_tables: 'settings.lib.retention.family.metricsTables',
+  metrics_indexes: 'settings.lib.retention.family.metricsIndexes',
+  metrics_bloat: 'settings.lib.retention.family.metricsBloat',
+} as const satisfies Record<RetentionFamilyName, MessageKey>
+
+/** What the family holds, in the console language. */
+export function retentionFamilyLabel(family: RetentionFamilyName): string {
+  return translate(RETENTION_FAMILY_KEYS[family])
 }
 
 export type DaysValidation = { ok: true; value: number } | { ok: false; error: string }
@@ -30,11 +38,13 @@ export type DaysValidation = { ok: true; value: number } | { ok: false; error: s
 /** Reads the days typed for a family: a whole number between `min` and `max`. */
 export function validateRetentionDays(text: string, min: number, max: number): DaysValidation {
   const value = text.trim()
-  if (value === '') return { ok: false, error: 'Enter a number of days.' }
-  if (!/^\d+$/.test(value)) return { ok: false, error: 'Enter a whole number of days.' }
+  if (value === '') return { ok: false, error: translate('settings.lib.retention.days.empty') }
+  if (!/^\d+$/.test(value)) {
+    return { ok: false, error: translate('settings.lib.retention.days.whole') }
+  }
   const days = Number(value)
   if (days < min || days > max) {
-    return { ok: false, error: `Enter between ${min} and ${max} days.` }
+    return { ok: false, error: translate('settings.lib.retention.days.range', { min, max }) }
   }
   return { ok: true, value: days }
 }
@@ -49,36 +59,46 @@ export function isShortening(current: number | null, days: number): boolean {
 
 const MIB = 1024 * 1024
 
+const ONE_DECIMAL: Intl.NumberFormatOptions = {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+  useGrouping: false,
+}
+
 /** A size in MiB for the confirmation text: one decimal under 10 MiB, whole MiB above. */
-export function formatMiB(bytes: number): string {
+export function formatMiB(bytes: number, locale = activeIntl()): string {
   const mib = bytes / MIB
-  if (bytes > 0 && mib < 0.1) return '0.1'
-  return mib < 10 ? mib.toFixed(1) : formatCount(Math.round(mib))
+  if (bytes > 0 && mib < 0.1) return localizedNumber(0.1, locale, ONE_DECIMAL)
+  return mib < 10 ? localizedNumber(mib, locale, ONE_DECIMAL) : formatCount(Math.round(mib), locale)
 }
 
 /** "N chunks", with the singular for one. */
 export function chunkCount(chunks: number): string {
-  return `${formatCount(chunks)} ${chunks === 1 ? 'chunk' : 'chunks'}`
+  return translate('settings.lib.retention.chunks', { count: formatCount(chunks), chunks })
 }
 
 /** The text of the destructive confirmation of a shortening (11.3 contract). */
 export function confirmationText(preview: RetentionPreview): string {
-  return (
-    `This will permanently delete ${chunkCount(preview.chunks_to_drop)} ` +
-    `(~${formatMiB(preview.bytes_to_free)} MiB) of ${preview.family} data older than ` +
-    `${preview.days} days at the next policy run. Take a backup first.`
-  )
+  return translate('settings.lib.retention.confirm', {
+    chunks: chunkCount(preview.chunks_to_drop),
+    mib: formatMiB(preview.bytes_to_free),
+    family: preview.family,
+    days: preview.days,
+  })
 }
 
 /** The one-line result of a preview, shown next to the Apply button. */
 export function previewSummary(preview: RetentionPreview, current: number | null): string {
   if (!isShortening(current, preview.days)) {
-    return `Keeps more history: nothing is deleted.`
+    return translate('settings.lib.retention.preview.keeps')
   }
   if (preview.chunks_to_drop === 0) {
-    return `Nothing older than ${preview.days} days is stored now.`
+    return translate('settings.lib.retention.preview.none', { days: preview.days })
   }
-  return `Deletes ${chunkCount(preview.chunks_to_drop)} (~${formatMiB(preview.bytes_to_free)} MiB) at the next policy run.`
+  return translate('settings.lib.retention.preview.deletes', {
+    chunks: chunkCount(preview.chunks_to_drop),
+    mib: formatMiB(preview.bytes_to_free),
+  })
 }
 
 function isApiFailure(error: unknown): error is ApiFailure {
@@ -89,22 +109,20 @@ function isApiFailure(error: unknown): error is ApiFailure {
 
 /** The inline message of a failed preview or apply; the stored retention is unchanged. */
 export function retentionErrorMessage(error: unknown): string {
-  if (!isApiFailure(error)) return 'The retention was not changed. Try again.'
+  if (!isApiFailure(error)) return translate('settings.lib.retention.error.generic')
   switch (error.kind) {
     case 'server':
-      if (error.status === 409) {
-        return 'The retention changed or needs confirmation. Preview again, then apply.'
-      }
-      if (error.status === 503) return 'The store is unavailable. Try again later.'
+      if (error.status === 409) return translate('settings.lib.retention.error.conflict')
+      if (error.status === 503) return translate('settings.lib.retention.error.unavailable')
       return error.detail ? `${error.error}: ${error.detail}` : error.error
     case 'unprocessable':
       return error.detail ? `${error.error}: ${error.detail}` : error.error
     case 'not_found':
-      return 'The server does not know this family. Reload the page.'
+      return translate('settings.lib.retention.error.unknownFamily')
     case 'unauthorized':
-      return 'Your session has expired. Sign in again to change the retention.'
+      return translate('settings.lib.retention.error.unauthorized')
     case 'forbidden':
-      return 'The server refused the change.'
+      return translate('settings.lib.retention.error.refused')
     case 'network':
     case 'malformed':
     case 'client':

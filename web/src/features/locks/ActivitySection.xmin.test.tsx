@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
+import { renderInRouter as render } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 
 import { NOW } from '@/test/time'

@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/base64"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -173,4 +176,69 @@ func TestContentSecurityPolicy_NoInlineScriptAdmitsNone(t *testing.T) {
 	policy := contentSecurityPolicy(testWebUIAssets())
 	require.Contains(t, policy, "script-src 'self';")
 	require.NotContains(t, policy, "sha256-")
+}
+
+func gzipped(t *testing.T, text string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, err := zw.Write([]byte(text))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	return buf.Bytes()
+}
+
+// TestSPA_ServesTheGzipCopyToGzipClients: the build writes name.gz next to
+// each large text file; a client that accepts gzip gets it with the type of
+// the original, any other client the original.
+func TestSPA_ServesTheGzipCopyToGzipClients(t *testing.T) {
+	assets := testWebUIAssets()
+	assets["assets/app-abc123.js.gz"] = &fstest.MapFile{Data: gzipped(t, "console.log('ok')")}
+	assets["index.html.gz"] = &fstest.MapFile{Data: gzipped(t, testIndexHTML)}
+
+	for _, target := range []string{"/assets/app-abc123.js", "/", "/clusters/123"} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.Header.Set("Accept-Encoding", "br, gzip, deflate")
+		rec := httptest.NewRecorder()
+		SPAHandler(assets).ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, target)
+		require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"), target)
+		require.Equal(t, "Accept-Encoding", rec.Header().Get("Vary"), target)
+		zr, err := gzip.NewReader(rec.Body)
+		require.NoError(t, err, target)
+		body, err := io.ReadAll(zr)
+		require.NoError(t, err, target)
+		if target == "/assets/app-abc123.js" {
+			require.Equal(t, "console.log('ok')", string(body))
+			require.Contains(t, rec.Header().Get("Content-Type"), "javascript")
+			require.Equal(t, webUIImmutableCache, rec.Header().Get("Cache-Control"))
+		} else {
+			require.Equal(t, testIndexHTML, string(body), target)
+			require.Contains(t, rec.Header().Get("Content-Type"), "text/html", target)
+			require.Equal(t, webUINoCache, rec.Header().Get("Cache-Control"), target)
+		}
+	}
+
+	plain := serveWebUIRequest(t, assets, http.MethodGet, "/assets/app-abc123.js")
+	require.Empty(t, plain.Header().Get("Content-Encoding"))
+	require.Equal(t, "Accept-Encoding", plain.Header().Get("Vary"))
+	require.Equal(t, "console.log('ok')", plain.Body.String())
+}
+
+func TestAcceptsGzip(t *testing.T) {
+	for header, want := range map[string]bool{
+		"":                     false,
+		"gzip":                 true,
+		"GZIP;q=0.5":           true,
+		"br, gzip;q=0":         false,
+		"identity":             false,
+		"*":                    true,
+		"gzip;q=0, *":          false,
+		"*;q=0":                false,
+		"deflate, x-gzip":      true,
+		"br;q=1.0, gzip ; q=1": true,
+	} {
+		require.Equal(t, want, acceptsGzip(header), header)
+	}
 }

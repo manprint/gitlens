@@ -10,6 +10,7 @@ import {
   type AshChartSeries,
 } from '@/components/charts/ash.options'
 import { foldOther, orderGroups, toStackedSeries, type AshBucket, type AshGroupBy } from '@/lib/ash'
+import { useT } from '@/i18n/react'
 import { groupSeries } from '@/lib/ashGroups'
 import type { CaptionId } from '@/lib/captions'
 
@@ -18,11 +19,20 @@ const OTHER = 'other'
 
 const GROUP_LABELS: Record<
   Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>,
-  string
+  'ash.group.queryid' | 'ash.group.waitEvent' | 'ash.group.waitEventType'
 > = {
-  queryid: 'Queries',
-  wait_event: 'Wait events',
-  wait_event_type: 'Wait event types',
+  queryid: 'ash.group.queryid',
+  wait_event: 'ash.group.waitEvent',
+  wait_event_type: 'ash.group.waitEventType',
+}
+
+const EMPTY_LABELS: Record<
+  Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>,
+  'ash.empty.queryid' | 'ash.empty.waitEvent' | 'ash.empty.waitEventType'
+> = {
+  queryid: 'ash.empty.queryid',
+  wait_event: 'ash.empty.waitEvent',
+  wait_event_type: 'ash.empty.waitEventType',
 }
 
 const STACK_CAPTIONS: Record<
@@ -126,14 +136,15 @@ export function AshBreakdown({
   resolutionSeconds,
   view = 'stacked',
 }: AshBreakdownProps) {
+  const t = useT()
   const { range } = useTimeRange()
   const { folded, series } = chartSeries(buckets, groupBy, resolutionSeconds)
-  const title = GROUP_LABELS[groupBy]
+  const title = t(GROUP_LABELS[groupBy])
   const eventTypes = eventTypesOf(buckets)
   const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
   const filterNote = filterLabel ? (
     <p className="text-muted-foreground mb-3 text-sm">
-      {title} filtered by {filterLabel}.
+      {t('ash.breakdown.filtered', { title, filter: filterLabel })}
     </p>
   ) : null
   const body = (
@@ -155,11 +166,11 @@ export function AshBreakdown({
           range={range}
           state="ready"
           stepSeconds={resolutionSeconds ?? 0}
-          title={`${title} average active backends`}
+          title={t('ash.breakdown.averageTitle', { title })}
         >
           <AshChart
-            ariaLabel={`${title} average active backends`}
-            dataTableLabel={`${title} average active backends data`}
+            ariaLabel={t('ash.breakdown.averageTitle', { title })}
+            dataTableLabel={t('ash.breakdown.averageTable', { title })}
             foldedCount={folded}
             {...interactionProps}
             series={series}
@@ -167,10 +178,7 @@ export function AshBreakdown({
           />
         </ChartCard>
       ) : (
-        <EmptyState
-          title={`No ${title.toLocaleLowerCase('en-US')} observed`}
-          description="The selected time range contains no sampled activity for this breakdown."
-        />
+        <EmptyState title={t(EMPTY_LABELS[groupBy])} description={t('ash.breakdown.emptyBody')} />
       )}
     </>
   )

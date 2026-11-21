@@ -106,10 +106,10 @@ describe('Full HD route inventory', () => {
     expect(charts.every((path) => CHART_ROUTES.includes(path))).toBe(true)
   })
 
-  it('FHD-ROUTES-003 only the sign-in page and the not-found page are exempt', () => {
+  it('FHD-ROUTES-003 only sign-in, the Inline Help documentation and not-found are exempt', () => {
     expect(
       FULLHD_ROUTES.filter((route) => route.kind === 'exempt').map((route) => route.path),
-    ).toEqual(['/login', '*'])
+    ).toEqual(['/login', '/help', '/help/:topicId', '*'])
   })
 
   it('FHD-ROUTES-004 no entry waits for an owning unit any more', () => {

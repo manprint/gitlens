@@ -144,15 +144,15 @@ func TestRefHazard_ResolvesLikeThePlanner(t *testing.T) {
 		{Schema: "public", Name: "twice", Volatility: "v", Visible: true},
 	}
 	// An unqualified name resolves through the search_path only.
-	require.Empty(t, refHazard(funcRef{Name: "lower"}, functions, true))
-	require.Contains(t, refHazard(funcRef{Schema: "app", Name: "lower"}, functions, true), "app.lower()")
+	require.Empty(t, refHazard(funcRef{Name: "lower"}, functions, true, functionHazard))
+	require.Contains(t, refHazard(funcRef{Schema: "app", Name: "lower"}, functions, true, functionHazard), "app.lower()")
 	// Not visible unqualified: a plan would have qualified it.
-	require.Contains(t, refHazard(funcRef{Name: "evil"}, functions, true), "cannot find")
-	require.Empty(t, refHazard(funcRef{Name: "evil"}, functions, false))
+	require.Contains(t, refHazard(funcRef{Name: "evil"}, functions, true, functionHazard), "cannot find")
+	require.Empty(t, refHazard(funcRef{Name: "evil"}, functions, false, functionHazard))
 	// One unsafe overload makes the name unsafe.
-	require.Contains(t, refHazard(funcRef{Name: "twice"}, functions, true), "user-defined")
-	require.Contains(t, refHazard(funcRef{Name: "unknown"}, functions, true), "cannot find")
-	require.Empty(t, refHazard(funcRef{Name: "unknown"}, functions, false))
+	require.Contains(t, refHazard(funcRef{Name: "twice"}, functions, true, functionHazard), "user-defined")
+	require.Contains(t, refHazard(funcRef{Name: "unknown"}, functions, true, functionHazard), "cannot find")
+	require.Empty(t, refHazard(funcRef{Name: "unknown"}, functions, false, functionHazard))
 }
 
 func analyzeConn() *explainConn {

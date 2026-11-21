@@ -7,6 +7,7 @@ import {
   parseRange,
   queryWindowKey,
   queryWindowOf,
+  rangeLabelKey,
   resolveQueryWindow,
   stepMilliseconds,
   toParams,
@@ -144,5 +145,17 @@ describe('query windows', () => {
     expect(window).toEqual({ from: '2026-08-31T10:00:00.000Z', to: '2026-08-31T11:00:00.000Z' })
     expect(queryWindowKey(window)).toBe('2026-08-31T10:00:00.000Z/2026-08-31T11:00:00.000Z')
     expect(resolveQueryWindow(window, NOW)).toBe(window)
+  })
+})
+
+describe('rangeLabelKey', () => {
+  it('names a preset by its own key and any absolute range as custom', () => {
+    expect(rangeLabelKey({ kind: 'relative', preset: '6h' })).toBe('shell.range.6h')
+    expect(rangeLabelKey({ kind: 'absolute' })).toBe('shell.range.custom')
+    for (const preset of Object.keys(RANGE_PRESETS)) {
+      expect(rangeLabelKey({ kind: 'relative', preset: preset as '1h' })).toBe(
+        `shell.range.${preset}`,
+      )
+    }
   })
 })

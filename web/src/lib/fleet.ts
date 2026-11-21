@@ -1,3 +1,4 @@
+import { translate } from '@/i18n/store'
 import { REFRESH } from '@/api/policy'
 import type { Cluster, Schemas } from '@/api/types'
 import { instanceLabel } from '@/lib/names'
@@ -84,7 +85,7 @@ export function deriveAgentHealth(
         ageSeconds: staleness.ageSeconds,
         cluster,
         instance,
-        reason: alert ? alertReason(alert) : 'The agent has not reported recently.',
+        reason: alert ? alertReason(alert) : translate('fleet.health.notReported'),
       })
     }
   }

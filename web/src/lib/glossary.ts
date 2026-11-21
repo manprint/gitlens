@@ -1,3 +1,5 @@
+import { domainText } from '@/i18n/store'
+
 /**
  * Plain-language definitions of the PostgreSQL and pglens terms the console
  * uses (D30). Every acronym in a caption or hint must be defined here or be one
@@ -148,8 +150,17 @@ export const glossary = {
 export type Term = keyof typeof glossary
 
 /** Acronyms readers know without a definition. */
-export const COMMON_ACRONYMS = ['UTC', 'CPU', 'SQL', 'PID', 'I/O', 'ID'] as const
+export const COMMON_ACRONYMS = ['UTC', 'CPU', 'SQL', 'PID', 'I/O', 'ID', 'NULL'] as const
 
 export function isTerm(value: string): value is Term {
   return Object.hasOwn(glossary, value)
+}
+
+/** A glossary entry in the console language (plan 006 F4). */
+export function glossaryOf(term: Term): GlossaryEntry {
+  const english: GlossaryEntry = glossary[term]
+  const short = domainText(english.short, (domain) => domain.glossary[term].short)
+  return english.long === undefined
+    ? { short }
+    : { short, long: domainText(english.long, (domain) => domain.glossary[term].long) }
 }

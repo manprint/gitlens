@@ -7,6 +7,8 @@
  * glossary. A wrong id fails the type check.
  */
 
+import { domainText } from '@/i18n/store'
+
 import { instanceCaptions } from './captionsets/instance'
 import { fleetCaptions } from './captionsets/fleet'
 import { queriesCaptions } from './captionsets/queries'
@@ -87,7 +89,7 @@ export const CAPTIONS = {
     howToRead: 'Names are unique without regard to case; an empty name restores the default label.',
   },
   'settings.preferences': {
-    what: 'Console preferences kept in this browser: the theme, the default time range, the refresh interval and the table page size.',
+    what: 'Console preferences kept in this browser: the theme, the default time range, the refresh interval, the table page size, the time zone and the language.',
     source:
       'The pglens.preferences entry of this browser’s local storage; nothing is sent to the server.',
     window: 'Applied at once to every open page of this browser and kept after a reload.',
@@ -152,7 +154,7 @@ export const CAPTIONS = {
       'getReadinessSummary: the readiness level of each instance, counted per cluster (warnings and notes added up).',
     window: 'Latest values; refreshed every 15 s.',
     howToRead:
-      'Partial means at least one server has a warning: open it, then its Readiness tab, for the fixes.',
+      'Partial means at least one server has a warning: click the badge to open its Readiness tab and fixes.',
   },
   'instance.coverage': {
     what: 'How many of the checks the agent schedules for this instance have stored a result since the agent last started.',
@@ -172,16 +174,17 @@ export const CAPTIONS = {
     howToRead:
       'The marked text is what matched. A link opens the index or table, expanded, on its tab, or the statement search on Slowest queries, in the same time range.',
   },
-  'indexes.suggestions': {
-    what: 'Candidate btree indexes for the columns your statements filter or sort on and no index leads with, best first. Every figure is an estimate.',
+  'indexes.missing': {
+    what: 'Where an index is missing, why, and the statement to create it, best first: from statements, foreign keys, spatial columns and full table scans.',
     source:
-      'getIndexSuggestions: the normalised statements of pg_stat_statements (query_texts) parsed for equality, range, prefix and ordering predicates, with the pg_stat_statements rates, the reported index definitions and column statistics, and the table counters.',
-    unit: 'weight in % of the database statement time; read cost in ms per second',
-    window: 'The window picked on the tab (1 hour to 7 days).',
+      'buildMissingIndexes (missingIndexes.ts) over getIndexSuggestions, the index.fk_unindexed and postgis.spatial_unindexed findings of getFindings, and the scan and write rates of getInstanceTables.',
+    unit: 'indexes',
+    window:
+      'Statements: the window picked on the tab (1 hour to 7 days). Findings and table rates: latest evaluation and collection.',
     howToRead:
-      'Weight and read cost are an upper bound of the time the statements spend today: an index cannot save more. Size comes from planner row counts. Write rates are inserts, updates and deletes per second. pglens never creates an index; review the statement before you run it.',
+      'Recommendation says what to do: Create, Test first, Check workload or Not worth it. Expand a row for the check, create, verify and undo statements. pglens never runs them.',
     thresholds:
-      'Verdict: read/write ratio of 10 or more is strong, 1 or more moderate, below 1 write-heavy; a table with no index writes is at least moderate. Tables under 1,000 rows are skipped.',
+      'Foreign key: create when parent rows are deleted and the table is 10 MiB or more. Full table scans: tables of 8 MiB or more read at 100 rows per second or more.',
   },
   'locks.sessions-application': {
     what: 'Sessions opened by your applications: one row per client session of the latest lock sample, oldest transaction first.',
@@ -373,17 +376,15 @@ export const columnHelp = {
   'indexes.dead-writes': 'Inserts, updates and deletes per second on the table, added together.',
   'indexes.dead-trend':
     'Dead rows of the table over the selected time range; only the 10 worst tables have a trend.',
-  'indexes.suggest-weight':
-    "Share of the database's tracked statement time that the statements which would use this index account for.",
-  'indexes.suggest-read-cost':
-    'Statement time per second spent in the statements that would use the index; an upper bound of what it could save.',
-  'indexes.suggest-size':
-    "Estimated size of the new index, from the planner's row count and the column widths.",
-  'indexes.suggest-writes': 'Inserts, updates and deletes per second on the table, in that order.',
-  'indexes.suggest-verdict':
-    'The reads the index would serve compared with the writes it would cost: strong, moderate or write-heavy.',
-  'indexes.suggest-statements':
-    'Number of tracked statements that filter or sort on the key columns.',
+  'indexes.missing-recommendation':
+    'What to do: Create, Test first, Check workload (run the check, then decide) or Not worth it (writes outweigh reads).',
+  'indexes.missing-source':
+    'Where the gap was found: slow statements, a foreign key, a spatial column or full table scans.',
+  'indexes.missing-columns':
+    'Columns of the index to create, in key order; a dash when the statements must be read first.',
+  'indexes.missing-why': 'Why the index is needed, with the figures; expand the row for the steps.',
+  'indexes.missing-command':
+    'Copies the statement that creates the index without blocking writes; pglens never runs it.',
   'indexes.tax-index-size':
     "Combined size of the table's indexes that the agent reported; indexes it did not report are not counted.",
   'indexes.tax-table-size': "Size of the table's heap alone, without its indexes and TOAST data.",
@@ -425,7 +426,7 @@ export const columnHelp = {
     'The value the metric must pass for the alert to fire, with its unit. A rule raised by an event has no threshold.',
   'rules.duration': 'How long the condition must hold before the alert fires; 0 s fires at once.',
   'findings.object':
-    'The table, index or other object the finding is about, then its database, instance and cluster, by name.',
+    'The statement text, or the table, index, setting or slot the finding is about; then its database, instance and cluster, by name.',
   'findings.scope':
     'What the finding covers: an instance, a cluster, a database, or one database object such as a table or index.',
   'findings.state':
@@ -442,6 +443,23 @@ export const columnHelp = {
 
 export type ColumnHelpId = keyof typeof columnHelp
 
+const OPTIONAL_FIELDS = ['unit', 'window', 'howToRead', 'thresholds'] as const
+
+/** The caption in the console language (plan 006 F4); a field English lacks stays absent. */
 export function captionOf(id: CaptionId): CaptionEntry {
-  return CAPTIONS[id]
+  const english: CaptionEntry = CAPTIONS[id]
+  const entry: CaptionEntry = {
+    what: domainText(english.what, (domain) => domain.captions[id].what),
+    source: domainText(english.source, (domain) => domain.captions[id].source),
+  }
+  for (const field of OPTIONAL_FIELDS) {
+    const text = english[field]
+    if (text !== undefined) entry[field] = domainText(text, (domain) => domain.captions[id][field])
+  }
+  return entry
+}
+
+/** A column header hint in the console language. */
+export function columnHelpOf(id: ColumnHelpId): string {
+  return domainText(columnHelp[id], (domain) => domain.columnHelp[id])
 }

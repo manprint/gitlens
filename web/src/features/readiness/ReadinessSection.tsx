@@ -1,17 +1,20 @@
 import { useState } from 'react'
 
 import { useReadiness } from '@/api/queries'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { CAPTIONS } from '@/lib/captions'
+import { useT } from '@/i18n/react'
+import { captionOf } from '@/lib/captions'
 import { severityRank, type ReadinessItem } from '@/lib/readiness'
 
 import { FixPanel } from './FixPanel'
 
 function ItemCard({ defaultOpen, item }: { defaultOpen: boolean; item: ReadinessItem }) {
   const [open, setOpen] = useState(defaultOpen)
+  const t = useT()
   const panelId = `readiness-${item.id}`
   return (
     <li
@@ -24,10 +27,10 @@ function ItemCard({ defaultOpen, item }: { defaultOpen: boolean; item: Readiness
           <div className="flex flex-wrap items-center gap-2">
             <Badge
               data-caption-id="readiness.severity"
-              title={CAPTIONS['readiness.severity'].what}
+              title={captionOf('readiness.severity').what}
               variant={item.severity === 'warning' ? 'warning' : 'outline'}
             >
-              {item.severity === 'warning' ? 'Warning' : 'Note'}
+              {item.severity === 'warning' ? t('readiness.item.warning') : t('readiness.item.note')}
             </Badge>
             <h3 className="text-sm font-semibold">{item.title}</h3>
             <code className="text-muted-foreground text-xs">{item.id}</code>
@@ -42,7 +45,7 @@ function ItemCard({ defaultOpen, item }: { defaultOpen: boolean; item: Readiness
           type="button"
           variant="outline"
         >
-          {open ? 'Hide details' : 'Show details'}
+          {open ? t('readiness.item.hide') : t('readiness.item.show')}
         </Button>
       </div>
       {open ? (
@@ -50,7 +53,7 @@ function ItemCard({ defaultOpen, item }: { defaultOpen: boolean; item: Readiness
           {item.impact.length > 0 ? (
             <div>
               <h4 className="text-muted-foreground text-xs font-semibold uppercase">
-                What you lose
+                {t('readiness.item.impact')}
               </h4>
               <ul className="list-disc pl-5 text-sm">
                 {item.impact.map((entry) => (
@@ -61,7 +64,7 @@ function ItemCard({ defaultOpen, item }: { defaultOpen: boolean; item: Readiness
           ) : null}
           {item.evidence !== '' ? (
             <p className="text-muted-foreground text-xs">
-              Evidence: <code>{item.evidence}</code>
+              {t('readiness.item.evidence')} <code>{item.evidence}</code>
             </p>
           ) : null}
           <FixPanel fixes={item.fixes} />
@@ -78,10 +81,11 @@ function ItemCard({ defaultOpen, item }: { defaultOpen: boolean; item: Readiness
  */
 export function ReadinessSection({ instanceId }: { instanceId: string }) {
   const query = useReadiness(instanceId)
+  const t = useT()
   if (query.error && !query.data) {
     return (
       <ErrorState
-        endpoint="instance readiness"
+        endpoint={t('readiness.section.endpoint')}
         failure={query.error}
         onRetry={() => void query.refetch()}
       />
@@ -89,8 +93,8 @@ export function ReadinessSection({ instanceId }: { instanceId: string }) {
   }
   if (query.isPending || query.data === undefined) {
     return (
-      <section aria-busy="true" aria-label="Loading readiness" role="status">
-        Loading readiness…
+      <section aria-busy="true" aria-label={t('readiness.section.loadingLabel')} role="status">
+        {t('readiness.section.loading')}
       </section>
     )
   }
@@ -101,11 +105,17 @@ export function ReadinessSection({ instanceId }: { instanceId: string }) {
   // fits a Full HD screen (I-13). Notes are always collapsed (RDY-UI-005).
   const openFirst = query.data.counts.warning === 1
   return (
-    <Section captionId="instance.readiness" title="Readiness">
+    <Section
+      actions={
+        <HelpLink anchor="instance-overview#readiness" label={t('readiness.section.help')} />
+      }
+      captionId="instance.readiness"
+      title={t('readiness.section.title')}
+    >
       {items.length === 0 ? (
         <EmptyState
-          description="Everything pglens can use is set up on this server."
-          title="Monitored in full"
+          description={t('readiness.section.emptyDescription')}
+          title={t('readiness.section.emptyTitle')}
         />
       ) : (
         <ul className="space-y-3" data-testid="readiness-items">

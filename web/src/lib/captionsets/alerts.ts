@@ -16,7 +16,7 @@ export const alertsCaptions = {
     what: 'One alert in full: its rule, state, labels, and when it started, was last evaluated and was resolved.',
     source:
       'Server alert endpoint for one alert key, the newest row of the alerts table with that key.',
-    window: 'Read when opened; started, last evaluated and resolved are UTC timestamps.',
+    window: 'Read when opened; started, last evaluated and resolved in the console time zone.',
     howToRead:
       'Labels are the identifiers the alert was raised with. A silence matches an alert on these labels.',
   },
@@ -135,7 +135,8 @@ export const alertsCaptions = {
     source:
       'Server silences endpoint over the silences table, newest ending first and capped like the alert list; the state is computed in the browser from the window.',
     unit: 'silences',
-    window: 'Pending before Start, active from Start until End, expired after End; times are UTC.',
+    window:
+      'Pending before Start, active from Start until End, expired after End; times in the console time zone.',
     howToRead:
       'A silence suppresses the alerts that match every matcher. It stops notifications only; the alert stays listed and keeps being evaluated. End silence stops one early or cancels a pending one.',
   },
@@ -144,7 +145,7 @@ export const alertsCaptions = {
     source:
       'Server alerts endpoint over the alerts table, filled by the alert engine from the alert rules; suppression is read from the stored silences.',
     unit: 'alerts',
-    window: 'The alerts left after the filters above; times are UTC.',
+    window: 'The alerts left after the filters above; times in the console time zone.',
     howToRead:
       'The alert key opens its detail. Notes names the silence that suppresses an alert, with the time it has left. An agent alert links to a checklist.',
   },
@@ -153,7 +154,8 @@ export const alertsCaptions = {
     source:
       'Server events endpoint over the events table, written by the ingest and the alert engine.',
     unit: 'events',
-    window: 'The selected time range, newest first, cut to the event limit; times are UTC.',
+    window:
+      'The selected time range, newest first, cut to the event limit; times in the console time zone.',
     howToRead:
       'Type is the raw event name, always shown so an event the console does not know stays visible. Details says what to check for that type.',
   },
@@ -180,7 +182,8 @@ export const alertsCaptions = {
     source:
       'Server silences endpoint over the silences table; the state is computed in the browser from the window.',
     unit: 'silences',
-    window: 'Pending before Start, active from Start until End, expired after End; times are UTC.',
+    window:
+      'Pending before Start, active from Start until End, expired after End; times in the console time zone.',
     howToRead:
       'A silence suppresses the alerts that match every matcher. It stops notifications only; the alert stays listed and keeps being evaluated.',
   },

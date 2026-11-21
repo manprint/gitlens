@@ -1,5 +1,7 @@
 import type { ApiFailure } from '@/api/client'
 import type { Schemas } from '@/api/types'
+import type { MessageKey } from '@/i18n/messages/en'
+import { translate } from '@/i18n/store'
 
 /**
  * The alert notification channels and the server environment variables that
@@ -16,7 +18,9 @@ export type NotificationTestResult = Schemas['NotificationTestResult']
 
 export interface NotificationChannelInfo {
   kind: NotificationChannelKind
+  /** English name; the console shows `channelLabel(info)`. */
   label: string
+  labelKey: MessageKey
   /** The variable that holds the webhook address. */
   variable: string
   /** The variable naming a file that holds the address, when the server reads one. */
@@ -30,6 +34,7 @@ export const NOTIFICATION_CHANNELS: readonly NotificationChannelInfo[] = [
   {
     kind: 'slack',
     label: 'Slack',
+    labelKey: 'alerts.channel.label.slack',
     variable: 'PGLENS_ALERT_SLACK_WEBHOOK_URL',
     fileVariable: 'PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE',
     aliases: ['PGLENS_SLACK_WEBHOOK_URL', 'PGLENS_SLACK_WEBHOOK_URL_FILE'],
@@ -37,17 +42,24 @@ export const NOTIFICATION_CHANNELS: readonly NotificationChannelInfo[] = [
   {
     kind: 'webhook',
     label: 'Generic webhook',
+    labelKey: 'alerts.channel.label.webhook',
     variable: 'PGLENS_WEBHOOK_URL',
     aliases: [],
   },
   {
     kind: 'google_chat',
     label: 'Google Chat',
+    labelKey: 'alerts.channel.label.google_chat',
     variable: 'PGLENS_GOOGLE_CHAT_WEBHOOK_URL',
     fileVariable: 'PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE',
     aliases: [],
   },
 ]
+
+/** The channel's name in the console language. */
+export function channelLabel(info: NotificationChannelInfo): string {
+  return translate(info.labelKey)
+}
 
 export function notificationChannelInfo(kind: NotificationChannelKind): NotificationChannelInfo {
   const info = NOTIFICATION_CHANNELS.find((channel) => channel.kind === kind)
@@ -66,8 +78,12 @@ export function channelVariables(info: NotificationChannelInfo): string[] {
 
 /** How to configure a channel that is not configured. */
 export function channelInstructions(info: NotificationChannelInfo): string {
-  const file = info.fileVariable === undefined ? '' : ' (or _FILE)'
-  return `Set ${info.variable}${file} in the server environment, then restart the server. Or store a URL from the console below: it applies at once.`
+  return translate(
+    info.fileVariable === undefined
+      ? 'alerts.channel.instructions'
+      : 'alerts.channel.instructionsFile',
+    { variable: info.variable },
+  )
 }
 
 /** The longest address the server stores (setNotificationChannel). */
@@ -194,59 +210,61 @@ function literalHost(authority: string): { host: string } | { problem: 'parse' }
  * address.
  */
 export function webhookUrlProblem(raw: string): string | null {
-  if (raw === '') return 'Enter the webhook URL.'
+  if (raw === '') return translate('alerts.channel.url.empty')
   if (new TextEncoder().encode(raw).length > MAX_WEBHOOK_URL_LENGTH) {
-    return `The URL may not be longer than ${MAX_WEBHOOK_URL_LENGTH} characters.`
+    return translate('alerts.channel.url.tooLong', { max: String(MAX_WEBHOOK_URL_LENGTH) })
   }
-  if (/[ \t\r\n]/.test(raw)) return 'The URL may not contain spaces, tabs or line breaks.'
-  if (raw.includes('#')) return 'The URL may not have a fragment (#).'
-  const notAUrl = 'This is not a URL: it starts with https:// and names a host.'
+  if (/[ \t\r\n]/.test(raw)) return translate('alerts.channel.url.spaces')
+  if (raw.includes('#')) return translate('alerts.channel.url.fragment')
+  const notAUrl = translate('alerts.channel.url.invalid')
   // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f\x7f]/.test(raw)) return notAUrl
   const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(raw)
   if (scheme === null) return notAUrl
   const rest = raw.slice(scheme[0].length)
-  if (!rest.startsWith('//')) return 'The URL names no host.'
+  if (!rest.startsWith('//')) return translate('alerts.channel.url.noHost')
   const authorityEnd = rest.slice(2).search(/[/?]/)
   const authority = authorityEnd < 0 ? rest.slice(2) : rest.slice(2, 2 + authorityEnd)
   const path = authorityEnd < 0 ? '' : rest.slice(2 + authorityEnd).split('?')[0]
   if (BAD_ESCAPE.test(path ?? '')) return notAUrl
   const parsed = literalHost(authority)
   if ('problem' in parsed) return notAUrl
-  if (parsed.host === '') return 'The URL names no host.'
+  if (parsed.host === '') return translate('alerts.channel.url.noHost')
   const name = (scheme[1] ?? '').toLowerCase()
   if (name === 'https') return null
   if (name === 'http') {
-    return isPrivateHost(parsed.host)
-      ? null
-      : 'http is accepted only for a loopback or private address; use https.'
+    return isPrivateHost(parsed.host) ? null : translate('alerts.channel.url.httpPublic')
   }
-  return 'The scheme must be https, or http for a loopback or private address.'
+  return translate('alerts.channel.url.scheme')
 }
 
 /** Where a channel's address comes from, as its badge reads. */
 export function channelSourceLabel(channel: NotificationChannel): string {
-  return channel.source === 'ui' ? 'Console' : 'Environment'
+  return translate(
+    channel.source === 'ui' ? 'alerts.channel.source.ui' : 'alerts.channel.source.env',
+  )
 }
 
 /** Why an address could not be stored or removed (the request failed). */
 export function channelChangeFailureMessage(error: unknown, action: 'save' | 'remove'): string {
-  const verb = action === 'save' ? 'Not saved' : 'Not removed'
-  if (!isApiFailure(error)) return `${verb}. Try again.`
+  const verb = translate(
+    action === 'save' ? 'alerts.channel.change.notSaved' : 'alerts.channel.change.notRemoved',
+  )
+  if (!isApiFailure(error)) return translate('alerts.channel.change.retry', { verb })
   switch (error.kind) {
     case 'server':
     case 'unprocessable':
-      return `${verb}: ${error.detail ? `${error.error}: ${error.detail}` : error.error}`
+      return translate('alerts.channel.change.error', { verb, error: failureText(error) })
     case 'not_found':
-      return `${verb}: the server does not know this channel. Reload the page.`
+      return translate('alerts.channel.change.notFound', { verb })
     case 'unauthorized':
-      return `Your session has expired. Sign in again, then enter the URL again.`
+      return translate('alerts.channel.change.unauthorized')
     case 'forbidden':
-      return `${verb}: the server refused the request.`
+      return translate('alerts.channel.change.forbidden', { verb })
     case 'network':
     case 'malformed':
     case 'client':
-      return `${verb}: ${error.message}`
+      return translate('alerts.channel.change.error', { verb, error: error.message })
   }
 }
 
@@ -254,12 +272,20 @@ export function channelChangeFailureMessage(error: unknown, action: 'save' | 're
 export function testResultText(result: NotificationTestResult): string {
   switch (result.status) {
     case 'delivered':
-      return 'Delivered'
+      return translate('alerts.channel.result.delivered')
     case 'timeout':
-      return `No answer within 10 s${result.error ? `: ${result.error}` : ''}`
+      return result.error
+        ? translate('alerts.channel.result.timeoutError', { error: result.error })
+        : translate('alerts.channel.result.timeout')
     case 'failed':
-      return `Failed${result.error ? `: ${result.error}` : ''}`
+      return result.error
+        ? translate('alerts.channel.result.failedError', { error: result.error })
+        : translate('alerts.channel.result.failed')
   }
+}
+
+function failureText(error: { error: string; detail?: string }): string {
+  return error.detail ? `${error.error}: ${error.detail}` : error.error
 }
 
 function isApiFailure(error: unknown): error is ApiFailure {
@@ -270,27 +296,27 @@ function isApiFailure(error: unknown): error is ApiFailure {
 
 /** Why a test send could not be made at all (the request failed, not the delivery). */
 export function testFailureMessage(error: unknown): string {
-  if (!isApiFailure(error)) return 'Not sent. Try again.'
+  if (!isApiFailure(error)) return translate('alerts.channel.test.retry')
   switch (error.kind) {
     case 'server':
       if (error.status === 409) {
-        return 'Not sent: the channel is not configured on the server. Reload the page.'
+        return translate('alerts.channel.test.notConfigured')
       }
       if (error.status === 429) {
-        return 'Not sent: a test of this channel is already running. Wait for its result.'
+        return translate('alerts.channel.test.running')
       }
-      return `Not sent: ${error.detail ? `${error.error}: ${error.detail}` : error.error}`
+      return translate('alerts.channel.test.error', { error: failureText(error) })
     case 'unprocessable':
-      return `Not sent: ${error.detail ? `${error.error}: ${error.detail}` : error.error}`
+      return translate('alerts.channel.test.error', { error: failureText(error) })
     case 'not_found':
-      return 'Not sent: the server does not know this channel. Reload the page.'
+      return translate('alerts.channel.test.notFound')
     case 'unauthorized':
-      return 'Your session has expired. Sign in again to send a test message.'
+      return translate('alerts.channel.test.unauthorized')
     case 'forbidden':
-      return 'Not sent: the server refused the request.'
+      return translate('alerts.channel.test.forbidden')
     case 'network':
     case 'malformed':
     case 'client':
-      return `Not sent: ${error.message}`
+      return translate('alerts.channel.test.error', { error: error.message })
   }
 }

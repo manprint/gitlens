@@ -1,10 +1,10 @@
-import { screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Cluster } from '@/api/types'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
-import { CLUSTER } from '@/test/fixture-helpers'
+import { CLUSTER, INSTANCE_ID } from '@/test/fixture-helpers'
 
 import { ClusterCard } from './ClusterCard'
 
@@ -107,13 +107,41 @@ describe('ClusterCard', () => {
     expect(screen.getByTestId('readiness-badge')).toHaveTextContent('Partial · 2 warnings')
   })
 
+  it('RDY-UI-012 a partial badge links to the Readiness tab of the instance to fix', () => {
+    const { router } = renderWithProviders(
+      <ClusterCard
+        cluster={makeCluster()}
+        readiness={{ level: 'partial', warnings: 1, infos: 0, fixInstanceId: INSTANCE_ID }}
+      />,
+    )
+    const link = screen.getByTestId('readiness-fix-link')
+    expect(link).toHaveAttribute('href', `/instances/${INSTANCE_ID}?section=readiness`)
+    expect(link).toHaveAccessibleName(/^Fix the readiness warning on /)
+    expect(link).toHaveTextContent('Partial · 1 warningFix')
+
+    fireEvent.click(link)
+    expect(router.state.location.pathname).toBe(`/instances/${INSTANCE_ID}`)
+    expect(router.state.location.search).toBe('?section=readiness')
+  })
+
+  it('RDY-UI-013 a full badge links nowhere', () => {
+    renderWithProviders(
+      <ClusterCard
+        cluster={makeCluster()}
+        readiness={{ level: 'full', warnings: 0, infos: 1, fixInstanceId: null }}
+      />,
+    )
+    expect(screen.getByTestId('readiness-badge')).toHaveTextContent('Full')
+    expect(screen.queryByTestId('readiness-fix-link')).toBeNull()
+  })
+
   it('RDY-UI-009 a card with the readiness badge has no accessibility violations', async () => {
     // The card is a list item: it needs its list, as the fleet page gives it.
     const view = renderWithProviders(
       <div role="list">
         <ClusterCard
           cluster={makeCluster()}
-          readiness={{ level: 'partial', warnings: 2, infos: 1 }}
+          readiness={{ level: 'partial', warnings: 2, infos: 1, fixInstanceId: INSTANCE_ID }}
         />
       </div>,
     )

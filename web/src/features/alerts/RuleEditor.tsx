@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Input } from '@/components/ui/input'
 import { Callout } from '@/components/ui/callout'
+import { useT, type Translate } from '@/i18n/react'
+import { severityText } from './AlertRow'
 
 const SEVERITIES = ['critical', 'warning', 'info'] as const
 type Severity = (typeof SEVERITIES)[number]
@@ -39,13 +41,13 @@ function initialValues(rule: AlertRule): FormValues {
   }
 }
 
-function validate(values: FormValues): FormErrors {
+function validate(values: FormValues, t: Translate): FormErrors {
   const errors: FormErrors = {}
   const threshold = Number.parseFloat(values.threshold)
   const forSeconds = Number.parseFloat(values.forSeconds)
 
   if (values.threshold.trim() === '' || !Number.isFinite(threshold)) {
-    errors.threshold = 'Threshold must be a finite number.'
+    errors.threshold = t('alerts.ruleEditor.thresholdInvalid')
   }
   if (
     values.forSeconds.trim() === '' ||
@@ -53,16 +55,22 @@ function validate(values: FormValues): FormErrors {
     forSeconds < 0 ||
     forSeconds > 2_147_483_647
   ) {
-    errors.forSeconds = 'Duration must be an integer from 0 to 2147483647 seconds.'
+    errors.forSeconds = t('alerts.ruleEditor.durationInvalid')
   }
   return errors
 }
 
-function confirmation(response: AlertRuleUpdateResponse): string {
-  return `Updated ${response.rule_id}: threshold ${response.threshold}, duration ${response.for_seconds}s, severity ${response.severity}.`
+function confirmation(response: AlertRuleUpdateResponse, t: Translate): string {
+  return t('alerts.ruleEditor.updated', {
+    rule: response.rule_id,
+    threshold: String(response.threshold),
+    seconds: String(response.for_seconds),
+    severity: severityText(response.severity, t),
+  })
 }
 
 export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
+  const t = useT()
   const mutation = useUpdateAlertRule()
   const [values, setValues] = useState<FormValues>(() => initialValues(rule))
   const [errors, setErrors] = useState<FormErrors>({})
@@ -70,7 +78,7 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const nextErrors = validate(values)
+    const nextErrors = validate(values, t)
     setErrors(nextErrors)
     setSaved(undefined)
     if (Object.keys(nextErrors).length > 0) {
@@ -97,7 +105,7 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
             severity: severityValue(response.severity),
             threshold: String(response.threshold),
           })
-          setSaved(confirmation(response))
+          setSaved(confirmation(response, t))
         },
       },
     )
@@ -107,17 +115,15 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
     <section aria-labelledby="alert-rule-editor-title" className="space-y-4">
       <div>
         <h2 id="alert-rule-editor-title" className="text-lg font-semibold" tabIndex={-1}>
-          Edit alert rule: {rule.id}
+          {t('alerts.ruleEditor.title', { rule: rule.id })}
         </h2>
-        <p className="text-muted-foreground text-sm">
-          Changes are validated by the server and applied only after a successful save.
-        </p>
+        <p className="text-muted-foreground text-sm">{t('alerts.ruleEditor.intro')}</p>
       </div>
 
       <form className="grid max-w-xl gap-4" noValidate onSubmit={submit}>
         <div className="space-y-1">
           <label className="space-y-1 text-sm" htmlFor="rule-threshold">
-            <span className="font-medium">Threshold</span>
+            <span className="font-medium">{t('alerts.rules.threshold')}</span>
             <Input
               aria-describedby={
                 errors.threshold
@@ -144,14 +150,13 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
             ) : null}
           </label>
           <p className="text-muted-foreground text-xs" id="rule-threshold-help">
-            The rule fires when its metric crosses this value. The unit is that of the rule’s
-            metric, for example seconds for clock skew.
+            {t('alerts.ruleEditor.thresholdHelp')}
           </p>
         </div>
 
         <div className="space-y-1">
           <label className="space-y-1 text-sm" htmlFor="rule-for-seconds">
-            <span className="font-medium">Duration (seconds)</span>
+            <span className="font-medium">{t('alerts.ruleEditor.duration')}</span>
             <Input
               aria-describedby={
                 errors.forSeconds
@@ -179,14 +184,13 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
             ) : null}
           </label>
           <p className="text-muted-foreground text-xs" id="rule-for-seconds-help">
-            How long the condition must hold before the alert fires; 0 fires at the first
-            evaluation.
+            {t('alerts.ruleEditor.durationHelp')}
           </p>
         </div>
 
         <div className="space-y-1">
           <label className="space-y-1 text-sm" htmlFor="rule-severity">
-            <span className="font-medium">Severity</span>
+            <span className="font-medium">{t('alerts.column.severity')}</span>
             <NativeSelect
               aria-describedby="rule-severity-help"
               className="w-full"
@@ -198,13 +202,13 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
             >
               {SEVERITIES.map((severity) => (
                 <option key={severity} value={severity}>
-                  {severity}
+                  {severityText(severity, t)}
                 </option>
               ))}
             </NativeSelect>
           </label>
           <p className="text-muted-foreground text-xs" id="rule-severity-help">
-            The severity given to alerts this rule raises; it ranks them in the alert list.
+            {t('alerts.ruleEditor.severityHelp')}
           </p>
         </div>
 
@@ -219,10 +223,10 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
               }
               type="checkbox"
             />
-            <span className="font-medium">Enabled</span>
+            <span className="font-medium">{t('alerts.rules.enabled')}</span>
           </label>
           <p className="text-muted-foreground text-xs" id="rule-enabled-help">
-            A rule that is switched off is not evaluated and raises no alerts.
+            {t('alerts.ruleEditor.enabledHelp')}
           </p>
         </div>
 
@@ -238,10 +242,10 @@ export function RuleEditor({ onCancel, rule }: RuleEditorProps) {
             disabled={mutation.isPending}
             type="submit"
           >
-            {mutation.isPending ? 'Saving…' : 'Save rule'}
+            {mutation.isPending ? t('alerts.ruleEditor.saving') : t('alerts.ruleEditor.save')}
           </Button>
           <Button size="sm" variant="outline" onClick={onCancel} type="button">
-            Cancel
+            {t('alerts.ruleEditor.cancel')}
           </Button>
         </div>
       </form>

@@ -1,6 +1,11 @@
 import createClient from 'openapi-fetch'
 
+import { activeLocale } from '@/i18n/store'
+
 import type { paths } from './generated'
+
+/** The server renders finding texts in the console's language (plan 006 D10, F5). */
+export const LANGUAGE_HEADER = 'X-Pglens-Lang'
 
 export const client = createClient<paths>({
   // A browser resolves relative URLs against the current origin; Node's fetch
@@ -9,7 +14,13 @@ export const client = createClient<paths>({
   baseUrl: window.location.origin,
   // Resolve fetch at request time so MSW (and other browser instrumentation)
   // can install its interceptor after this module has been imported.
-  fetch: (...args) => globalThis.fetch(...args),
+  // The header is set here rather than in a middleware, which would add an
+  // asynchronous step to every request.
+  fetch: (...args) => {
+    const [input] = args
+    if (input instanceof Request) input.headers.set(LANGUAGE_HEADER, activeLocale())
+    return globalThis.fetch(...args)
+  },
   credentials: 'same-origin',
   headers: { Accept: 'application/json' },
 })

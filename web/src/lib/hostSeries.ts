@@ -65,11 +65,3 @@ export function usedRatio(total: number | null, free: number | null): number | n
   }
   return total > 0 ? (total - free) / total : null
 }
-
-/** The smallest 1, 2, 2.5 or 5 × 10ⁿ at or above `value`, so the top is a tick. */
-export function niceCeil(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 1
-  const magnitude = 10 ** Math.floor(Math.log10(value))
-  const factor = [1, 2, 2.5, 5, 10].find((candidate) => value <= candidate * magnitude) ?? 10
-  return factor * magnitude
-}

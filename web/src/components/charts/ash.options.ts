@@ -1,7 +1,9 @@
 import type { EChartsOption } from 'echarts'
 
 import type { AshPoint, AshSeries } from '@/lib/ash'
+import { translate } from '@/i18n/store'
 import { formatTooltipTime } from '@/lib/chartTime'
+import { formatCount, formatDecimal } from '@/lib/format'
 
 import { sliderLabelFormatter, spanOf, timeAxisOption } from './timeAxis'
 
@@ -43,7 +45,10 @@ export const ASH_PALETTE: Record<AshPaletteName, string> = {
   other: 'var(--wait-other)',
 }
 
-export const OTHER_FOLDED_LABEL = 'other (folded)'
+/** The series name of the waits folded into `other`, in the active language. */
+export function otherFoldedLabel(): string {
+  return translate('ash.chart.otherFolded')
+}
 
 export interface AshChartPoint extends AshPoint {
   samples?: number | null
@@ -58,8 +63,6 @@ export interface AshChartSeries {
 export interface AshOptionOptions {
   /** The selected time range; the time axis spans it rather than the data alone. */
   window?: { from: Date; to: Date } | undefined
-  /** Host CPU count; absent or non-positive values omit the reference line. */
-  cpuCount?: number | null
   /** Number of source groups folded into the `other` series. */
   foldedCount?: number
 }
@@ -80,7 +83,7 @@ function escapeHtml(value: string): string {
 }
 
 export function displayName(name: string): string {
-  return name === 'other' ? OTHER_FOLDED_LABEL : name
+  return name === 'other' ? otherFoldedLabel() : name
 }
 
 /** The colour token of a wait event type; unknown types take the `other` colour. */
@@ -102,20 +105,24 @@ export const ASH_EVENT_COLORS: readonly string[] = [
   'var(--wait-activity)',
 ]
 
-function formatMetric(value: unknown): string {
-  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : 'Unknown'
+function unknown(): string {
+  return translate('ash.chart.unknown')
 }
 
-function formatCount(value: unknown): string {
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : 'Unknown'
+function metricText(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? formatDecimal(value, 2) : unknown()
+}
+
+function countText(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? formatCount(value) : unknown()
 }
 
 function pointValue(value: unknown): string {
-  if (!Array.isArray(value)) return 'Unknown'
+  if (!Array.isArray(value)) return unknown()
   const timestamp = (value as readonly unknown[])[0]
   return typeof timestamp === 'string' || typeof timestamp === 'number'
     ? String(timestamp)
-    : 'Unknown'
+    : unknown()
 }
 
 function tupleValue(value: unknown, index: number): unknown {
@@ -131,26 +138,26 @@ function tooltipFor(
   const first = entries[0]
   const timestamp = pointValue(first?.value)
   const rows = entries.map((entry) => {
-    const name = typeof entry.seriesName === 'string' ? entry.seriesName : 'Unknown'
+    const name = typeof entry.seriesName === 'string' ? entry.seriesName : unknown()
     const value = tupleValue(entry.value, 1)
     const metadataPoint = metadata.get(`${name}\u0000${timestamp}`)
     const samples = metadataPoint?.samples
     const ticks = metadataPoint?.ticks
-    return (
-      `<div><strong>${escapeHtml(name)}</strong>: ${formatMetric(value)} avg active backends ` +
-      `(samples: ${formatCount(samples)}, ticks: ${formatCount(ticks)})</div>`
-    )
+    const row = translate('ash.chart.tooltipRow', {
+      value: metricText(value),
+      samples: countText(samples),
+      ticks: countText(ticks),
+    })
+    return `<div><strong>${escapeHtml(name)}</strong>: ${escapeHtml(row)}</div>`
   })
   const folded =
-    foldedCount > 0 ? `<div>${OTHER_FOLDED_LABEL}: ${foldedCount} groups folded</div>` : ''
+    foldedCount > 0
+      ? `<div>${escapeHtml(otherFoldedLabel())}: ${escapeHtml(translate('ash.chart.folded', { count: foldedCount }))}</div>`
+      : ''
   // The lookup keeps the raw timestamp; the reader sees the UTC tooltip form.
   const parsed = Date.parse(timestamp)
   const time = Number.isFinite(parsed) ? formatTooltipTime(parsed) : timestamp
   return `<div>${escapeHtml(time)}</div>${rows.join('')}${folded}`
-}
-
-function validCpuCount(value: number | null | undefined): value is number {
-  return value !== null && value !== undefined && Number.isFinite(value) && value > 0
 }
 
 export function orderAshSeries<S extends AshChartSeries | AshSeries>(series: readonly S[]): S[] {
@@ -209,25 +216,10 @@ function ashLineSeries(
   }
 }
 
-function cpuCountLine(cpuCount: number) {
-  return {
-    silent: true,
-    symbol: 'none',
-    data: [
-      {
-        yAxis: cpuCount,
-        name: `CPU count (${cpuCount})`,
-        label: { formatter: `CPU count (${cpuCount})` },
-        lineStyle: { color: 'var(--muted-foreground)', type: 'dashed' as const, width: 1 },
-      },
-    ],
-  }
-}
-
 /** Build a deterministic, gap-preserving stacked area option for ASH groups. */
 export function buildAshOption(
   series: readonly AshChartSeries[] | readonly AshSeries[],
-  { cpuCount, foldedCount = 0, window }: AshOptionOptions = {},
+  { foldedCount = 0, window }: AshOptionOptions = {},
 ): EChartsOption {
   const ordered = orderAshSeries<AshChartSeries | AshSeries>(series)
   const metadata = tooltipMetadata(ordered)
@@ -236,13 +228,7 @@ export function buildAshOption(
     spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts))),
   )
   const safeFoldedCount = safeFolded(foldedCount)
-  const metricSeries = ordered.map((item, index) => {
-    const optionSeries = ashLineSeries(item, 'ash')
-    if (index === 0 && validCpuCount(cpuCount)) {
-      return { ...optionSeries, markLine: cpuCountLine(cpuCount) }
-    }
-    return optionSeries
-  })
+  const metricSeries = ordered.map((item) => ashLineSeries(item, 'ash'))
 
   return {
     animation: false,
@@ -254,9 +240,8 @@ export function buildAshOption(
       formatter: (params: unknown) => tooltipFor(params, metadata, safeFoldedCount),
     },
     xAxis: ashTimeAxis(spanMs, window),
-    yAxis: { type: 'value', min: 0, name: 'avg active backends' },
+    yAxis: { type: 'value', min: 0, name: translate('ash.chart.axis') },
     dataZoom: [
-      { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
       {
         type: 'slider',
         xAxisIndex: 0,
@@ -269,25 +254,9 @@ export function buildAshOption(
   }
 }
 
-/** Indexes of values with no value on either side: a line through them draws nothing. */
-export function isolatedPoints(points: readonly AshPoint[]): Set<number> {
-  const isolated = new Set<number>()
-  points.forEach((point, index) => {
-    if (point.value === null) return
-    const before = points[index - 1]?.value ?? null
-    const after = points[index + 1]?.value ?? null
-    if (before === null && after === null) isolated.add(index)
-  })
-  return isolated
-}
-
-const ISOLATED_SYMBOL_SIZE = 5
-
 export interface AshGroupOptionOptions extends AshOptionOptions {
   /** The stack (and wait group) id; each group's chart stacks only its own series. */
   stack: string
-  /** Only the CPU card draws the CPU-count line. */
-  showCpuCount?: boolean
   /** Span of the whole page's data, so every card labels its time axis alike. */
   spanMs?: number
   /** Colour of a series; by default the token of its wait event type. */
@@ -300,15 +269,7 @@ export interface AshGroupOptionOptions extends AshOptionOptions {
  */
 export function buildAshGroupOption(
   series: readonly AshChartSeries[] | readonly AshSeries[],
-  {
-    colorOf = paletteFor,
-    cpuCount,
-    foldedCount = 0,
-    showCpuCount = false,
-    spanMs,
-    stack,
-    window,
-  }: AshGroupOptionOptions,
+  { colorOf = paletteFor, foldedCount = 0, spanMs, stack, window }: AshGroupOptionOptions,
 ): EChartsOption {
   const ordered = orderAshSeries<AshChartSeries | AshSeries>(series)
   const metadata = tooltipMetadata(ordered)
@@ -317,21 +278,7 @@ export function buildAshGroupOption(
     spanMs ?? spanOf(ordered.flatMap((item) => item.points.map((point) => point.ts))),
   )
   const safeFoldedCount = safeFolded(foldedCount)
-  const metricSeries = ordered.map((item, index) => {
-    const isolated = isolatedPoints(item.points)
-    // A sample between two unsampled buckets gets a dot, or it would not show.
-    const optionSeries = {
-      ...ashLineSeries(item, stack, colorOf(item.name)),
-      showSymbol: isolated.size > 0,
-      symbol: 'circle',
-      symbolSize: (_value: unknown, params: { dataIndex?: number }) =>
-        params.dataIndex !== undefined && isolated.has(params.dataIndex) ? ISOLATED_SYMBOL_SIZE : 0,
-    }
-    if (index === 0 && showCpuCount && validCpuCount(cpuCount)) {
-      return { ...optionSeries, markLine: cpuCountLine(cpuCount) }
-    }
-    return optionSeries
-  })
+  const metricSeries = ordered.map((item) => ashLineSeries(item, stack, colorOf(item.name)))
 
   return {
     animation: false,
@@ -344,9 +291,8 @@ export function buildAshGroupOption(
       formatter: (params: unknown) => tooltipFor(params, metadata, safeFoldedCount),
     },
     xAxis: ashTimeAxis(span, window),
-    yAxis: { type: 'value', min: 0, name: 'avg active backends' },
+    yAxis: { type: 'value', min: 0, name: translate('ash.chart.axis') },
     dataZoom: [
-      { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
       {
         type: 'slider',
         xAxisIndex: 0,

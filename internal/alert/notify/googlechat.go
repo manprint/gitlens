@@ -40,8 +40,8 @@ func googleChatText(m Message) string {
 	if !isTest(m) {
 		text += "\n" + fmt.Sprintf("cluster=%s instance=%s database=%s value=%v at=%s", m.Cluster, m.Instance, m.Database, m.Value, m.At.Format(time.RFC3339))
 	}
-	if r := []rune(text); len(r) > googleChatMaxRunes {
-		text = string(r[:googleChatMaxRunes-1]) + "…"
+	if m.Detail != nil && m.Detail.Title != "" {
+		text = detailText(m.Detail)
 	}
-	return text
+	return clip(text, googleChatMaxRunes)
 }

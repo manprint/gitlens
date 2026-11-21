@@ -29,6 +29,8 @@ describe('application route registry', () => {
       '/alerts/rules',
       '/alerts/silences',
       '/settings',
+      '/help',
+      '/help/:topicId',
       '*',
     ])
 

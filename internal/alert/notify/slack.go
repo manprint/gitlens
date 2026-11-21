@@ -23,11 +23,15 @@ func (s *slack) Send(ctx context.Context, m Message) error {
 	if !isTest(m) {
 		blocks = append(blocks, map[string]any{"type": "context", "elements": []any{map[string]string{"type": "mrkdwn", "text": fmt.Sprintf("cluster=%s instance=%s database=%s value=%v at=%s", m.Cluster, m.Instance, m.Database, m.Value, m.At.Format(time.RFC3339))}}})
 	}
+	text := strings.ToUpper(m.Severity) + " " + m.Summary
+	if m.Detail != nil && m.Detail.Title != "" {
+		blocks, text = slackBlocks(m), m.Detail.Title
+	}
 	payload := struct {
 		Text   string `json:"text"`
 		Blocks []any  `json:"blocks"`
 	}{
-		Text:   strings.ToUpper(m.Severity) + " " + m.Summary,
+		Text:   text,
 		Blocks: blocks,
 	}
 	b, err := json.Marshal(payload)

@@ -7,11 +7,14 @@ import { useStatements } from '@/api/queries'
 import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { InfoHint } from '@/components/layout/InfoHint'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { FULL_SEARCH_HINT, SearchBox } from '@/components/layout/SearchBox'
+import { SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
 import { SqlText } from '@/components/layout/SqlText'
 import { Button } from '@/components/ui/button'
+import type { MessageKey } from '@/i18n/messages/en'
+import { type Translate, useT } from '@/i18n/react'
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import { Truncated } from '@/components/state/Truncated'
@@ -39,14 +42,14 @@ const DEFAULT_SORT: StatementSort = 'total_exec_time'
 // The server has always ranked by temporary blocks and WAL too; the list
 // offered neither, so the statements spilling to disk or writing the most
 // WAL could only be found by paging through another ranking.
-const SORT_OPTIONS: readonly { value: StatementSort; label: string }[] = [
-  { value: 'total_exec_time', label: 'Total time' },
-  { value: 'mean_exec_time', label: 'Mean time' },
-  { value: 'calls', label: 'Calls' },
-  { value: 'rows', label: 'Rows' },
-  { value: 'shared_blks_read', label: 'Shared blocks read' },
-  { value: 'temp_blks_written', label: 'Temporary blocks written' },
-  { value: 'wal_bytes', label: 'WAL bytes' },
+const SORT_OPTIONS: readonly { value: StatementSort; labelKey: MessageKey }[] = [
+  { value: 'total_exec_time', labelKey: 'queries.common.totalTime' },
+  { value: 'mean_exec_time', labelKey: 'queries.common.meanTime' },
+  { value: 'calls', labelKey: 'queries.common.calls' },
+  { value: 'rows', labelKey: 'queries.common.rows' },
+  { value: 'shared_blks_read', labelKey: 'queries.list.sortSharedRead' },
+  { value: 'temp_blks_written', labelKey: 'queries.list.sortTempWritten' },
+  { value: 'wal_bytes', labelKey: 'queries.list.sortWal' },
 ]
 
 interface QueryListPageProps {
@@ -86,7 +89,7 @@ function formatNumber(value: number | null | undefined): string {
     : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
 
-function queryTextCell(row: StatementDisplayRow, instanceId: string, term: string) {
+function queryTextCell(row: StatementDisplayRow, instanceId: string, term: string, t: Translate) {
   const queryText = row.query_text ?? ''
   const normalised = normaliseQueryText(queryText)
 
@@ -97,7 +100,7 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string, term: strin
         className="text-primary text-xs font-semibold underline-offset-4 hover:underline min-[1600px]:shrink-0 min-[1600px]:whitespace-nowrap"
         to={queryPath(instanceId, row.queryid, row.datname)}
       >
-        Query {String(row.queryid)}
+        {t('queries.list.queryLink', { queryid: String(row.queryid) })}
       </Link>
       {queryText ? (
         <details className="max-w-xl min-[1600px]:min-w-0">
@@ -124,19 +127,20 @@ function queryTextCell(row: StatementDisplayRow, instanceId: string, term: strin
 function statementColumns(
   instanceId: string,
   term: string,
+  t: Translate,
 ): DataTableProps<StatementDisplayRow>['columns'] {
   return [
     {
       id: 'query',
-      header: 'Query',
+      header: t('queries.common.query'),
       // Takes the width the fixed-width figures leave from 1600 px (D26).
       enableSorting: false,
-      cell: ({ row }) => queryTextCell(row.original, instanceId, term),
+      cell: ({ row }) => queryTextCell(row.original, instanceId, term, t),
     },
     {
       id: 'calls',
       meta: { width: '5.5rem' },
-      header: 'Calls',
+      header: t('queries.common.calls'),
       accessorFn: (row) => summariseStatement(row).calls,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
@@ -150,7 +154,7 @@ function statementColumns(
     {
       id: 'total-time',
       meta: { width: '8rem', help: 'statements.total-time' },
-      header: 'Total time',
+      header: t('queries.common.totalTime'),
       accessorFn: (row) => summariseStatement(row).total,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
@@ -164,7 +168,7 @@ function statementColumns(
     {
       id: 'mean-time',
       meta: { width: '8rem', help: 'statements.mean-time' },
-      header: 'Mean time',
+      header: t('queries.common.meanTime'),
       accessorFn: (row) => summariseStatement(row).mean,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
@@ -176,7 +180,7 @@ function statementColumns(
     {
       id: 'share-total',
       meta: { width: '9.5rem', help: 'statements.share-of-listed' },
-      header: 'Share of listed time',
+      header: t('queries.list.shareOfListed'),
       enableSorting: false,
       cell: ({ row }) => {
         const share = row.original.totalShare
@@ -190,7 +194,7 @@ function statementColumns(
     {
       id: 'rows',
       meta: { width: '5.5rem' },
-      header: 'Rows',
+      header: t('queries.common.rows'),
       accessorFn: (row) =>
         typeof row.rows === 'number' && Number.isFinite(row.rows) ? row.rows : null,
       cell: ({ row }) => <span className="tabular-nums">{formatNumber(row.original.rows)}</span>,
@@ -198,7 +202,7 @@ function statementColumns(
     {
       id: 'cache-hit-ratio',
       meta: { width: '8rem', help: 'statements.cache-hit-ratio' },
-      header: 'Cache hit ratio',
+      header: t('queries.overview.cacheHitRatio'),
       accessorFn: (row) => summariseStatement(row).cacheHitRatio,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
@@ -212,7 +216,7 @@ function statementColumns(
     {
       id: 'wal-bytes',
       meta: { width: '6.5rem', help: 'statements.wal' },
-      header: 'WAL',
+      header: t('queries.list.wal'),
       accessorFn: (row) =>
         typeof row.wal_bytes === 'number' && Number.isFinite(row.wal_bytes) ? row.wal_bytes : null,
       cell: ({ row }) => {
@@ -229,7 +233,7 @@ function statementColumns(
     {
       id: 'temporary-bytes',
       meta: { width: '11rem', help: 'statements.temp-bytes-per-call' },
-      header: 'Temporary bytes/call',
+      header: t('queries.list.tempBytesPerCall'),
       accessorFn: (row) => summariseStatement(row).tempBytesPerCall,
       cell: ({ row }) => {
         const summary = summariseStatement(row.original)
@@ -247,31 +251,30 @@ function isDisabledResponse(data: StatementApiResponse): boolean {
   return data.disabled === true || data.enabled === false
 }
 
-function skipSentence(reason: string | undefined): string {
-  return reason
-    ? `The agent skips the stat_statements check: ${reason}.`
-    : 'The agent does not collect statements for this instance.'
+function skipSentence(reason: string | undefined, t: Translate): string {
+  return reason ? t('queries.list.skipWithReason', { reason }) : t('queries.list.skipNone')
 }
 
 // There is no configuration key to turn back on: the agent skips the check
 // when, at startup, it finds no pg_stat_statements view it can read.
 function DisabledStatementsState({ reason }: { reason: string | undefined }) {
+  const t = useT()
   return (
     <div className="space-y-4">
       <PageHeader
+        help={<HelpLink anchor="query-performance" label={t('queries.list.inspectorHelp')} />}
         icon={Zap}
-        eyebrow="Query performance"
-        title="Query inspector"
-        subtitle="Every statement pg_stat_statements recorded on this instance in the selected time range. Change the ranking to find the slowest, most frequent or most I/O-heavy queries, and open one to see its plan."
+        eyebrow={t('queries.overview.eyebrow')}
+        title={t('queries.list.inspectorTitle')}
+        subtitle={t('queries.list.inspectorSubtitle')}
       />
       <div role="status" className="bg-muted/50 rounded-lg border px-4 py-3 text-sm">
-        <strong>pg_stat_statements disabled.</strong> {skipSentence(reason)}
+        <strong>{t('queries.list.disabledTitle')}</strong> {skipSentence(reason, t)}
       </div>
       <p className="text-muted-foreground text-sm">
-        The agent looks for the view when it starts, in the database its DSN names and then in the
-        monitored databases; the module must also be in <code>shared_preload_libraries</code>.{' '}
+        {t('queries.list.extensionBefore')} <code>shared_preload_libraries</code>.{' '}
         <a className="underline" href="/README.md#agent-configuration">
-          See the README extension guidance.
+          {t('queries.list.readmeLink')}
         </a>
       </p>
     </div>
@@ -279,6 +282,7 @@ function DisabledStatementsState({ reason }: { reason: string | undefined }) {
 }
 
 export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageProps = {}) {
+  const t = useT()
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const { range } = useTimeRange()
@@ -350,11 +354,11 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
       <SearchBox
         busy={statementsQuery.isFetching && term !== ''}
         draft={searchDraft}
-        hint={FULL_SEARCH_HINT}
+        fullSearch
         id="statement-search"
-        label="Search statements"
+        label={t('queries.list.searchLabel')}
         onChange={setSearch}
-        placeholder="Query text, queryid or database"
+        placeholder={t('queries.list.searchPlaceholder')}
         value={q}
       />
     </div>
@@ -366,7 +370,7 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
     return (
       <div className="space-y-4">
         <div className="flex">{searchBox}</div>
-        <div role="status">Loading statements…</div>
+        <div role="status">{t('queries.list.loading')}</div>
       </div>
     )
   }
@@ -381,7 +385,7 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
       <div className="space-y-4">
         <div className="flex">{searchBox}</div>
         <ErrorState
-          endpoint="statements"
+          endpoint={t('queries.list.statements')}
           failure={statementsQuery.error}
           onRetry={() => void statementsQuery.refetch()}
         />
@@ -400,19 +404,27 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   const statementNotes = (
     <div
       className="text-muted-foreground flex min-w-0 flex-1 items-center gap-2 self-center overflow-hidden text-xs whitespace-nowrap"
-      title={`${truncated ? `Showing ${rows.length} of ${STATEMENT_LIMIT} statements (truncated; budget ${STATEMENT_LIMIT}). The top-N budget is configured by checks.stat_statements.top_n. ` : ''}Entries beyond pg_stat_statements.max are evicted and may appear and disappear. queryid values are comparable only within this cluster.`}
+      title={
+        truncated
+          ? `${t('queries.list.notesTruncated', { shown: rows.length, limit: STATEMENT_LIMIT })} ${t('queries.list.notesEvicted')}`
+          : t('queries.list.notesEvicted')
+      }
     >
       {truncated ? (
         <>
-          <Truncated shown={rows.length} budget={STATEMENT_LIMIT} scope="statements" />
+          <Truncated
+            shown={rows.length}
+            budget={STATEMENT_LIMIT}
+            scope={t('queries.list.statements')}
+          />
           <span>
-            The top-N budget is configured by <code>checks.stat_statements.top_n</code>.
+            {t('queries.list.topNBefore')} <code>checks.stat_statements.top_n</code>.
           </span>
         </>
       ) : null}
       <span className="truncate">
-        Entries beyond <code>pg_stat_statements.max</code> are evicted and may appear and disappear.{' '}
-        <code>queryid</code> values are comparable only within this cluster.
+        {t('queries.list.evictedBefore')} <code>pg_stat_statements.max</code>{' '}
+        {t('queries.list.evictedAfter')} <code>queryid</code> {t('queries.list.queryidAfter')}
       </span>
     </div>
   )
@@ -420,22 +432,23 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
   return (
     <div className="space-y-8 min-[1600px]:space-y-2">
       <PageHeader
+        help={<HelpLink anchor="query-performance" label={t('queries.list.inspectorHelp')} />}
         icon={Zap}
-        eyebrow="Query performance"
-        title="Query inspector"
-        subtitle="Every statement pg_stat_statements recorded here in the selected range. Re-rank it, then open one to see its plan."
+        eyebrow={t('queries.overview.eyebrow')}
+        title={t('queries.list.inspectorTitle')}
+        subtitle={t('queries.list.inspectorSubtitleRange')}
         freshness={
           <FreshnessBadge dataUpdatedAt={statementsQuery.dataUpdatedAt} policy="statements" />
         }
       />
       <Section
         id="statement-list"
-        title="Statements"
+        title={t('queries.list.statementsTitle')}
         captionId="queries.statements-section"
         actions={
           <>
             <label className="text-muted-foreground text-sm font-medium" htmlFor="statement-sort">
-              Sort statements
+              {t('queries.list.sortLabel')}
             </label>
             <NativeSelect
               className="min-[1600px]:h-8"
@@ -445,11 +458,15 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
             >
               {SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(option.labelKey)}
                 </option>
               ))}
             </NativeSelect>
-            <InfoHint id="queries.ranking" label="Sort statements" />
+            <InfoHint id="queries.ranking" label={t('queries.list.sortLabel')} />
+            <HelpLink
+              anchor="query-performance#query-inspector"
+              label={t('queries.list.tableHelp')}
+            />
           </>
         }
       >
@@ -458,38 +475,38 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
             role="status"
             className="border-warning bg-warning/10 mb-4 rounded-lg border p-3 text-sm"
           >
-            {skipSentence(response.disabled_reason)} The statements below were collected earlier.
+            {skipSentence(response.disabled_reason, t)} {t('queries.list.collectedEarlier')}
           </p>
         ) : null}
         {rows.length === 0 ? <div className="mb-3 flex">{searchBox}</div> : null}
         <DataTable
-          ariaLabel="Statement statistics"
+          ariaLabel={t('queries.list.ariaLabel')}
           captionId="queries.statements-table"
           tableId="statement-statistics"
-          columns={statementColumns(instanceId, shownTerm)}
+          columns={statementColumns(instanceId, shownTerm, t)}
           data={rows}
           emptyState={
             shownTerm === '' ? (
               <EmptyState
-                title="No statements"
-                description="No pg_stat_statements entries match the selected instance, database, and time range."
+                title={t('queries.list.noStatementsTitle')}
+                description={t('queries.list.noStatementsText')}
               />
             ) : (
               <EmptyState
                 action={
                   <Button onClick={() => clearSearch()} size="sm" type="button" variant="outline">
-                    Show all statements
+                    {t('queries.list.showAll')}
                   </Button>
                 }
-                description="The search covers every statement collected on this instance in the time range, not only the listed ones. Try another term or a wider range."
-                title={`No statement matches “${shownTerm}” in this range`}
+                description={t('queries.list.noMatchText')}
+                title={t('queries.list.noMatchTitle', { term: shownTerm })}
               />
             )
           }
           {...(shownTerm === ''
             ? {}
             : { footerNote: matchCountNote(rows.length, response?.has_more === true) })}
-          scope="statements"
+          scope={t('queries.list.statements')}
           toolbarExtra={
             <>
               {searchBox}

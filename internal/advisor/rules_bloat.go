@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/manprint/pglens/internal/i18n"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/wire"
 )
@@ -48,12 +49,9 @@ func (r bloatBlindRule) Evaluate(s *Snapshot) []Finding {
 			Scope:          ScopeDatabase,
 			Datname:        f.Datname,
 			ObjectName:     "table statistics",
-			Title:          "Bloat estimate blind",
-			Detail:         fmt.Sprintf("%d tables have column statistics the monitoring role cannot read, so no bloat is estimated for them", int(count)),
-			Remediation:    "Grant the monitoring role SELECT on the columns of these tables and row access that row security does not hide, or accept that they are not estimated",
 			DegradedReason: reason,
 			Evidence:       map[string]any{"skipped_tables": int(count), "tables": names},
-		})
+		}.say("bloat.estimate_blind", i18n.Args{"count": int(count)}))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Datname < out[j].Datname })
 	return out

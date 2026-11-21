@@ -2,6 +2,7 @@ import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight } from 'lucide-rea
 
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
+import { useT } from '@/i18n/react'
 import { PAGE_SIZES } from '@/lib/tableControls'
 
 export interface TablePaginationProps {
@@ -27,14 +28,34 @@ export function TablePagination({
   onPageSize,
   ariaLabel,
 }: TablePaginationProps) {
+  const t = useT()
   const steps = [
-    { label: 'First page', Icon: ChevronFirst, target: 1, disabled: page <= 1 },
-    { label: 'Previous page', Icon: ChevronLeft, target: page - 1, disabled: page <= 1 },
-    { label: 'Next page', Icon: ChevronRight, target: page + 1, disabled: page >= pageCount },
-    { label: 'Last page', Icon: ChevronLast, target: pageCount, disabled: page >= pageCount },
+    { label: t('shell.table.firstPage'), Icon: ChevronFirst, target: 1, disabled: page <= 1 },
+    {
+      label: t('shell.table.previousPage'),
+      Icon: ChevronLeft,
+      target: page - 1,
+      disabled: page <= 1,
+    },
+    {
+      label: t('shell.table.nextPage'),
+      Icon: ChevronRight,
+      target: page + 1,
+      disabled: page >= pageCount,
+    },
+    {
+      label: t('shell.table.lastPage'),
+      Icon: ChevronLast,
+      target: pageCount,
+      disabled: page >= pageCount,
+    },
   ]
   return (
-    <nav aria-label={ariaLabel} className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+    <nav
+      aria-label={ariaLabel}
+      data-table-pager=""
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs"
+    >
       {pageCount > 1 ? (
         <div className="flex items-center gap-1">
           {steps.slice(0, 2).map(({ label, Icon, target, disabled }) => (
@@ -52,7 +73,7 @@ export function TablePagination({
             </Button>
           ))}
           <span aria-live="polite" className="text-muted-foreground px-2 tabular-nums">
-            Page {page} of {pageCount}
+            {t('shell.table.pageOf', { page, pageCount })}
           </span>
           {steps.slice(2).map(({ label, Icon, target, disabled }) => (
             <Button
@@ -71,9 +92,9 @@ export function TablePagination({
         </div>
       ) : null}
       <label className="text-muted-foreground flex items-center gap-2">
-        Rows per page
+        {t('shell.table.rowsPerPage')}
         <NativeSelect
-          aria-label="Rows per page"
+          aria-label={t('shell.table.rowsPerPage')}
           className="h-8 px-2 text-xs min-[1600px]:h-7"
           onChange={(event) => onPageSize(Number(event.target.value))}
           value={pageSize}

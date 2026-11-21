@@ -11,6 +11,7 @@ import { server } from '@/test/msw/server'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { flushNetwork } from '@/test/network'
 import { renderWithProviders } from '@/test/render'
+import { formatDuration } from '@/lib/format'
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
 
 import { FindingsPage } from './FindingsPage'
@@ -181,12 +182,86 @@ describe('FindingsPage', () => {
     expect(screen.getByText(/grant T1 access/)).toBeInTheDocument()
   })
 
-  it('UI-FIND-016 renders evidence values', async () => {
-    await renderFindings([finding({ evidence: { lag_seconds: 42, threshold: 10, primary: true } })])
+  it('UI-FIND-016 renders evidence values with labels and units, the key in the tooltip', async () => {
+    await renderFindings([
+      finding({ evidence: { lag_seconds: 42, threshold: 10, primary: true, share: 0.425 } }),
+    ])
 
-    expect(screen.getByText('lag_seconds')).toBeInTheDocument()
-    expect(screen.getByText('42')).toBeInTheDocument()
-    expect(screen.getByText('true')).toBeInTheDocument()
+    const evidence = screen.getByRole('region', { name: 'Evidence' })
+    expect(within(evidence).getByTitle('lag_seconds')).toHaveTextContent(/^Lag$/)
+    expect(within(evidence).getByText(formatDuration(42))).toBeInTheDocument()
+    expect(within(evidence).getByTitle('share')).toHaveTextContent('Share of the execution time')
+    expect(within(evidence).getByText('42.5%')).toBeInTheDocument()
+    expect(within(evidence).getByText('yes')).toBeInTheDocument()
+    expect(within(evidence).queryByText(/[{}"]/)).not.toBeInTheDocument()
+  })
+
+  it('UI-FIND-051 shows a statement finding by its text, never its id, and the full text in the card', async () => {
+    await renderFindings([
+      finding({
+        rule_id: 'query.slow_mean',
+        scope: 'instance',
+        instance_id: INSTANCE_ID,
+        datname: 'shop',
+        object_name: 'queryid:-4617329483752201933',
+        query_text: 'SELECT *\n  FROM orders\n WHERE id = $1',
+        evidence: { queryid: -4617329483752202000, observed_ms: 761.3274609999993 },
+      }),
+    ])
+
+    const table = screen.getByRole('table', { name: 'Advisor findings' })
+    expect(within(table).getByTitle('SELECT * FROM orders WHERE id = $1')).toBeInTheDocument()
+    expect(within(table).queryByText(/queryid:/)).not.toBeInTheDocument()
+
+    const statement = screen.getByRole('region', { name: 'Statement' })
+    expect(within(statement).getByLabelText('Statement text').textContent).toContain(
+      'SELECT *\n  FROM orders\n WHERE id = $1',
+    )
+    expect(within(statement).getByText('-4617329483752201933')).toBeInTheDocument()
+    expect(within(statement).getByRole('button', { name: 'Copy query text' })).toBeInTheDocument()
+    expect(within(statement).getByRole('link', { name: 'Open query details' })).toHaveAttribute(
+      'href',
+      `/instances/${INSTANCE_ID}/queries/-4617329483752201933?db=shop`,
+    )
+    const evidence = screen.getByRole('region', { name: 'Evidence' })
+    expect(within(evidence).queryByTitle('queryid')).not.toBeInTheDocument()
+    expect(within(evidence).getByTitle('observed_ms')).toHaveTextContent('Mean time now')
+  })
+
+  it('UI-FIND-052 says when the server no longer keeps the statement text', async () => {
+    await renderFindings([finding({ rule_id: 'query.slow_mean', object_name: 'queryid:42' })])
+
+    const table = screen.getByRole('table', { name: 'Advisor findings' })
+    expect(within(table).getByText('Statement 42 (text no longer kept)')).toBeInTheDocument()
+    const statement = screen.getByRole('region', { name: 'Statement' })
+    expect(
+      within(statement).getByText(/text of this statement is no longer kept/),
+    ).toBeInTheDocument()
+    expect(within(statement).queryByLabelText('Statement text')).not.toBeInTheDocument()
+  })
+
+  it('UI-FIND-053 gives the steps and a read-only SQL script to verify the finding', async () => {
+    await renderFindings([
+      finding({
+        rule_id: 'table.dead_tuples_high',
+        scope: 'object',
+        datname: 'shop',
+        object_name: 'public.orders',
+      }),
+      finding({ finding_id: 'finding-2', title: 'No check' }),
+    ])
+
+    const checks = screen.getAllByRole('region', { name: 'How to verify it on the database' })
+    expect(checks).toHaveLength(1)
+    const check = checks[0]!
+    expect(within(check).getAllByRole('listitem')[0]).toHaveTextContent(
+      /Connect to the database shop/,
+    )
+    const sql = within(check).getByLabelText('Verification SQL').textContent
+    expect(sql.startsWith('BEGIN TRANSACTION READ ONLY;')).toBe(true)
+    expect(sql.trimEnd().endsWith('ROLLBACK;')).toBe(true)
+    expect(sql).toContain("'public.orders'")
+    expect(within(check).getByRole('button', { name: 'Copy SQL' })).toBeInTheDocument()
   })
 
   it('UI-FIND-040 presents an affirmative empty state with the evaluated rule count', async () => {
@@ -596,11 +671,17 @@ describe('FindingsPage', () => {
     const table = screen.getByRole('table', { name: 'Advisor findings' })
     expect(table).toHaveClass('min-[1600px]:table-fixed')
     expect(screen.queryByRole('article')).not.toBeInTheDocument()
-    const title = within(table).getByTitle('Long finding title')
-    expect(title).toHaveClass('min-[1600px]:truncate')
-    expect(within(table).getByTitle('public.orders · database shop')).toHaveClass(
-      'min-[1600px]:truncate',
-    )
+    const title = within(table).getByRole('rowheader', { name: /Long finding title/ })
+    expect(title).toHaveClass('whitespace-normal')
+    expect(title).not.toHaveClass('min-[1600px]:truncate')
+    expect(within(table).getByTitle('public.orders')).toHaveClass('line-clamp-2')
+    expect(within(table).getByTitle('database shop')).toHaveTextContent('database shop')
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((th) => th.textContent),
+    ).toEqual(expect.arrayContaining(['Severity', 'Finding', 'Last seen']))
+    expect(within(table).queryByRole('columnheader', { name: /^(Rule|Scope|State)$/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'Show details of Long finding title' })).toHaveClass(
       'min-[1600px]:size-5',
     )

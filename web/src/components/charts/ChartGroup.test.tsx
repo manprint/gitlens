@@ -1,25 +1,29 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
+import { captionOf } from '@/lib/captions'
+
 import { ChartCard } from './ChartCard'
 import { ChartGroup } from './ChartGroup'
 
 describe('ChartGroup', () => {
-  it('CGRP-001 renders its heading, description and id', () => {
+  it('CGRP-001 renders a card with its heading, caption and id', () => {
     render(
-      <ChartGroup description="Commits and rollbacks" id="throughput" title="Throughput">
+      <ChartGroup captionId="overview.group-workload" id="throughput" title="Throughput">
         <div>card</div>
       </ChartGroup>,
     )
     const group = screen.getByRole('region', { name: 'Throughput' })
     expect(group).toHaveAttribute('id', 'throughput')
     expect(within(group).getByRole('heading', { level: 2, name: 'Throughput' })).toBeVisible()
-    expect(within(group).getByText('Commits and rollbacks')).toBeVisible()
+    expect(within(group).getByText(captionOf('overview.group-workload').what)).toBeVisible()
+    expect(group).toHaveAttribute('data-card')
+    expect(group).toHaveAttribute('data-caption-id', 'overview.group-workload')
   })
 
   it('CGRP-002 places the children in a two-column grid', () => {
     render(
-      <ChartGroup description="d" id="g" title="Group">
+      <ChartGroup captionId="overview.group-workload" id="g" title="Group">
         <div>first card</div>
         <div>second card</div>
         <ChartCard

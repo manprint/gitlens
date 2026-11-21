@@ -238,15 +238,14 @@ test('VIS-016 ASH shows one readable chart per wait group with a clear legend', 
   await expect(page).not.toHaveURL(/view=/)
   await expect(grid.locator('[data-chart-card]')).toHaveCount(count)
 
-  // Shared zoom: dragging the first chart's slider handle narrows every chart.
-  // The slider zooms in place (its event carries percentages, so the URL range
-  // stays); echarts.connect redraws the other charts on the new window.
+  // Local zoom: dragging the first chart's slider handle narrows that chart
+  // only. Charts are not connected, and the URL range stays.
   const pixels = (index: number) =>
     cards
       .nth(index)
       .locator('canvas')
       .evaluate((element) => (element as HTMLCanvasElement).toDataURL())
-  const before = [await pixels(0), await pixels(1)]
+  const before = await pixels(0)
   const first = cards.first()
   await first.scrollIntoViewIfNeeded()
   const box = await first.locator('canvas').boundingBox()
@@ -272,9 +271,10 @@ test('VIS-016 ASH shows one readable chart per wait group with a clear legend', 
   await page.mouse.move(box.x + handleX + 2, sliderY)
   await page.mouse.down()
   await page.mouse.move(box.x + box.width * 0.6, sliderY, { steps: 12 })
+  const urlBefore = page.url()
   await page.mouse.up()
-  await expect.poll(() => pixels(0), { timeout: 10_000 }).not.toBe(before[0])
-  await expect.poll(() => pixels(1), { timeout: 10_000 }).not.toBe(before[1])
+  await expect.poll(() => pixels(0), { timeout: 10_000 }).not.toBe(before)
+  expect(page.url()).toBe(urlBefore)
   await cards.nth(1).screenshot({
     path: `${ARTIFACT_DIR}/vis-016-ash-zoomed-card-1.png`,
   })
@@ -548,7 +548,11 @@ test('VIS-032 the Overview has no serious accessibility violations', async ({
       timeout: 3 * 30_000,
     })
     .toBeGreaterThan(0)
-  const report = await new AxeBuilder({ page }).include('#instance-overview').analyze()
+  // The tiles card and the chart cards below it are siblings since the overview layout of 2026-11-21.
+  const report = await new AxeBuilder({ page })
+    .include('#instance-overview')
+    .include('[data-testid="overview-charts"]')
+    .analyze()
   const severe = report.violations.filter(
     (violation) => violation.impact === 'serious' || violation.impact === 'critical',
   )
@@ -3085,20 +3089,20 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
     [1440, 1080],
   ] as const) {
     await page.setViewportSize({ width, height })
-    await page.goto(`/indexes?instance=${instanceId}&tab=suggestions&db=odoo`)
-    const table = page.getByRole('table', { name: 'Suggested indexes' })
+    await page.goto(`/indexes?instance=${instanceId}&tab=missing&db=odoo`)
+    const table = page.getByRole('table', { name: 'Missing index candidates' })
     await expect(table).toBeVisible({ timeout: 30_000 })
     await expect(
       page.getByText('Suggestions are estimates from statement statistics'),
     ).toBeVisible()
 
-    await page.getByRole('searchbox', { name: 'Search suggestions' }).fill('res_partner')
+    await page.getByRole('searchbox', { name: 'Search missing indexes' }).fill('res_partner')
     const row = table
       .locator('tbody tr')
       .filter({ hasText: 'res_partner' })
       .filter({ has: page.getByRole('cell', { name: SUGGESTION_COLUMN, exact: true }) })
     await expect(row.first()).toBeVisible()
-    await expect(row.first()).toContainText('~')
+    await expect(row.first()).toContainText('Statements')
     await expect(
       table
         .locator('tbody tr')
@@ -3123,7 +3127,7 @@ test('VIS-040 index suggestions show the ground-truth column of res_partner, and
     await page.screenshot({ path: `${ARTIFACT_DIR}/vis-040-suggestions-${width}.png` })
   }
 
-  await assertFits(page, api, fullHdRoute('/indexes?tab=suggestions'))
+  await assertFits(page, api, fullHdRoute('/indexes?tab=missing'))
   browserErrors.assertClean()
 })
 

@@ -218,7 +218,7 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 
 	// Significance guard
 	if totalTicks < 60 {
-		msg := "fewer than 60 samples in range; results are not statistically significant"
+		msg := "fewer than 60 sampling ticks in range (the agent samples once per second); results are not statistically significant"
 		resp.Warning = &msg
 	}
 
@@ -640,7 +640,7 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if totalTicks < 60 {
-		msg := "fewer than 60 samples in range; results are not statistically significant"
+		msg := "fewer than 60 sampling ticks in range (the agent samples once per second); results are not statistically significant"
 		resp.Warning = &msg
 	}
 

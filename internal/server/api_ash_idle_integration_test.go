@@ -245,5 +245,5 @@ func TestIntASH020_IdleRangeIsEmptyWithoutWarning(t *testing.T) {
 	require.NotNil(t, none.Buckets)
 	require.Empty(t, none.Buckets)
 	require.NotNil(t, none.Warning)
-	require.Contains(t, *none.Warning, "fewer than 60 samples")
+	require.Contains(t, *none.Warning, "fewer than 60 sampling ticks")
 }

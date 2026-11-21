@@ -12,8 +12,9 @@ import {
 
 import { createPortal } from 'react-dom'
 
-import { CAPTIONS, columnHelp, type CaptionId, type ColumnHelpId } from '@/lib/captions'
+import { captionOf, columnHelpOf, type CaptionId, type ColumnHelpId } from '@/lib/captions'
 import { cn } from '@/lib/utils'
+import { useT } from '@/i18n/react'
 
 import { withTerms } from './withTerms'
 import { placeTooltip, type TooltipSide } from './tooltipPlacement'
@@ -38,6 +39,7 @@ interface HintButtonProps {
  * viewport and follows the button when the page or a table scrolls.
  */
 function HintButton({ label, className, children }: HintButtonProps) {
+  const t = useT()
   const tooltipId = `${useId().replaceAll(':', '')}-hint`
   const button = useRef<HTMLButtonElement>(null)
   const tip = useRef<HTMLDivElement>(null)
@@ -114,7 +116,7 @@ function HintButton({ label, className, children }: HintButtonProps) {
       <button
         ref={button}
         type="button"
-        aria-label={`About ${label}`}
+        aria-label={t('shell.hint.about', { label })}
         aria-expanded={pinned}
         aria-controls={tooltipId}
         aria-describedby={tooltipId}
@@ -160,11 +162,11 @@ function HintButton({ label, className, children }: HintButtonProps) {
 }
 
 const FIELDS = [
-  ['source', 'Source'],
-  ['unit', 'Unit'],
-  ['window', 'Window'],
-  ['howToRead', 'How to read'],
-  ['thresholds', 'Thresholds'],
+  ['source', 'shell.hint.source'],
+  ['unit', 'shell.hint.unit'],
+  ['window', 'shell.hint.window'],
+  ['howToRead', 'shell.hint.howToRead'],
+  ['thresholds', 'shell.hint.thresholds'],
 ] as const
 
 /**
@@ -184,7 +186,8 @@ export function InfoHint({
   className?: string
   extra?: ReactNode
 }) {
-  const entry = CAPTIONS[id]
+  const t = useT()
+  const entry = captionOf(id)
   return (
     <HintButton className={className} label={label}>
       {extra === undefined ? null : (
@@ -196,7 +199,7 @@ export function InfoHint({
           const value = (entry as Partial<Record<(typeof FIELDS)[number][0], string>>)[key]
           return value === undefined ? null : (
             <div key={key} className="contents">
-              <dt className="text-muted-foreground font-medium">{name}</dt>
+              <dt className="text-muted-foreground font-medium">{t(name)}</dt>
               <dd>{key === 'source' || key === 'howToRead' ? withTerms(value) : value}</dd>
             </div>
           )
@@ -210,7 +213,7 @@ export function InfoHint({
 export function ColumnHint({ id, label }: { id: ColumnHelpId; label: string }) {
   return (
     <HintButton label={label}>
-      <p>{columnHelp[id]}</p>
+      <p>{columnHelpOf(id)}</p>
     </HintButton>
   )
 }

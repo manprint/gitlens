@@ -1,5 +1,7 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+
+import { setServerTimeZone } from '@/lib/timezone'
 
 import { TimeRangePicker } from './TimeRangePicker'
 import { renderWithProviders } from '@/test/render'
@@ -31,7 +33,7 @@ describe('TimeRangePicker', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Zoom out time range' }))
     params = new URLSearchParams(result.router.state.location.search)
-    expect(params.get('range')).toBe('6h')
+    expect(params.get('range')).toBe('2h')
     expect(params.get('db')).toBe('app')
     expect(params.get('wait_event_type')).toBe('Lock')
   })
@@ -97,6 +99,28 @@ describe('TimeRangePicker', () => {
     expect(result.router.state.location.search).toBe('?range=1h')
   })
 
+  it('offers presets from 15 minutes to 30 days in order', () => {
+    renderWithProviders(<TimeRangePicker />, { route: '/?range=1h' })
+
+    const values = within(screen.getByRole('combobox', { name: 'Time range preset' }))
+      .getAllByRole('option')
+      .map((option) => (option as HTMLOptionElement).value)
+    expect(values).toEqual([
+      '',
+      '15m',
+      '1h',
+      '2h',
+      '4h',
+      '6h',
+      '8h',
+      '24h',
+      '3d',
+      '7d',
+      '14d',
+      '30d',
+    ])
+  })
+
   it('zooms an absolute range out to the shortest longer preset', () => {
     const result = renderWithProviders(<TimeRangePicker />, {
       route: '/findings?from=2026-01-01T00:00:00Z&to=2026-01-01T02:00:00Z',
@@ -104,6 +128,28 @@ describe('TimeRangePicker', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Zoom out time range' }))
 
-    expect(new URLSearchParams(result.router.state.location.search).get('range')).toBe('6h')
+    expect(new URLSearchParams(result.router.state.location.search).get('range')).toBe('4h')
+  })
+
+  it('UI-TIME-020 reads the custom range in the console time zone and keeps UTC in the URL', () => {
+    setServerTimeZone('Europe/Rome')
+    try {
+      const result = renderWithProviders(<TimeRangePicker />, {
+        route: '/findings?from=2026-11-20T17:00:00Z&to=2026-11-20T18:00:00Z',
+      })
+      expect(screen.getByText('Custom time range (Europe/Rome)')).toBeInTheDocument()
+      expect(screen.getByLabelText('From')).toHaveValue('2026-11-20T18:00')
+      expect(screen.getByLabelText('To')).toHaveValue('2026-11-20T19:00')
+
+      fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-11-20T09:00' } })
+      fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-11-20T10:30' } })
+      fireEvent.submit(screen.getByRole('form', { name: 'Absolute time range' }))
+
+      const params = new URLSearchParams(result.router.state.location.search)
+      expect(params.get('from')).toBe('2026-11-20T08:00:00.000Z')
+      expect(params.get('to')).toBe('2026-11-20T09:30:00.000Z')
+    } finally {
+      setServerTimeZone('UTC')
+    }
   })
 })

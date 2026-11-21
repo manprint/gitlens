@@ -1,4 +1,5 @@
 import { act, screen, within } from '@testing-library/react'
+import { captionOf } from '@/lib/captions'
 import { http, HttpResponse } from 'msw/http'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -112,7 +113,7 @@ function card(title: string) {
 }
 
 describe('OverviewCharts', () => {
-  it('OVC-003 renders every group with its heading, description and cards', async () => {
+  it('OVC-003 renders every group with its heading, caption and cards', async () => {
     serve(() => 1)
     renderCharts()
     await settle()
@@ -121,7 +122,7 @@ describe('OverviewCharts', () => {
       const region = screen.getByRole('region', { name: group.title })
       expect(region).toHaveAttribute('id', group.id)
       expect(within(region).getByRole('heading', { level: 2, name: group.title })).toBeVisible()
-      expect(within(region).getByText(group.description)).toBeVisible()
+      expect(within(region).getByText(captionOf(group.captionId).what)).toBeVisible()
       const titles = within(region)
         .getAllByRole('heading', { level: 3 })
         .map((heading) => heading.firstChild?.textContent)
@@ -260,7 +261,7 @@ describe('OverviewCharts', () => {
     expect(within(card('Connections')).getByRole('img')).toBeVisible()
   })
 
-  it('OVC-004 draws dashed gap lines on counters only, never on gauges', async () => {
+  it('OVC-004 draws no gap line and names gaps on counters only, never on gauges', async () => {
     server.use(
       http.get(metricsUrl, () =>
         HttpResponse.json({
@@ -280,8 +281,12 @@ describe('OverviewCharts', () => {
 
     const hasGapLine = (...names: string[]) =>
       optionWithLegend(...names)?.series.some((line) => 'markLine' in line)
-    expect(hasGapLine('Commits', 'Rollbacks')).toBe(true)
+    expect(hasGapLine('Commits', 'Rollbacks')).toBe(false)
     expect(hasGapLine('Connections in use', 'Configured maximum')).toBe(false)
+    expect(
+      within(card('Transactions per second')).getByText(/· 1 gap or counter reset$/),
+    ).toBeVisible()
+    expect(within(card('Connections')).queryByText(/counter reset/)).toBeNull()
   })
 
   it('OVC-010 names one long outage as one gap, not one reset per null bucket', async () => {

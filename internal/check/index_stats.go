@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -38,6 +39,42 @@ type indexStatsRow struct {
 	LastScan    *time.Time
 	Reset       *time.Time
 }
+
+// indexStatsQuery reads the indexes the selector can pick: the top $1 by each
+// of its rankings, ordered as the selector orders them (score descending, then
+// key in byte order), and the keys it retains ($2). A database with hundreds of
+// thousands of indexes otherwise ships every row on each scrape. The last
+// column counts every index, so Partial still compares against all of them.
+// %[1]s and %[2]s are the last-scan and index stats-reset expressions.
+const indexStatsQuery = `
+WITH base AS (
+  SELECT s.indexrelid,
+         s.schemaname || '.' || s.indexrelname AS key,
+         COALESCE(s.idx_scan, 0)::float8 AS scans,
+         (GREATEST(ic.relpages, 0)::bigint * current_setting('block_size')::bigint)::float8 AS est
+  FROM pg_stat_user_indexes s
+  JOIN pg_class ic ON ic.oid = s.indexrelid
+  WHERE ic.relpersistence <> 't'
+), picked AS (
+  (SELECT indexrelid FROM base ORDER BY est - scans DESC, key COLLATE "C" LIMIT $1)
+  UNION
+  (SELECT indexrelid FROM base ORDER BY est DESC, key COLLATE "C" LIMIT $1)
+  UNION
+  SELECT indexrelid FROM base WHERE key = ANY($2::text[])
+)
+SELECT s.schemaname, s.relname, s.indexrelname,
+       COALESCE(s.idx_scan,0), COALESCE(s.idx_tup_read,0), COALESCE(s.idx_tup_fetch,0),
+       COALESCE(io.idx_blks_read,0), COALESCE(io.idx_blks_hit,0),
+       (GREATEST(ic.relpages, 0)::bigint * current_setting('block_size')::bigint),
+       ix.indisunique, ix.indisprimary, ix.indisvalid, s.indexrelid,
+       %[1]s, %[2]s,
+       (SELECT d.stats_reset FROM pg_stat_database d WHERE d.datname = current_database()),
+       (SELECT count(*) FROM base)
+FROM picked p
+JOIN pg_stat_user_indexes s ON s.indexrelid = p.indexrelid
+JOIN pg_index ix ON ix.indexrelid = s.indexrelid
+JOIN pg_class ic ON ic.oid = s.indexrelid
+LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid`
 
 // indexDefinitionQuery reads one index's exact size and definition. Both
 // lock the index's table, so they run only for the indexes that are reported.
@@ -75,28 +112,17 @@ func (c *indexStatsCheck) Scrape(ctx context.Context, t Target) (Result, error) 
 	// pg_stat_user_indexes lists the indexes of every session's temporary tables
 	// under their pg_temp_N schemas. They are gone with their session, so they
 	// are left out, as table_stats leaves its temporary tables out.
-	rows, err := conn.Query(ctx, `
-SELECT s.schemaname, s.relname, s.indexrelname,
-       COALESCE(s.idx_scan,0), COALESCE(s.idx_tup_read,0), COALESCE(s.idx_tup_fetch,0),
-       COALESCE(io.idx_blks_read,0), COALESCE(io.idx_blks_hit,0),
-       (GREATEST(ic.relpages, 0)::bigint * current_setting('block_size')::bigint),
-       ix.indisunique, ix.indisprimary, ix.indisvalid, s.indexrelid,
-       `+lastScanExpr+`, `+indexResetExpr+`,
-       (SELECT d.stats_reset FROM pg_stat_database d WHERE d.datname = current_database())
-FROM pg_stat_user_indexes s
-JOIN pg_index ix ON ix.indexrelid = s.indexrelid
-JOIN pg_class ic ON ic.oid = s.indexrelid
-LEFT JOIN pg_statio_user_indexes io ON io.indexrelid = s.indexrelid
-WHERE ic.relpersistence <> 't'`)
+	rows, err := conn.Query(ctx, fmt.Sprintf(indexStatsQuery, lastScanExpr, indexResetExpr), c.selectors.prefilterLimit(), c.selectors.retained(t))
 	if err != nil {
 		return Result{}, err
 	}
 	defer rows.Close()
 	parsed := make([]indexStatsRow, 0)
+	var total int64
 	for rows.Next() {
 		var r indexStatsRow
 		var indexReset, databaseReset *time.Time
-		if err := rows.Scan(&r.Schema, &r.Relation, &r.Index, &r.IdxScan, &r.IdxTupRead, &r.IdxTupFetch, &r.IdxBlksRead, &r.IdxBlksHit, &r.EstBytes, &r.Unique, &r.Primary, &r.Valid, &r.OID, &r.LastScan, &indexReset, &databaseReset); err != nil {
+		if err := rows.Scan(&r.Schema, &r.Relation, &r.Index, &r.IdxScan, &r.IdxTupRead, &r.IdxTupFetch, &r.IdxBlksRead, &r.IdxBlksHit, &r.EstBytes, &r.Unique, &r.Primary, &r.Valid, &r.OID, &r.LastScan, &indexReset, &databaseReset, &total); err != nil {
 			return Result{}, err
 		}
 		r.ScanTracked = scanTracked
@@ -140,7 +166,7 @@ WHERE ic.relpersistence <> 't'`)
 	}
 	result := indexStatsResult(reported, byKey)
 	result.Truncated = truncated
-	result.Partial = len(reported) < len(candidates)
+	result.Partial = int64(len(reported)) < total
 	return result, nil
 }
 

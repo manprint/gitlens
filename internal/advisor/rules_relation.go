@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/manprint/pglens/internal/i18n"
 	"github.com/manprint/pglens/internal/pgtype"
 )
 
@@ -262,7 +263,8 @@ func init() {
 					continue
 				}
 			}
-			detail := "no scan of this index was recorded in the last " + windowText(window)
+			unit, n := windowParts(window)
+			args := i18n.Args{"basis": "other", "windowUnit": unit, "windowCount": n, "date": ""}
 			observed := indexObservation(s.Now, i, born)
 			evidence := map[string]any{
 				"peak_scan_rate": i.IdxScan, "history_days": i.HistoryDays, "size_bytes": i.SizeBytes,
@@ -270,18 +272,20 @@ func init() {
 				"window_seconds": int64(window / time.Second),
 			}
 			if lastScanBefore {
-				detail = "no scan of this index since " + i.LastScan.UTC().Format("2006-01-02") + ", more than " + windowText(window) + " ago"
+				args["basis"] = "last_scan"
+				args["date"] = i.LastScan.UTC().Format("2006-01-02")
 				evidence["last_scan"] = i.LastScan.UTC().Format(time.RFC3339)
 			}
 			if sinceReset {
-				detail = "no scan of this index since the statistics were reset, at an unknown time"
+				args["basis"] = "reset_unknown"
 				evidence["window"] = "since statistics reset"
 				if i.StatsReset != nil {
-					detail = "no scan of this index since the statistics were reset on " + i.StatsReset.UTC().Format("2006-01-02")
+					args["basis"] = "reset_on"
+					args["date"] = i.StatsReset.UTC().Format("2006-01-02")
 					evidence["stats_reset"] = i.StatsReset.UTC().Format(time.RFC3339)
 				}
 			}
-			f := relationFinding("index.unused", SeverityWarning, i.Datname, i.Name, "Unused index", detail, "Confirm workload intent, including queries served by standbys, before dropping this candidate", evidence)
+			f := relationFinding("index.unused", SeverityWarning, i.Datname, i.Name, "", "", "", evidence).say("index.unused", args)
 			scanned, reported := standbyScans(s, databaseFactKey(i.Datname, i.Name))
 			switch {
 			case scanned:
@@ -322,7 +326,7 @@ func init() {
 				names[j] = g[j].Name
 			}
 			sort.Strings(names)
-			out = append(out, relationFinding("index.duplicate", SeverityWarning, g[0].Datname, g[0].TableName, "Duplicate indexes", fmt.Sprintf("indexes %s share a definition", strings.Join(names, ", ")), "Drop the non-primary, non-unique duplicate after validation", map[string]any{"indexes": names}))
+			out = append(out, relationFinding("index.duplicate", SeverityWarning, g[0].Datname, g[0].TableName, "", "", "", map[string]any{"indexes": names}).say("index.duplicate", i18n.Args{"names": strings.Join(names, ", ")}))
 		}
 		return out
 	}})
@@ -348,7 +352,7 @@ func init() {
 				}
 				bc, ok := indexColumns(s.Indexes[b].IndexDef)
 				if ok && isPrefix(ac, bc) {
-					out = append(out, relationFinding("index.redundant_prefix", SeverityInfo, s.Indexes[a].Datname, s.Indexes[a].Name, "Redundant index prefix", fmt.Sprintf("%s is a prefix of %s", s.Indexes[a].Name, s.Indexes[b].Name), "Review whether the shorter non-unique index can be removed", map[string]any{"prefix": s.Indexes[a].Name, "extended": s.Indexes[b].Name}))
+					out = append(out, relationFinding("index.redundant_prefix", SeverityInfo, s.Indexes[a].Datname, s.Indexes[a].Name, "", "", "", map[string]any{"prefix": s.Indexes[a].Name, "extended": s.Indexes[b].Name}).say("index.redundant_prefix", i18n.Args{"prefix": s.Indexes[a].Name, "extended": s.Indexes[b].Name}))
 					break
 				}
 			}
@@ -359,13 +363,13 @@ func init() {
 		var out []Finding
 		for _, i := range s.Indexes {
 			if !i.IsValid {
-				out = append(out, relationFinding("index.invalid", SeverityCritical, i.Datname, i.Name, "Invalid index", "index is not valid and is still maintained on writes", "Rebuild or drop the invalid index", map[string]any{"is_valid": false}))
+				out = append(out, relationFinding("index.invalid", SeverityCritical, i.Datname, i.Name, "", "", "", map[string]any{"is_valid": false}).say("index.invalid", i18n.Args{}))
 			}
 		}
 		return out
 	}})
 	Register(relationRule{id: "index.bloat_high", severity: SeverityWarning, needs: []string{"Bloat"}, eval: func(s *Snapshot) []Finding {
-		return relationBloat(s, "index.bloat_high", SeverityWarning, "index", .4, indexBloatBytes, "Index bloat is high")
+		return relationBloat(s, "index.bloat_high", SeverityWarning, "index", .4, indexBloatBytes)
 	}})
 	Register(relationRule{id: "index.divergence", severity: SeverityWarning, needs: []string{"Siblings"}, eval: func(s *Snapshot) []Finding {
 		// This instance's index definitions against each sibling's. The
@@ -393,9 +397,9 @@ func init() {
 				other, ok := sib.IndexHashes[key]
 				switch {
 				case !ok:
-					out = append(out, relationFinding("index.divergence", SeverityWarning, datname, name+"@"+sib.InstanceID.String(), "Index topology diverges", fmt.Sprintf("index %s is absent on sibling %s", name, sib.InstanceID), "Reconcile index definitions after confirming replication state", map[string]any{"missing_on": sib.InstanceID.String()}))
+					out = append(out, relationFinding("index.divergence", SeverityWarning, datname, name+"@"+sib.InstanceID.String(), "", "", "", map[string]any{"missing_on": sib.InstanceID.String()}).say("index.divergence", i18n.Args{"absent": true, "name": name, "sibling": sib.InstanceID.String()}))
 				case other != own[key]:
-					out = append(out, relationFinding("index.divergence", SeverityWarning, datname, name+"@"+sib.InstanceID.String(), "Index topology diverges", fmt.Sprintf("index %s has a different definition on sibling %s", name, sib.InstanceID), "Reconcile index definitions after confirming replication state", map[string]any{"differs_on": sib.InstanceID.String()}))
+					out = append(out, relationFinding("index.divergence", SeverityWarning, datname, name+"@"+sib.InstanceID.String(), "", "", "", map[string]any{"differs_on": sib.InstanceID.String()}).say("index.divergence", i18n.Args{"absent": false, "name": name, "sibling": sib.InstanceID.String()}))
 				}
 			}
 		}
@@ -406,7 +410,7 @@ func init() {
 		for _, t := range s.Tables {
 			r := t.NDeadTup / t.NLiveTup
 			if t.NLiveTup > 0 && r > deadTupleRatio && t.NDeadTup >= deadTupleLimit {
-				out = append(out, relationFinding("table.dead_tuples_high", SeverityWarning, t.Datname, t.Name, "Dead tuples are high", fmt.Sprintf("dead/live tuple ratio is %.1f%%", r*100), "Investigate autovacuum and vacuum this table", map[string]any{"ratio": r, "dead_tuples": t.NDeadTup}))
+				out = append(out, relationFinding("table.dead_tuples_high", SeverityWarning, t.Datname, t.Name, "", "", "", map[string]any{"ratio": r, "dead_tuples": t.NDeadTup}).say("table.dead_tuples_high", i18n.Args{"ratio": strconv.FormatFloat(r*100, 'f', 1, 64)}))
 			}
 		}
 		return out
@@ -420,7 +424,7 @@ func init() {
 		var out []Finding
 		for _, t := range s.Tables {
 			if t.NLiveTup > largeTableRows && t.LastAutovacuum == nil && t.LastVacuum == nil {
-				out = append(out, relationFinding("table.never_autovacuumed", SeverityWarning, t.Datname, t.Name, "Table never vacuumed", "no vacuum or autovacuum timestamp is available", "Check autovacuum coverage for this table", nil))
+				out = append(out, relationFinding("table.never_autovacuumed", SeverityWarning, t.Datname, t.Name, "", "", "", nil).say("table.never_autovacuumed", i18n.Args{}))
 			}
 		}
 		return out
@@ -429,7 +433,7 @@ func init() {
 		var out []Finding
 		for _, t := range s.Tables {
 			if t.NLiveTup > 0 && t.NModSinceAnalyze/t.NLiveTup > autoAnalyzeRatio {
-				out = append(out, relationFinding("table.autoanalyze_stale", SeverityInfo, t.Datname, t.Name, "Table statistics are stale", "modifications exceed 20% of live tuples", "Analyze the table and review autoanalyze settings", map[string]any{"ratio": t.NModSinceAnalyze / t.NLiveTup}))
+				out = append(out, relationFinding("table.autoanalyze_stale", SeverityInfo, t.Datname, t.Name, "", "", "", map[string]any{"ratio": t.NModSinceAnalyze / t.NLiveTup}).say("table.autoanalyze_stale", i18n.Args{}))
 			}
 		}
 		return out
@@ -438,19 +442,19 @@ func init() {
 		var out []Finding
 		for _, t := range s.Tables {
 			if t.RelfrozenXIDAge > wraparoundRelationAge {
-				out = append(out, relationFinding("table.wraparound_risk", SeverityCritical, t.Datname, t.Name, "Table wraparound risk", fmt.Sprintf("relfrozenxid age is %.0f", t.RelfrozenXIDAge), "Vacuum this relation immediately", map[string]any{"age": t.RelfrozenXIDAge}))
+				out = append(out, relationFinding("table.wraparound_risk", SeverityCritical, t.Datname, t.Name, "", "", "", map[string]any{"age": t.RelfrozenXIDAge}).say("table.wraparound_risk", i18n.Args{"age": strconv.FormatFloat(t.RelfrozenXIDAge, 'f', 0, 64)}))
 			}
 		}
 		return out
 	}})
 	Register(relationRule{id: "table.bloat_high", severity: SeverityWarning, needs: []string{"Bloat"}, eval: func(s *Snapshot) []Finding {
-		return relationBloat(s, "table.bloat_high", SeverityWarning, "table", .3, tableBloatBytes, "Table bloat is high")
+		return relationBloat(s, "table.bloat_high", SeverityWarning, "table", .3, tableBloatBytes)
 	}})
 	Register(relationRule{id: "table.seq_scan_heavy", severity: SeverityInfo, needs: []string{"Tables"}, eval: func(s *Snapshot) []Finding {
 		var out []Finding
 		for _, t := range s.Tables {
 			if t.NLiveTup > largeTableRows && t.SeqScanRate > 0 && t.IdxScanRate <= t.SeqScanRate*.1 {
-				out = append(out, relationFinding("table.seq_scan_heavy", SeverityInfo, t.Datname, t.Name, "Heavy sequential scans", "this is a missing-index candidate, not a certainty", "Review query predicates and execution plans", map[string]any{"seq_scan_rate": t.SeqScanRate, "idx_scan_rate": t.IdxScanRate}))
+				out = append(out, relationFinding("table.seq_scan_heavy", SeverityInfo, t.Datname, t.Name, "", "", "", map[string]any{"seq_scan_rate": t.SeqScanRate, "idx_scan_rate": t.IdxScanRate}).say("table.seq_scan_heavy", i18n.Args{}))
 			}
 		}
 		return out
@@ -465,34 +469,53 @@ func init() {
 			}
 		}
 		if count > 10 && workers > 0 && busy >= workers {
-			detail := fmt.Sprintf("%d tables exceed the dead tuple threshold while all workers are busy", count)
 			evidence := map[string]any{"tables": count, "jobs": busy, "workers": workers}
+			args := i18n.Args{"count": count, "holder": false, "holderKind": "", "identity": "", "ageXids": ""}
 			// A held xmin horizon is what stops the workers from removing the
 			// dead rows, so the finding names the holder when one is known.
 			if holder := xminHolderEvidence(s); holder != nil {
-				detail = withHolderDetail(detail, holder)
+				args["holder"] = true
+				kind, _ := holder["holder_kind"].(string)
+				args["holderKind"] = kind
+				args["identity"] = fmt.Sprint(holder["identity"])
+				args["ageXids"] = fmt.Sprint(holder["age_xids"])
 				evidence["xmin_holder"] = holder
 			}
-			return []Finding{relationFinding("vacuum.starvation", SeverityCritical, "", "vacuum", "Vacuum starvation", detail, "Investigate blocked or undersized autovacuum workers", evidence)}
+			return []Finding{relationFinding("vacuum.starvation", SeverityCritical, "", "vacuum", "", "", "", evidence).say("vacuum.starvation", args)}
 		}
 		return nil
 	}})
 	Register(relationRule{id: "vacuum.disabled", severity: SeverityCritical, needs: []string{"settings"}, eval: func(s *Snapshot) []Finding {
 		if strings.EqualFold(s.Settings["autovacuum"], "off") {
-			return []Finding{relationFinding("vacuum.disabled", SeverityCritical, "", "cluster", "Autovacuum disabled", "autovacuum is off", "Enable autovacuum to prevent table and transaction ID bloat", nil)}
+			return []Finding{relationFinding("vacuum.disabled", SeverityCritical, "", "cluster", "", "", "", nil).say("vacuum.disabled", i18n.Args{})}
 		}
 		return nil
 	}})
 }
 
+// windowParts is windowText as its unit and count, for the catalog message,
+// which pluralises the unit.
+func windowParts(d time.Duration) (string, int64) {
+	switch {
+	case d > 0 && d%(24*time.Hour) == 0:
+		return "day", int64(d / (24 * time.Hour))
+	case d > 0 && d%time.Hour == 0:
+		return "hour", int64(d / time.Hour)
+	case d > 0 && d%time.Minute == 0:
+		return "minute", int64(d / time.Minute)
+	default:
+		return "second", int64(d / time.Second)
+	}
+}
+
 // relationBloat evaluates the bloat of one kind of relation. Both bloat
 // rules used to walk every row, tables and indexes alike, so a bloated
 // index was also reported as a bloated table and the other way round.
-func relationBloat(s *Snapshot, id string, sev Severity, kind string, ratio, size float64, title string) []Finding {
+func relationBloat(s *Snapshot, id string, sev Severity, kind string, ratio, size float64) []Finding {
 	var out []Finding
 	for _, b := range s.Bloat {
 		if b.Kind == kind && b.Ratio > ratio && b.SizeBytes > size {
-			out = append(out, relationFinding(id, sev, b.Datname, b.Name, title, fmt.Sprintf("bloat ratio is %.1f%%", b.Ratio*100), "Schedule maintenance after confirming workload impact", map[string]any{"bloat_ratio": b.Ratio, "size_bytes": b.SizeBytes, "method": b.Method}))
+			out = append(out, relationFinding(id, sev, b.Datname, b.Name, "", "", "", map[string]any{"bloat_ratio": b.Ratio, "size_bytes": b.SizeBytes, "method": b.Method}).say(id, i18n.Args{"ratio": strconv.FormatFloat(b.Ratio*100, 'f', 1, 64)}))
 		}
 	}
 	return out

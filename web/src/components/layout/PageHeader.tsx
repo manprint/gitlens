@@ -19,9 +19,9 @@ interface PageHeaderProps {
    */
   truncateTitle?: boolean
   /**
-   * For a header whose actions need the whole screen width to share the title
-   * line: from 1600 px the actions drop under the title, and only from 1900 px
-   * (the Full HD reference screen) do both sit on one line.
+   * For a header whose actions need the whole screen width: from 1600 px the
+   * actions always take their own line under the title, so they never squeeze
+   * or cover it.
    */
   wrapActionsBelowFullHd?: boolean
   /**
@@ -30,6 +30,8 @@ interface PageHeaderProps {
    * text and details. Below 1600 px the subtitle is shown as usual.
    */
   subtitleHint?: CaptionId
+  /** The page's Inline Help link (`HelpLink`), shown beside the title. */
+  help?: ReactNode
 }
 
 export function PageHeader({
@@ -42,14 +44,13 @@ export function PageHeader({
   truncateTitle = false,
   wrapActionsBelowFullHd = false,
   subtitleHint,
+  help,
 }: PageHeaderProps) {
   return (
     // From 1600 px the eyebrow, title and subtitle share one line (D26).
     <header
       className={`flex flex-col gap-4 pb-2 min-[1600px]:items-center min-[1600px]:pb-0 sm:flex-row sm:items-start sm:justify-between ${
-        wrapActionsBelowFullHd
-          ? 'min-[1600px]:flex-wrap min-[1600px]:gap-y-2 min-[1900px]:flex-nowrap'
-          : ''
+        wrapActionsBelowFullHd ? 'min-[1600px]:flex-wrap min-[1600px]:gap-y-2' : ''
       }`}
     >
       <div className="flex min-w-0 items-start gap-4 min-[1600px]:items-center min-[1600px]:gap-3">
@@ -85,10 +86,13 @@ export function PageHeader({
               label={title}
             />
           )}
+          {help ? (
+            <span className="mt-1 inline-flex min-[1600px]:mt-0 min-[1600px]:shrink-0">{help}</span>
+          ) : null}
           {subtitle ? (
             // From 1600 px the subtitle stays within two lines (D26); the full text is its title.
             <p
-              className={`text-muted-foreground mt-1.5 max-w-3xl text-sm leading-relaxed min-[1600px]:mt-0 min-[1600px]:line-clamp-2 min-[1600px]:max-w-none min-[1600px]:min-w-0${
+              className={`text-muted-foreground mt-1.5 max-w-3xl text-sm leading-relaxed min-[1600px]:mt-0 min-[1600px]:line-clamp-2 min-[1600px]:max-w-none min-[1600px]:min-w-0 ${
                 subtitleHint === undefined ? '' : 'min-[1600px]:hidden'
               }`}
               title={typeof subtitle === 'string' ? subtitle : undefined}
@@ -99,7 +103,11 @@ export function PageHeader({
         </div>
       </div>
       {freshness || actions ? (
-        <div className="flex flex-wrap items-center gap-2 min-[1600px]:shrink-0 min-[1600px]:flex-nowrap sm:justify-end">
+        <div
+          className={`flex flex-wrap items-center gap-2 min-[1600px]:shrink-0 min-[1600px]:flex-nowrap sm:justify-end ${
+            wrapActionsBelowFullHd ? 'min-[1600px]:basis-full min-[1600px]:justify-start' : ''
+          }`}
+        >
           {freshness}
           {actions}
         </div>

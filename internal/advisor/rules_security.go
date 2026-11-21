@@ -1,9 +1,11 @@
 package advisor
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/manprint/pglens/internal/i18n"
 )
 
 // The monitoring_role check (internal/check/monitoring_role.go) reports one
@@ -49,11 +51,9 @@ func init() {
 			return nil
 		}
 		role := fact.Labels["role"]
-		return []Finding{configFinding(id, SeverityCritical,
-			"The monitoring role could write to the database",
-			fmt.Sprintf("pglens connects as %s, which %s. pglens only reads, but anyone holding its credentials could change data.", role, fact.ValueText),
-			"Run deploy/sql/monitoring_user.sql again as an administrator: it refuses the role and lists the statement that removes each problem.",
-			map[string]any{"role": role, "problems": strings.Split(fact.ValueText, "; ")})}
+		return []Finding{configFinding(id, SeverityCritical, "", "", "",
+			map[string]any{"role": role, "problems": strings.Split(fact.ValueText, "; ")}).
+			say(id, i18n.Args{"role": role, "problems": fact.ValueText})}
 	}})
 	Register(configRule{id: "security.monitoring_role_read_only_off", severity: SeverityWarning, needs: []string{monitoringRoleFactKind}, eval: func(s *Snapshot) []Finding {
 		const id = "security.monitoring_role_read_only_off"
@@ -66,10 +66,8 @@ func init() {
 			return nil
 		}
 		role := fact.Labels["role"]
-		return []Finding{configFinding(id, SeverityWarning,
-			"The monitoring role does not default to read-only transactions",
-			fmt.Sprintf("default_transaction_read_only is %q for %s in this database. pglens sets it in every session it opens; the role default is the second safeguard.", value, role),
-			"Run deploy/sql/monitoring_user.sql again: it sets the role default and removes database-specific overrides.",
-			map[string]any{"role": role, "read_only_default": value})}
+		return []Finding{configFinding(id, SeverityWarning, "", "", "",
+			map[string]any{"role": role, "read_only_default": value}).
+			say(id, i18n.Args{"value": strconv.Quote(value), "role": role})}
 	}})
 }

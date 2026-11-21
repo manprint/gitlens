@@ -6,6 +6,9 @@ import {
 } from '@tanstack/react-query'
 import { useNavigate, type NavigateFunction } from 'react-router-dom'
 
+import { setServerLanguage } from '@/i18n/store'
+import { setServerTimeZone } from '@/lib/timezone'
+
 import { client, toApiFailure, type ApiFailure } from './client'
 import type { components } from './generated'
 import { qk } from './keys'
@@ -111,6 +114,8 @@ async function fetchSession(): Promise<SessionStatus> {
   try {
     const result = await client.GET('/api/v1/session')
     if (result.response.status === 401 && isSessionStatus(result.error)) {
+      setServerTimeZone(result.error.time_zone)
+      void setServerLanguage(result.error.language)
       return result.error
     }
     if (result.error !== undefined) {
@@ -122,6 +127,10 @@ async function fetchSession(): Promise<SessionStatus> {
         message: 'API response did not contain data',
       })
     }
+    // The console's default zone (PGLENS_TZ) is set before any page renders;
+    // its default language (PGLENS_LANG) follows once its catalog has loaded.
+    setServerTimeZone(result.data.time_zone)
+    void setServerLanguage(result.data.language)
     return result.data
   } catch (error) {
     if (error instanceof AuthRequestError) {

@@ -1,6 +1,8 @@
+import { displayTimeZone, fromZonedInput, toZonedInput } from '@/lib/timezone'
 import { useId, useState, type FormEvent } from 'react'
 
 import { useMuteFinding, useUnmuteFinding } from '@/api/findings'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -14,30 +16,37 @@ import {
 import type { JoinedFinding } from '@/lib/findings'
 import { Input } from '@/components/ui/input'
 import { Callout } from '@/components/ui/callout'
+import { useT, type Translate } from '@/i18n/react'
 
 type ExpiryPreset = '1h' | '8h' | '24h' | '7d' | 'custom'
 
-const expiryPresets: readonly { value: ExpiryPreset; label: string; seconds?: number }[] = [
-  { value: '1h', label: '1 hour', seconds: 60 * 60 },
-  { value: '8h', label: '8 hours', seconds: 8 * 60 * 60 },
-  { value: '24h', label: '24 hours', seconds: 24 * 60 * 60 },
-  { value: '7d', label: '7 days', seconds: 7 * 24 * 60 * 60 },
-  { value: 'custom', label: 'Explicit timestamp' },
+const expiryPresets: readonly { value: ExpiryPreset; seconds?: number }[] = [
+  { value: '1h', seconds: 60 * 60 },
+  { value: '8h', seconds: 8 * 60 * 60 },
+  { value: '24h', seconds: 24 * 60 * 60 },
+  { value: '7d', seconds: 7 * 24 * 60 * 60 },
+  { value: 'custom' },
 ]
 
-function mutationErrorMessage(error: unknown, action: string): string {
+function presetLabel(t: Translate, preset: ExpiryPreset): string {
+  if (preset === '1h') return t('findings.mute.preset1h')
+  if (preset === '8h') return t('findings.mute.preset8h')
+  if (preset === '24h') return t('findings.mute.preset24h')
+  if (preset === '7d') return t('findings.mute.preset7d')
+  return t('findings.mute.presetCustom')
+}
+
+function mutationErrorMessage(t: Translate, error: unknown, action: string): string {
   if (error instanceof Error && error.message) {
-    return `Could not ${action}: ${error.message}`
+    return t('findings.mute.errorDetail', { action, detail: error.message })
   }
-  return `Could not ${action}.`
+  return t('findings.mute.error', { action })
 }
 
 function expiryTimestamp(preset: ExpiryPreset, explicit: string): string | null {
   if (preset === 'custom') {
-    const value = new Date(explicit)
-    return Number.isFinite(value.getTime()) && value.getTime() > Date.now()
-      ? value.toISOString()
-      : null
+    const value = fromZonedInput(explicit, displayTimeZone())
+    return value !== null && value.getTime() > Date.now() ? value.toISOString() : null
   }
 
   const seconds = expiryPresets.find((option) => option.value === preset)?.seconds
@@ -47,9 +56,9 @@ function expiryTimestamp(preset: ExpiryPreset, explicit: string): string | null 
 // The server refuses a mute that runs past this many days from its own clock.
 const maxMuteDays = 90
 
-// The local wall-clock time as a datetime-local value, down to the minute.
+// The wall clock in the console's zone as a datetime-local value, down to the minute.
 function localDateTimeValue(time: Date): string {
-  return new Date(time.getTime() - time.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+  return toZonedInput(time.getTime(), displayTimeZone())
 }
 
 function clearFormState(
@@ -63,6 +72,7 @@ function clearFormState(
 }
 
 export function MuteDialog({ finding }: { finding: JoinedFinding }) {
+  const t = useT()
   // A finding id holds its database and object names, which can contain
   // spaces: as an element id it split the aria-describedby reference.
   const domId = useId().replaceAll(':', '')
@@ -89,13 +99,13 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
     event.preventDefault()
     const trimmedReason = reason.trim()
     if (!trimmedReason) {
-      setFormError('A reason is required before muting a finding.')
+      setFormError(t('findings.mute.reasonRequired'))
       return
     }
 
     const until = expiryTimestamp(preset, explicit)
     if (!until) {
-      setFormError('Choose a future expiry timestamp.')
+      setFormError(t('findings.mute.expiryRequired'))
       return
     }
 
@@ -115,46 +125,46 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
     <>
       {finding.state === 'muted' ? (
         <Button
-          aria-label="Unmute finding"
+          aria-label={t('findings.mute.unmute')}
           disabled={pending}
           onClick={removeMute}
           type="button"
           variant="outline"
         >
-          {unmute.isPending ? 'Removing mute…' : 'Unmute finding'}
+          {unmute.isPending ? t('findings.mute.removing') : t('findings.mute.unmute')}
         </Button>
       ) : (
         <Button
-          aria-label="Mute finding"
+          aria-label={t('findings.mute.mute')}
           disabled={pending}
           onClick={openDialog}
           type="button"
           variant="outline"
         >
-          Mute finding
+          {t('findings.mute.mute')}
         </Button>
       )}
 
       {unmute.error ? (
         <Callout variant="destructive">
-          {mutationErrorMessage(unmute.error, 'remove the mute')}
+          {mutationErrorMessage(t, unmute.error, t('findings.mute.actionRemove'))}
         </Callout>
       ) : null}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Mute finding</DialogTitle>
-            <DialogDescription>
-              Muting does not resolve this finding. When the mute expires, the next evaluation pass
-              restores its real state.
-            </DialogDescription>
+            <div className="flex flex-wrap items-center gap-2">
+              <DialogTitle>{t('findings.mute.mute')}</DialogTitle>
+              <HelpLink anchor="findings#mute-dialog" label={t('findings.mute.mute')} />
+            </div>
+            <DialogDescription>{t('findings.mute.description')}</DialogDescription>
           </DialogHeader>
 
           <form className="space-y-4" onSubmit={submit}>
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor={`mute-reason-${domId}`}>
-                Reason
+                {t('findings.mute.reason')}
               </label>
               <textarea
                 aria-describedby={formError ? `mute-error-${domId}` : undefined}
@@ -167,7 +177,7 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
             </div>
 
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">Expiry</legend>
+              <legend className="text-sm font-medium">{t('findings.mute.expiry')}</legend>
               <div className="grid gap-2 sm:grid-cols-2">
                 {expiryPresets.map((option) => (
                   <label className="flex items-center gap-2 text-sm" key={option.value}>
@@ -178,14 +188,14 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
                       type="radio"
                       value={option.value}
                     />
-                    {option.label}
+                    {presetLabel(t, option.value)}
                   </label>
                 ))}
               </div>
               <label className="flex flex-col gap-1 text-sm" htmlFor={`mute-until-${domId}`}>
-                <span>Mute until</span>
+                <span>{t('findings.mute.until')}</span>
                 <Input
-                  aria-label="Mute until"
+                  aria-label={t('findings.mute.until')}
                   className="w-auto"
                   disabled={preset !== 'custom'}
                   id={`mute-until-${domId}`}
@@ -204,19 +214,19 @@ export function MuteDialog({ finding }: { finding: JoinedFinding }) {
             ) : null}
             {mute.error ? (
               <Callout variant="destructive">
-                {mutationErrorMessage(mute.error, 'mute the finding')}
+                {mutationErrorMessage(t, mute.error, t('findings.mute.actionMute'))}
               </Callout>
             ) : null}
-            {mute.isPending ? <p role="status">Sending mute request…</p> : null}
+            {mute.isPending ? <p role="status">{t('findings.mute.sending')}</p> : null}
 
             <DialogFooter>
               <DialogClose asChild>
                 <Button disabled={pending} type="button" variant="outline">
-                  Cancel
+                  {t('findings.mute.cancel')}
                 </Button>
               </DialogClose>
               <Button disabled={pending} type="submit">
-                {mute.isPending ? 'Muting…' : 'Mute finding'}
+                {mute.isPending ? t('findings.mute.muting') : t('findings.mute.mute')}
               </Button>
             </DialogFooter>
           </form>

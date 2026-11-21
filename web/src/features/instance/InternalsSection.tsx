@@ -7,10 +7,13 @@ import {
   type DataTableProps,
   type DataTableToolbar,
 } from '@/components/layout/DataTable'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT, type Translate } from '@/i18n/react'
 import { formatBytes, formatCount, formatPercent, formatRate } from '@/lib/format'
 
 import { CaptionedBlock, InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
@@ -19,10 +22,8 @@ import { useInstanceView, type InstanceView } from './instanceViews'
 
 type InternalsViewId = (typeof INTERNALS_VIEW_IDS)[number]
 
-const WAL_NOT_LISTED =
-  'pg_wal is not listed: the monitoring role needs EXECUTE on pg_ls_waldir(), which pg_monitor grants.'
-const SLRU_HINT =
-  "A page missing from a cache is read from disk under the cache's lock, which stalls every session that needs it: watch the subtransaction and multixact caches."
+const WAL_NOT_LISTED: MessageKey = 'instance.internals.walNotListed'
+const SLRU_HINT: MessageKey = 'instance.internals.slruHint'
 
 type DatabaseSize = Schemas['DatabaseSize']
 type SLRUCache = Schemas['SLRUCache']
@@ -38,8 +39,9 @@ function perMinute(perSecond: number): string {
   return `${perMinuteFormat.format(perSecond * 60)}/min`
 }
 
-function growth(bytes: number | null) {
-  if (bytes === null) return <span className="text-muted-foreground">n/a</span>
+function growth(bytes: number | null, t: Translate) {
+  if (bytes === null)
+    return <span className="text-muted-foreground">{t('instance.internals.notAvailable')}</span>
   return bytes > 0 ? `+${formatBytes(bytes)}` : formatBytes(bytes)
 }
 
@@ -51,104 +53,123 @@ const SLRU_TOOLBAR: DataTableToolbar<SLRUCache> = { searchFields: [(cache) => ca
 const TEMP_FILE_TOOLBAR: DataTableToolbar<TempFileRate> = {
   searchFields: [(rate) => rate.database],
 }
-const CONFLICT_TOOLBAR: DataTableToolbar<RecoveryConflictRate> = {
-  searchFields: [(rate) => rate.database, (rate) => rate.reason],
-  filters: [
-    { id: 'database', label: 'Database', kind: 'select', accessor: (rate) => rate.database },
-  ],
+function conflictToolbar(t: Translate): DataTableToolbar<RecoveryConflictRate> {
+  return {
+    searchFields: [(rate) => rate.database, (rate) => rate.reason],
+    filters: [
+      {
+        id: 'database',
+        label: t('instance.internals.col.database'),
+        kind: 'select',
+        accessor: (rate) => rate.database,
+      },
+    ],
+  }
 }
 
-function databaseColumns(): DataTableProps<DatabaseSize>['columns'] {
+function databaseColumns(t: Translate): DataTableProps<DatabaseSize>['columns'] {
   return [
-    { accessorKey: 'database', header: 'Database', meta: { truncate: true } },
+    {
+      accessorKey: 'database',
+      header: t('instance.internals.col.database'),
+      meta: { truncate: true },
+    },
     {
       accessorKey: 'size_bytes',
-      header: 'Size',
+      header: t('instance.internals.col.size'),
       cell: ({ row }) => formatBytes(row.original.size_bytes),
     },
     {
       id: 'growth_24h',
-      header: 'Last 24 hours',
+      header: t('instance.internals.col.growth24h'),
       accessorFn: (db) => db.growth_24h_bytes,
-      cell: ({ row }) => growth(row.original.growth_24h_bytes),
+      cell: ({ row }) => growth(row.original.growth_24h_bytes, t),
     },
     {
       id: 'growth_7d',
-      header: 'Last 7 days',
+      header: t('instance.internals.col.growth7d'),
       accessorFn: (db) => db.growth_7d_bytes,
-      cell: ({ row }) => growth(row.original.growth_7d_bytes),
+      cell: ({ row }) => growth(row.original.growth_7d_bytes, t),
     },
   ]
 }
 
-function slruColumns(): DataTableProps<SLRUCache>['columns'] {
+function slruColumns(t: Translate): DataTableProps<SLRUCache>['columns'] {
   return [
-    { accessorKey: 'name', header: 'Cache', meta: { truncate: true } },
+    { accessorKey: 'name', header: t('instance.internals.col.cache'), meta: { truncate: true } },
     {
       id: 'hit_ratio',
-      header: 'Hit ratio',
+      header: t('instance.internals.col.hitRatio'),
       accessorFn: (cache) => cache.hit_ratio,
       cell: ({ row }) =>
         formatPercent(
           row.original.hits_per_second,
           row.original.hits_per_second + row.original.reads_per_second,
-        ) ?? <span className="text-muted-foreground">No reads in the last hour</span>,
+        ) ?? <span className="text-muted-foreground">{t('instance.internals.noReads')}</span>,
     },
     {
       accessorKey: 'reads_per_second',
-      header: 'Read from disk',
+      header: t('instance.internals.col.readFromDisk'),
       cell: ({ row }) => formatRate(row.original.reads_per_second),
     },
     {
       accessorKey: 'writes_per_second',
-      header: 'Written',
+      header: t('instance.internals.col.written'),
       cell: ({ row }) => formatRate(row.original.writes_per_second),
     },
     {
       accessorKey: 'zeroed_per_second',
-      header: 'Zeroed',
+      header: t('instance.internals.col.zeroed'),
       meta: { help: 'internals.slru-zeroed' },
       cell: ({ row }) => formatRate(row.original.zeroed_per_second),
     },
     {
       accessorKey: 'flushes_per_second',
-      header: 'Flushes',
+      header: t('instance.internals.col.flushes'),
       meta: { help: 'internals.slru-flushes' },
       cell: ({ row }) => formatRate(row.original.flushes_per_second),
     },
     {
       accessorKey: 'truncates_per_second',
-      header: 'Truncations',
+      header: t('instance.internals.col.truncations'),
       meta: { help: 'internals.slru-truncations' },
       cell: ({ row }) => formatRate(row.original.truncates_per_second),
     },
   ]
 }
 
-function tempFileColumns(): DataTableProps<TempFileRate>['columns'] {
+function tempFileColumns(t: Translate): DataTableProps<TempFileRate>['columns'] {
   return [
-    { accessorKey: 'database', header: 'Database', meta: { truncate: true } },
+    {
+      accessorKey: 'database',
+      header: t('instance.internals.col.database'),
+      meta: { truncate: true },
+    },
     {
       accessorKey: 'files_per_second',
-      header: 'Files',
+      header: t('instance.internals.col.files'),
       meta: { help: 'internals.temp-files-rate' },
       cell: ({ row }) => perMinute(row.original.files_per_second),
     },
     {
       accessorKey: 'bytes_per_second',
-      header: 'Written',
+      header: t('instance.internals.col.written'),
       cell: ({ row }) => `${formatBytes(row.original.bytes_per_second)}/s`,
     },
   ]
 }
 
-function conflictColumns(): DataTableProps<RecoveryConflictRate>['columns'] {
+function conflictColumns(t: Translate): DataTableProps<RecoveryConflictRate>['columns'] {
   return [
-    { accessorKey: 'database', header: 'Database', meta: { truncate: true } },
-    { accessorKey: 'reason', header: 'Reason', meta: { truncate: true } },
+    {
+      accessorKey: 'database',
+      header: t('instance.internals.col.database'),
+      meta: { truncate: true },
+    },
+    { accessorKey: 'reason', header: t('instance.internals.col.reason'), meta: { truncate: true } },
     {
       accessorKey: 'per_second',
-      header: 'Queries cancelled',
+      header: t('instance.internals.col.queriesCancelled'),
       meta: { help: 'internals.recovery-cancelled' },
       cell: ({ row }) => perMinute(row.original.per_second),
     },
@@ -173,7 +194,9 @@ function StandbyReplay({
   standby: Schemas['StandbyReplay']
   walNotes: readonly string[]
 }) {
-  const conflicts = useMemo(() => conflictColumns(), [])
+  const t = useT()
+  const conflicts = useMemo(() => conflictColumns(t), [t])
+  const toolbar = useMemo(() => conflictToolbar(t), [t])
   const prefetch = standby.prefetch_blocks_per_second
   const prefetched = prefetch.prefetch
   const cached = prefetch.hit
@@ -182,15 +205,19 @@ function StandbyReplay({
       ? walNotes
       : [
           ...walNotes,
-          `WAL prefetch: ${formatRate(prefetched)} blocks read ahead, ${formatRate(cached)} already in shared buffers.`,
+          t('instance.internals.walPrefetch', {
+            read: formatRate(prefetched),
+            cached: formatRate(cached),
+          }),
         ]
   if (standby.conflicts.length === 0) {
     return (
-      <CaptionedBlock ariaLabel="Recovery conflicts" captionId="internals.recovery-conflicts">
+      <CaptionedBlock
+        ariaLabel={t('instance.internals.recoveryConflicts')}
+        captionId="internals.recovery-conflicts"
+      >
         <div className="space-y-2">
-          <p className="text-muted-foreground text-sm">
-            Replay cancelled no standby query in the last hour.
-          </p>
+          <p className="text-muted-foreground text-sm">{t('instance.internals.replayCancelled')}</p>
           {notes.map((note) => (
             <p key={note} className="text-muted-foreground text-sm">
               {note}
@@ -202,32 +229,35 @@ function StandbyReplay({
   }
   return (
     <DataTable
-      ariaLabel="Recovery conflicts"
+      ariaLabel={t('instance.internals.recoveryConflicts')}
       captionId="internals.recovery-conflicts"
       tableId="recovery-conflicts"
-      toolbar={CONFLICT_TOOLBAR}
+      toolbar={toolbar}
       {...(notes.length === 0 ? {} : { toolbarExtra: notesOf(notes) })}
       columns={conflicts}
       data={standby.conflicts}
       emptyState={null}
-      scope="conflicts"
+      scope={t('instance.internals.noun.conflicts')}
       total={standby.conflicts.length}
     />
   )
 }
 
 export function InternalsSection({ instanceId }: { instanceId: string }) {
+  const t = useT()
   const query = useInstanceInternals(instanceId)
-  const databases = useMemo(() => databaseColumns(), [])
-  const slru = useMemo(() => slruColumns(), [])
-  const temp = useMemo(() => tempFileColumns(), [])
+  const databases = useMemo(() => databaseColumns(t), [t])
+  const slru = useMemo(() => slruColumns(t), [t])
+  const temp = useMemo(() => tempFileColumns(t), [t])
   // One table per view (15.3): only the lists the instance has are offered.
   const views: InstanceView<InternalsViewId>[] = []
   if (query.data) {
-    if (query.data.databases.length > 0) views.push({ id: 'databases', label: 'Database sizes' })
-    if (query.data.slru.length > 0) views.push({ id: 'slru', label: 'SLRU caches' })
-    views.push({ id: 'temp', label: 'Temporary files' })
-    if (query.data.standby !== null) views.push({ id: 'replay', label: 'Recovery conflicts' })
+    if (query.data.databases.length > 0)
+      views.push({ id: 'databases', label: t('instance.internals.databaseSizes') })
+    if (query.data.slru.length > 0) views.push({ id: 'slru', label: t('instance.internals.slru') })
+    views.push({ id: 'temp', label: t('instance.internals.tempFiles') })
+    if (query.data.standby !== null)
+      views.push({ id: 'replay', label: t('instance.internals.recoveryConflicts') })
   }
   const [view, showView] = useInstanceView(views)
 
@@ -244,8 +274,8 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
     )
   } else if (query.isPending || query.data === undefined) {
     body = (
-      <section aria-busy="true" aria-label="Loading server internals" role="status">
-        Loading server internals…
+      <section aria-busy="true" aria-label={t('instance.internals.loadingAria')} role="status">
+        {t('instance.internals.loading')}
       </section>
     )
   } else if (
@@ -257,35 +287,39 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
   ) {
     body = (
       <EmptyState
-        title="No internals collected"
-        description="The wal_directory, database_size, slru, database_stats and recovery checks have reported nothing in the last hour."
+        title={t('instance.internals.noCollected')}
+        description={t('instance.internals.noCollectedDescription')}
       />
     )
   } else {
     const { standby, temp_files: tempFiles, wal_directory: walDirectory } = query.data
     const spilling = tempFiles.filter((row) => row.files_per_second > 0 || row.bytes_per_second > 0)
-    const walNotes = walDirectory === null ? [WAL_NOT_LISTED] : []
+    const walNotes = walDirectory === null ? [t(WAL_NOT_LISTED)] : []
     tiles = (
       <>
         <MetricTile
           className={TILE_IN_HEADING}
-          label="WAL directory"
+          label={t('instance.internals.walDirectory')}
           captionId="internals.wal-directory"
           value={walDirectory === null ? null : formatBytes(walDirectory.bytes)}
           {...(walDirectory === null
             ? {}
-            : { detail: `Spread over ${formatCount(walDirectory.files)} files.` })}
+            : {
+                detail: t('instance.internals.spreadOverFiles', {
+                  count: formatCount(walDirectory.files),
+                }),
+              })}
         />
         {standby === null ? null : (
           <MetricTile
             className={TILE_IN_HEADING}
-            label="WAL replay"
+            label={t('instance.internals.walReplay')}
             captionId="internals.wal-replay"
             value={
               standby.replay_paused ? (
-                <Badge variant="destructive">paused</Badge>
+                <Badge variant="destructive">{t('instance.internals.paused')}</Badge>
               ) : (
-                <Badge variant="outline">running</Badge>
+                <Badge variant="outline">{t('instance.internals.running')}</Badge>
               )
             }
           />
@@ -296,7 +330,7 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
       <>
         <TabsContent value="databases">
           <DataTable
-            ariaLabel="Database sizes"
+            ariaLabel={t('instance.internals.databaseSizes')}
             captionId="internals.database-sizes"
             tableId="database-sizes"
             toolbar={DATABASE_SIZE_TOOLBAR}
@@ -304,28 +338,28 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
             columns={databases}
             data={query.data.databases}
             emptyState={null}
-            scope="databases"
+            scope={t('instance.internals.noun.databases')}
             total={query.data.databases.length}
           />
         </TabsContent>
         <TabsContent value="slru">
           <DataTable
-            ariaLabel="SLRU caches"
+            ariaLabel={t('instance.internals.slru')}
             captionId="internals.slru"
             tableId="slru-caches"
             toolbar={SLRU_TOOLBAR}
-            toolbarExtra={notesOf([...walNotes, SLRU_HINT])}
+            toolbarExtra={notesOf([...walNotes, t(SLRU_HINT)])}
             columns={slru}
             data={query.data.slru}
             emptyState={null}
-            scope="caches"
+            scope={t('instance.internals.noun.caches')}
             total={query.data.slru.length}
           />
         </TabsContent>
         <TabsContent value="temp">
           {spilling.length > 0 ? (
             <DataTable
-              ariaLabel="Temporary files"
+              ariaLabel={t('instance.internals.tempFiles')}
               captionId="internals.temp-files"
               tableId="temporary-files"
               toolbar={TEMP_FILE_TOOLBAR}
@@ -333,15 +367,16 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
               columns={temp}
               data={spilling}
               emptyState={null}
-              scope="databases"
+              scope={t('instance.internals.noun.databases')}
               total={spilling.length}
             />
           ) : (
-            <CaptionedBlock ariaLabel="Temporary files" captionId="internals.temp-files">
+            <CaptionedBlock
+              ariaLabel={t('instance.internals.tempFiles')}
+              captionId="internals.temp-files"
+            >
               <div className="space-y-2">
-                <p className="text-muted-foreground text-sm">
-                  No query outgrew work_mem in the last hour.
-                </p>
+                <p className="text-muted-foreground text-sm">{t('instance.internals.noOutgrew')}</p>
                 {walNotes.map((note) => (
                   <p key={note} className="text-muted-foreground text-sm">
                     {note}
@@ -364,15 +399,21 @@ export function InternalsSection({ instanceId }: { instanceId: string }) {
     <Tabs onValueChange={showView} value={view ?? ''}>
       <InstancePanel
         id="internals"
-        title="Server internals"
+        title={t('instance.internals.section')}
         captionId="internals.section"
         actions={
-          tiles === null ? undefined : (
-            <>
-              {tiles}
-              <InstanceViewTabs label="Server internals lists" views={views} />
-            </>
-          )
+          <>
+            {tiles === null ? null : (
+              <>
+                {tiles}
+                <InstanceViewTabs label={t('instance.internals.viewsLabel')} views={views} />
+              </>
+            )}
+            <HelpLink
+              anchor="instance-overview#internals"
+              label={t('instance.internals.section')}
+            />
+          </>
         }
       >
         {body}

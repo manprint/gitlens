@@ -621,12 +621,12 @@ test('IND-SUGG a hot unindexed column is suggested, and the suggestion goes once
         problems.push(`api: no suggestion on ${tbl}(a) (${found.length} for the table)`)
       const rows = await uiRows(
         page,
-        await uiPath('suggestions'),
-        'Suggested indexes',
-        'Search suggestions',
+        await uiPath('missing'),
+        'Missing index candidates',
+        'Search missing indexes',
         tbl,
       )
-      if (rows.length === 0) problems.push('ui: no Suggested indexes row')
+      if (rows.length === 0) problems.push('ui: no Missing index candidates row')
       else if (
         (await page
           .getByRole('row')
@@ -664,12 +664,12 @@ test('IND-SUGG a hot unindexed column is suggested, and the suggestion goes once
         problems.push(`api /indexes lacks ${idx}`)
       const sugg = await uiRows(
         page,
-        await uiPath('suggestions'),
-        'Suggested indexes',
-        'Search suggestions',
+        await uiPath('missing'),
+        'Missing index candidates',
+        'Search missing indexes',
         tbl,
       )
-      if (sugg.length > 0) problems.push('ui: Suggested indexes row still shown')
+      if (sugg.length > 0) problems.push('ui: Missing index candidates row still shown')
       const tax = await uiRows(
         page,
         await uiPath('tax'),

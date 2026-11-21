@@ -11,6 +11,7 @@ import {
   Activity,
   Bell,
   BellOff,
+  BookOpen,
   Gauge,
   History,
   LayoutDashboard,
@@ -24,6 +25,8 @@ import {
 } from 'lucide-react'
 
 import type { Cluster } from '@/api/types'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT } from '@/i18n/react'
 import { chooseInstance, readLastInstance, writeLastInstance } from '@/lib/lastInstance'
 import { clusterLabel, instanceLabel } from '@/lib/names'
 import { cn } from '@/lib/utils'
@@ -32,7 +35,7 @@ import { Logo } from './Logo'
 
 interface Destination {
   /** The accessible name of the link; it matches the visible label. */
-  label: string
+  label: MessageKey
   path: string
   icon: ComponentType<{ className?: string }>
   /** Marks the link active only on an exact match. */
@@ -40,28 +43,33 @@ interface Destination {
 }
 
 interface NavGroup {
-  title: string
+  title: MessageKey
   items: readonly Destination[]
 }
 
 const monitoringGroup: NavGroup = {
-  title: 'Monitoring',
+  title: 'shell.nav.monitoring',
   items: [
-    { icon: LayoutDashboard, label: 'Fleet', path: '/', end: true },
-    { icon: Gauge, label: 'Slowest queries', path: '/queries', end: true },
-    { icon: ListTree, label: 'Index analysis', path: '/indexes', end: true },
-    { icon: Lightbulb, label: 'Findings', path: '/findings' },
+    { icon: LayoutDashboard, label: 'shell.nav.fleet', path: '/', end: true },
+    { icon: Gauge, label: 'shell.nav.slowestQueries', path: '/queries', end: true },
+    { icon: ListTree, label: 'shell.nav.indexAnalysis', path: '/indexes', end: true },
+    { icon: Lightbulb, label: 'shell.nav.findings', path: '/findings' },
   ],
 }
 
 const alertingGroup: NavGroup = {
-  title: 'Alerting',
+  title: 'shell.nav.alerting',
   items: [
-    { icon: Bell, label: 'Alerts', path: '/alerts', end: true },
-    { icon: History, label: 'Events', path: '/events' },
-    { icon: ListChecks, label: 'Alert rules', path: '/alerts/rules' },
-    { icon: BellOff, label: 'Silences', path: '/alerts/silences' },
+    { icon: Bell, label: 'shell.nav.alerts', path: '/alerts', end: true },
+    { icon: History, label: 'shell.nav.events', path: '/events' },
+    { icon: ListChecks, label: 'shell.nav.alertRules', path: '/alerts/rules' },
+    { icon: BellOff, label: 'shell.nav.silences', path: '/alerts/silences' },
   ],
+}
+
+const helpGroup: NavGroup = {
+  title: 'shell.nav.inlineHelp',
+  items: [{ icon: BookOpen, label: 'shell.nav.userGuide', path: '/help' }],
 }
 
 /** Fleet-level pages that name their server in the `instance` search parameter. */
@@ -69,15 +77,20 @@ function isFleetServerPage(pathname: string): boolean {
   return pathname === '/queries' || pathname === '/indexes'
 }
 
-function instanceGroup(instanceId: string): NavGroup {
+/**
+ * The views of one server. A database chosen on one view (`db`) is carried to
+ * the others, so moving between them keeps the same scope.
+ */
+function instanceGroup(instanceId: string, database: string | null): NavGroup {
   const base = `/instances/${encodeURIComponent(instanceId)}`
+  const search = database ? `?${new URLSearchParams({ db: database }).toString()}` : ''
   return {
-    title: 'Instance',
+    title: 'shell.nav.instance',
     items: [
-      { icon: Server, label: 'Instance overview', path: base, end: true },
-      { icon: Zap, label: 'Query performance', path: `${base}/queries` },
-      { icon: Activity, label: 'Wait events', path: `${base}/ash` },
-      { icon: Lock, label: 'Locks and activity', path: `${base}/locks` },
+      { icon: Server, label: 'shell.nav.instanceOverview', path: `${base}${search}`, end: true },
+      { icon: Zap, label: 'shell.nav.queryPerformance', path: `${base}/queries${search}` },
+      { icon: Activity, label: 'shell.nav.waitEvents', path: `${base}/ash${search}` },
+      { icon: Lock, label: 'shell.nav.locks', path: `${base}/locks${search}` },
     ],
   }
 }
@@ -99,7 +112,9 @@ function NavItem({
   expanded: boolean
   onNavigate: (() => void) | undefined
 }) {
-  const { icon: Icon, label, path, end } = destination
+  const t = useT()
+  const { icon: Icon, path, end } = destination
+  const label = t(destination.label)
   return (
     <li>
       <NavLink
@@ -151,6 +166,7 @@ function Group({
   group: NavGroup
   onNavigate: (() => void) | undefined
 }) {
+  const t = useT()
   return (
     <div className="space-y-1">
       <p
@@ -159,7 +175,7 @@ function Group({
           !expanded && 'hidden lg:block',
         )}
       >
-        {group.title}
+        {t(group.title)}
       </p>
       <ul className="flex flex-col gap-0.5">
         {group.items.map((destination) => (
@@ -182,6 +198,7 @@ function InstanceSwitcher({
   clusters: readonly Cluster[]
   current: string | null
 }) {
+  const t = useT()
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const instances = clusters.flatMap((cluster) =>
@@ -211,7 +228,7 @@ function InstanceSwitcher({
         className="text-sidebar-foreground/75 mb-1.5 block px-1 text-[0.6875rem] font-semibold tracking-wider uppercase"
         htmlFor="sidebar-instance"
       >
-        Server
+        {t('shell.nav.server')}
       </label>
       <div className="relative">
         <Server
@@ -225,13 +242,13 @@ function InstanceSwitcher({
           value={current ?? ''}
         >
           <option disabled value="">
-            Choose a server…
+            {t('shell.nav.chooseServer')}
           </option>
           {instances.map(({ cluster, instance }) => (
             <option key={instance.instance_id} value={instance.instance_id}>
               {instanceLabel(instance)}
               {cluster.name ? ` · ${clusterLabel(cluster)}` : ''}
-              {instance.up ? '' : ' (down)'}
+              {instance.up ? '' : ` ${t('shell.nav.down')}`}
             </option>
           ))}
         </select>
@@ -254,6 +271,7 @@ function InstanceSwitcher({
 
 /** The navigation body, shared by the fixed rail and the mobile drawer. */
 export function SidebarContent({ clusters = [], expanded = false, onNavigate }: SidebarProps) {
+  const t = useT()
   const match = useMatch('/instances/:instanceId/*')
   const routeInstance = match?.params.instanceId ?? null
 
@@ -262,6 +280,8 @@ export function SidebarContent({ clusters = [], expanded = false, onNavigate }: 
   const requested =
     routeInstance ?? (isFleetServerPage(pathname) ? searchParams.get('instance') : null)
   const currentInstance = chooseInstance(clusters, requested, readLastInstance())
+  const database =
+    routeInstance !== null && routeInstance === currentInstance ? searchParams.get('db') : null
 
   // Only a server the operator opened is remembered, not a fallback choice.
   useEffect(() => {
@@ -272,7 +292,7 @@ export function SidebarContent({ clusters = [], expanded = false, onNavigate }: 
     <div className="flex h-full flex-col">
       <div className="border-sidebar-border flex h-16 shrink-0 items-center border-b px-4">
         <Link
-          aria-label="pglens home"
+          aria-label={t('shell.nav.home')}
           className="text-sidebar-accent-foreground"
           onClick={onNavigate}
           to="/"
@@ -285,22 +305,23 @@ export function SidebarContent({ clusters = [], expanded = false, onNavigate }: 
         <InstanceSwitcher clusters={clusters} current={currentInstance} />
       </div>
 
-      <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-3 pb-4">
+      <nav aria-label={t('shell.nav.primary')} className="flex-1 overflow-y-auto px-3 pb-4">
         <Group expanded={expanded} group={monitoringGroup} onNavigate={onNavigate} />
         {currentInstance ? (
           <Group
             expanded={expanded}
-            group={instanceGroup(currentInstance)}
+            group={instanceGroup(currentInstance, database)}
             onNavigate={onNavigate}
           />
         ) : null}
         <Group expanded={expanded} group={alertingGroup} onNavigate={onNavigate} />
+        <Group expanded={expanded} group={helpGroup} onNavigate={onNavigate} />
       </nav>
 
       <div className="border-sidebar-border border-t px-3 py-3">
         <ul>
           <NavItem
-            destination={{ icon: Settings, label: 'Settings', path: '/settings' }}
+            destination={{ icon: Settings, label: 'shell.nav.settings', path: '/settings' }}
             expanded={expanded}
             onNavigate={onNavigate}
           />

@@ -1,3 +1,4 @@
+import { translate } from '@/i18n/store'
 import type { Schemas } from '@/api/types'
 import { clusterLabel, instanceAddress, instanceLabel } from '@/lib/names'
 
@@ -28,7 +29,7 @@ function instanceRow(instance: InstanceSummary, cluster: Cluster | null): NameRo
     kind: 'instance',
     cluster_id: cluster?.cluster_id ?? null,
     cluster_name: cluster?.name ?? null,
-    cluster_label: cluster ? clusterLabel(cluster) : 'Not assigned',
+    cluster_label: cluster ? clusterLabel(cluster) : translate('settings.inventory.notAssigned'),
     instance_id: instance.instance_id,
     instance_name: instance.display_name ?? null,
     instance_label: instanceLabel(instance),

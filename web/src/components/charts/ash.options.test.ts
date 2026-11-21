@@ -9,8 +9,7 @@ import {
   buildAshGroupOption,
   buildAshOption,
   type AshChartSeries,
-  isolatedPoints,
-  OTHER_FOLDED_LABEL,
+  otherFoldedLabel,
 } from './ash.options'
 import { timeAxisOption } from './timeAxis'
 
@@ -64,10 +63,10 @@ describe('buildAshOption', () => {
     const plotted = optionSeries(option)
     const tooltip = (option.tooltip as { formatter?: (params: unknown) => string }).formatter
 
-    expect(plotted.at(-1)?.name).toBe(OTHER_FOLDED_LABEL)
-    expect((option.legend as { data?: string[] }).data?.at(-1)).toBe(OTHER_FOLDED_LABEL)
+    expect(plotted.at(-1)?.name).toBe(otherFoldedLabel())
+    expect((option.legend as { data?: string[] }).data?.at(-1)).toBe(otherFoldedLabel())
     expect(
-      tooltip?.([{ seriesName: OTHER_FOLDED_LABEL, value: ['2026-09-01T10:00:00Z', 1] }]),
+      tooltip?.([{ seriesName: otherFoldedLabel(), value: ['2026-09-01T10:00:00Z', 1] }]),
     ).toContain('3 groups folded')
   })
 
@@ -76,18 +75,13 @@ describe('buildAshOption', () => {
     const plotted = optionSeries(option)
 
     for (const item of plotted) {
-      const sourceName = item.name === OTHER_FOLDED_LABEL ? 'other' : item.name
+      const sourceName = item.name === otherFoldedLabel() ? 'other' : item.name
       expect(item.itemStyle?.color).toBe(ASH_PALETTE[sourceName as keyof typeof ASH_PALETTE])
     }
   })
 
-  it('UI-ASH-014 omits the CPU reference line when the core count is unknown', () => {
-    expect(
-      optionSeries(buildAshOption(series, { cpuCount: null })).every((item) => !item.markLine),
-    ).toBe(true)
-    expect(
-      optionSeries(buildAshOption(series, { cpuCount: 4 })).some((item) => item.markLine),
-    ).toBe(true)
+  it('UI-ASH-014 draws no reference line: every mark is in the legend', () => {
+    expect(optionSeries(buildAshOption(series)).every((item) => !item.markLine)).toBe(true)
   })
   it('gives every wait-event type its own colour, with BufferPin sharing Buffer', () => {
     const colours = Object.entries(ASH_PALETTE)
@@ -117,14 +111,8 @@ describe('ASH time axis (plan 005 1.4)', () => {
     expect(zoom.find((item) => item.type === 'slider')?.labelFormatter?.(at)).toBe('10:00')
   })
 
-  it('ASHOPT-003 keeps the CPU-count line and the tooltip rows, with a UTC tooltip time', () => {
-    const option = buildAshOption(series, { cpuCount: 4 })
-    const cpu = optionSeries(option).find((item) => item.name === 'CPU') as {
-      markLine?: { data: { yAxis: number; name: string }[] }
-    }
-    expect(cpu.markLine?.data[0]).toEqual(
-      expect.objectContaining({ yAxis: 4, name: 'CPU count (4)' }),
-    )
+  it('ASHOPT-003 keeps the tooltip rows, with a UTC tooltip time', () => {
+    const option = buildAshOption(series)
     const tooltip = (option.tooltip as { formatter: (params: unknown) => string }).formatter
     const html = tooltip([{ seriesName: 'CPU', value: ['2026-09-01T10:00:00Z', 1] }])
     expect(html).toContain('2026-09-01 10:00:00 UTC')
@@ -139,7 +127,7 @@ describe('ASH time axis (plan 005 1.4)', () => {
       { name: 'Lock', points },
     ]
     const spanMs = 6 * 60 * 60 * 1_000
-    const option = buildAshGroupOption(locks, { cpuCount: 4, stack: 'locks', spanMs })
+    const option = buildAshGroupOption(locks, { stack: 'locks', spanMs })
     const lines = optionSeries(option)
 
     expect(lines.map(({ name }) => name)).toEqual(['Lock', 'LWLock'])
@@ -149,21 +137,11 @@ describe('ASH time axis (plan 005 1.4)', () => {
     expect(option.legend).toEqual({ show: false })
     expect(lines.some(({ markLine }) => markLine !== undefined)).toBe(false)
 
-    const cpu = buildAshGroupOption([{ name: 'CPU', points }], {
-      cpuCount: 4,
-      showCpuCount: true,
-      stack: 'cpu',
-      spanMs,
-    })
-    expect(JSON.stringify(optionSeries(cpu)[0]?.markLine)).toContain('CPU count (4)')
-    expect(
-      optionSeries(
-        buildAshGroupOption([{ name: 'CPU', points }], { stack: 'cpu', showCpuCount: true }),
-      )[0]?.markLine,
-    ).toBeUndefined()
+    const cpu = buildAshGroupOption([{ name: 'CPU', points }], { stack: 'cpu', spanMs })
+    expect(optionSeries(cpu)[0]?.markLine).toBeUndefined()
   })
 
-  it('ASHOPT-012 marks isolated samples so sparse data stays visible', () => {
+  it('ASHOPT-012 draws no point markers and no wheel zoom, even on sparse samples', () => {
     const sparse = [
       { ts: '2026-09-01T10:00:00Z', value: null },
       { ts: '2026-09-01T10:01:00Z', value: 0.05 },
@@ -171,18 +149,14 @@ describe('ASH time axis (plan 005 1.4)', () => {
       { ts: '2026-09-01T10:03:00Z', value: 1 },
       { ts: '2026-09-01T10:04:00Z', value: 2 },
     ]
-    expect([...isolatedPoints(sparse)]).toEqual([1])
-
-    const line = optionSeries(
-      buildAshGroupOption([{ name: 'Client', points: sparse }], { stack: 'client' }),
-    )[0] as {
-      showSymbol?: boolean
-      symbolSize?: (value: unknown, params: { dataIndex?: number }) => number
+    const option = buildAshGroupOption([{ name: 'Client', points: sparse }], { stack: 'client' })
+    const line = optionSeries(option)[0] as { showSymbol?: boolean; symbolSize?: unknown }
+    expect(line.showSymbol).toBe(false)
+    expect(line.symbolSize).toBeUndefined()
+    for (const built of [option, buildAshOption(series)]) {
+      const zoom = built.dataZoom as { type: string }[]
+      expect(zoom.map((item) => item.type)).toEqual(['slider'])
     }
-    expect(line.showSymbol).toBe(true)
-    expect(line.symbolSize?.(null, { dataIndex: 1 })).toBeGreaterThan(0)
-    expect(line.symbolSize?.(null, { dataIndex: 3 })).toBe(0)
-    expect(line.symbolSize?.(null, {})).toBe(0)
   })
 
   it('ASHOPT-013 pins the time axis to the selected window', () => {
@@ -202,7 +176,7 @@ describe('ASH time axis (plan 005 1.4)', () => {
   })
 
   it('ASHOPT-011 keeps the stacked option unchanged', () => {
-    expect(buildAshOption(series, { cpuCount: 4, foldedCount: 2 })).toMatchSnapshot()
+    expect(buildAshOption(series, { foldedCount: 2 })).toMatchSnapshot()
     expect(buildAshOption(series)).toMatchSnapshot()
   })
 

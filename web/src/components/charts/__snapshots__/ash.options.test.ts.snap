@@ -11,12 +11,6 @@ exports[`ASH time axis (plan 005 1.4) > ASHOPT-011 keeps the stacked option unch
   ],
   "dataZoom": [
     {
-      "filterMode": "none",
-      "throttle": 50,
-      "type": "inside",
-      "xAxisIndex": 0,
-    },
-    {
       "bottom": 8,
       "filterMode": "none",
       "labelFormatter": [Function],
@@ -63,24 +57,6 @@ exports[`ASH time axis (plan 005 1.4) > ASHOPT-011 keeps the stacked option unch
       "lineStyle": {
         "color": "var(--wait-cpu)",
         "width": 1,
-      },
-      "markLine": {
-        "data": [
-          {
-            "label": {
-              "formatter": "CPU count (4)",
-            },
-            "lineStyle": {
-              "color": "var(--muted-foreground)",
-              "type": "dashed",
-              "width": 1,
-            },
-            "name": "CPU count (4)",
-            "yAxis": 4,
-          },
-        ],
-        "silent": true,
-        "symbol": "none",
       },
       "name": "CPU",
       "showSymbol": false,
@@ -206,12 +182,6 @@ exports[`ASH time axis (plan 005 1.4) > ASHOPT-011 keeps the stacked option unch
     "var(--wait-other)",
   ],
   "dataZoom": [
-    {
-      "filterMode": "none",
-      "throttle": 50,
-      "type": "inside",
-      "xAxisIndex": 0,
-    },
     {
       "bottom": 8,
       "filterMode": "none",

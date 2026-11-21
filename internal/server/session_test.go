@@ -406,9 +406,13 @@ func TestSessionGet_States(t *testing.T) {
 				Authenticated bool   `json:"authenticated"`
 				Configured    bool   `json:"configured"`
 				ExpiresAt     string `json:"expires_at"`
+				TimeZone      string `json:"time_zone"`
+				Language      string `json:"language"`
 			}
 			require.NoError(t, json.NewDecoder(recorder.Body).Decode(&status))
 			require.Equal(t, tt.authenticated, status.Authenticated)
+			require.Equal(t, "UTC", status.TimeZone)
+			require.Equal(t, "en", status.Language)
 			if !tt.authenticated {
 				require.Equal(t, tt.configured, status.Configured)
 			}
@@ -416,6 +420,25 @@ func TestSessionGet_States(t *testing.T) {
 				require.NotEmpty(t, status.ExpiresAt)
 			}
 		})
+	}
+}
+
+func TestSessionGet_ConsoleDefaults(t *testing.T) {
+	cfg := UIConfig{Password: "correct", SessionTTL: time.Hour, TimeZone: "Europe/Rome", Language: "it"}
+	store := NewSessionStore(time.Hour)
+	token, _, err := store.Create()
+	require.NoError(t, err)
+	for _, withCookie := range []bool{true, false} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+		if withCookie {
+			request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+		}
+		newSessionRoutes(cfg, store).ServeHTTP(recorder, request)
+		var status map[string]any
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&status))
+		require.Equal(t, "Europe/Rome", status["time_zone"])
+		require.Equal(t, "it", status["language"])
 	}
 }
 

@@ -1,6 +1,7 @@
+import { activeIntl } from '@/i18n/store'
 import { localizedNumber, UNKNOWN } from './shared'
 
-export function formatLag(seconds: number | null, locale = 'en-US'): string {
+export function formatLag(seconds: number | null, locale = activeIntl()): string {
   if (seconds === null || !Number.isFinite(seconds)) return UNKNOWN
   const absolute = Math.abs(seconds)
   const number = localizedNumber(seconds, locale, {

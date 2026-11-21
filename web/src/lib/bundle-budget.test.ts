@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseChunkList, parseStaticImports } from '../../scripts/bundle-budget'
+import {
+  LAZY_GZIP_LIMIT,
+  lazyLimit,
+  LOCALE_GZIP_LIMIT,
+  parseChunkList,
+  parseStaticImports,
+} from '../../scripts/bundle-budget'
 
 describe('bundle budget parser', () => {
   it('UI-PERF-001 parses the measured chunk list', () => {
@@ -14,5 +20,12 @@ describe('bundle budget parser', () => {
     expect(parseStaticImports('import "./shared.js"; import("./lazy.js");')).toEqual([
       './shared.js',
     ])
+  })
+
+  it('UI-PERF-003 holds each language catalog chunk to its own limit', () => {
+    expect(lazyLimit('i18n-it-B3x_9aQe.js')).toBe(LOCALE_GZIP_LIMIT)
+    expect(lazyLimit('i18n-pt-BR-B3x_9aQe.js')).toBe(LOCALE_GZIP_LIMIT)
+    expect(lazyLimit('pages-Db_np5Nt.js')).toBe(LAZY_GZIP_LIMIT)
+    expect(lazyLimit('vendor-echarts-BOAgtSqb.js')).toBe(LAZY_GZIP_LIMIT)
   })
 })

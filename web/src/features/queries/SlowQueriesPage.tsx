@@ -9,11 +9,14 @@ import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { MetricTile } from '@/components/layout/MetricTile'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { FULL_SEARCH_HINT, HighlightedText, SearchBox } from '@/components/layout/SearchBox'
+import { HighlightedText, SearchBox } from '@/components/layout/SearchBox'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import type { MessageKey } from '@/i18n/messages/en'
+import { type Translate, useT } from '@/i18n/react'
 import { useKeepFocus } from '@/hooks/useKeepFocus'
 import { useLegacySearchParam, useSearchDraft, useShownTerm } from '@/hooks/useSearch'
 import { useTimeRange } from '@/hooks/useTimeRange'
@@ -27,7 +30,7 @@ import {
 } from '@/lib/statements'
 import { chooseInstance, readLastInstance } from '@/lib/lastInstance'
 import { clusterLabel, instanceLabel } from '@/lib/names'
-import { queryWindowOf } from '@/lib/timerange'
+import { queryWindowOf, rangeLabelKey } from '@/lib/timerange'
 import { cn } from '@/lib/utils'
 import { NativeSelect } from '@/components/ui/native-select'
 
@@ -39,17 +42,9 @@ export const STATEMENT_FETCH_LIMIT = 200
 
 type Ranking = 'mean' | 'total'
 
-const RANKINGS: readonly { value: Ranking; label: string; hint: string }[] = [
-  {
-    value: 'mean',
-    label: 'Mean time per call',
-    hint: 'The statements that take longest each time they run.',
-  },
-  {
-    value: 'total',
-    label: 'Total time',
-    hint: 'The statements that use the most database time overall.',
-  },
+const RANKINGS: readonly { value: Ranking; labelKey: MessageKey; hintKey: MessageKey }[] = [
+  { value: 'mean', labelKey: 'queries.slow.rankMean', hintKey: 'queries.slow.rankMeanHint' },
+  { value: 'total', labelKey: 'queries.common.totalTime', hintKey: 'queries.slow.rankTotalHint' },
 ]
 
 const ORDER_BY = { mean: 'mean_exec_time', total: 'total_exec_time' } as const
@@ -101,11 +96,15 @@ interface SlowRow {
   share: number | null
 }
 
-function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>['columns'] {
+function slowColumns(
+  instanceId: string,
+  term: string,
+  t: Translate,
+): DataTableProps<SlowRow>['columns'] {
   return [
     {
       id: 'rank',
-      header: 'Rank',
+      header: t('queries.slow.rank'),
       accessorFn: (slow) => slow.rank,
       cell: ({ row }) => (
         <span
@@ -122,7 +121,7 @@ function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>[
     },
     {
       id: 'query',
-      header: 'Query',
+      header: t('queries.common.query'),
       enableSorting: false,
       cell: ({ row }) => {
         const { row: statement } = row.original
@@ -132,19 +131,26 @@ function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>[
             {/* The name starts with `Query <id>` and still holds the visible text (label in name). */}
             <Link
               className="text-primary block min-w-0 truncate font-mono text-xs hover:underline"
-              title={statement.query_text ?? `Query ${String(statement.queryid)}`}
+              title={
+                statement.query_text ??
+                t('queries.list.queryLink', { queryid: String(statement.queryid) })
+              }
               to={queryPath(instanceId, statement.queryid, statement.datname)}
             >
               {text ? (
                 <>
-                  <span className="sr-only">Query {String(statement.queryid)}: </span>
+                  <span className="sr-only">
+                    {t('queries.list.queryLink', { queryid: String(statement.queryid) })}:{' '}
+                  </span>
                   <HighlightedText q={term} text={text} />
                 </>
               ) : (
-                `Query ${String(statement.queryid)}`
+                t('queries.list.queryLink', { queryid: String(statement.queryid) })
               )}
             </Link>
-            {statement.truncated ? <Badge variant="warning">text truncated</Badge> : null}
+            {statement.truncated ? (
+              <Badge variant="warning">{t('queries.slow.textTruncated')}</Badge>
+            ) : null}
             {statement.query_text ? <CopyButton text={statement.query_text} /> : null}
           </div>
         )
@@ -152,20 +158,20 @@ function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>[
     },
     {
       id: 'database',
-      header: 'Database',
+      header: t('queries.common.database'),
       accessorFn: (slow) => slow.row.datname ?? null,
       cell: ({ row }) => row.original.row.datname ?? '—',
     },
     {
       id: 'calls',
-      header: 'Calls',
+      header: t('queries.common.calls'),
       accessorFn: (slow) => slow.calls,
       cell: ({ row }) => (row.original.calls === null ? '—' : formatCount(row.original.calls)),
     },
     {
       id: 'mean',
       meta: { help: 'statements.mean-time' },
-      header: 'Mean time',
+      header: t('queries.common.meanTime'),
       accessorFn: (slow) => slow.mean,
       cell: ({ row }) => (
         <span className="whitespace-nowrap">{formatMilliseconds(row.original.mean)}</span>
@@ -174,7 +180,7 @@ function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>[
     {
       id: 'total',
       meta: { help: 'statements.total-time' },
-      header: 'Total time',
+      header: t('queries.common.totalTime'),
       accessorFn: (slow) => slow.total,
       cell: ({ row }) => (
         <span className="whitespace-nowrap">{formatMilliseconds(row.original.total)}</span>
@@ -183,7 +189,7 @@ function slowColumns(instanceId: string, term: string): DataTableProps<SlowRow>[
     {
       id: 'share',
       meta: { help: 'statements.share-of-listed' },
-      header: 'Share of listed time',
+      header: t('queries.list.shareOfListed'),
       accessorFn: (slow) => slow.share,
       cell: ({ row }) => {
         const { share } = row.original
@@ -220,6 +226,7 @@ function InstanceStatements({
   ranking,
   serverLabel,
 }: InstanceStatementsProps) {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   const { range } = useTimeRange()
   const database = searchParams.get('db') ?? undefined
@@ -261,7 +268,7 @@ function InstanceStatements({
       })),
     [rows, shares, summaries],
   )
-  const columns = useMemo(() => slowColumns(instanceId, shownTerm), [instanceId, shownTerm])
+  const columns = useMemo(() => slowColumns(instanceId, shownTerm, t), [instanceId, shownTerm, t])
   const totalTime = summaries.reduce((sum, summary) => sum + (summary.total ?? 0), 0)
   const totalCalls = summaries.reduce((sum, summary) => sum + (summary.calls ?? 0), 0)
   const slowestMean = Math.max(0, ...summaries.map((summary) => summary.mean ?? 0))
@@ -304,11 +311,11 @@ function InstanceStatements({
       <SearchBox
         busy={statementsQuery.isFetching && term !== ''}
         draft={searchDraft}
-        hint={FULL_SEARCH_HINT}
+        fullSearch
         id="slow-search"
-        label="Search statements"
+        label={t('queries.list.searchLabel')}
         onChange={setSearch}
-        placeholder="Query text, queryid or database"
+        placeholder={t('queries.list.searchPlaceholder')}
         value={q}
       />
       {controls}
@@ -317,7 +324,7 @@ function InstanceStatements({
           className="text-muted-foreground text-xs font-medium min-[1600px]:sr-only"
           htmlFor="slow-db"
         >
-          Database
+          {t('queries.common.database')}
         </label>
         <div className="relative">
           <Database
@@ -330,7 +337,7 @@ function InstanceStatements({
             onChange={(event) => setDatabase(event.target.value)}
             value={database ?? ''}
           >
-            <option value="">All databases</option>
+            <option value="">{t('queries.slow.allDatabases')}</option>
             {monitored.map((entry) => (
               <option key={entry.datname} value={entry.datname}>
                 {entry.datname}
@@ -359,14 +366,15 @@ function InstanceStatements({
       {movableControls}
     </div>
   )
-  const hint = RANKINGS.find((option) => option.value === ranking)?.hint
+  const rankingOption = RANKINGS.find((option) => option.value === ranking)
+  const hint = rankingOption ? t(rankingOption.hintKey) : undefined
 
   if (statementsQuery.isPending && response === undefined) {
     return (
       <div className="space-y-6 min-[1600px]:space-y-4">
         {standaloneBar}
-        <div aria-busy="true" aria-label="Loading slowest queries" role="status">
-          Loading slowest queries…
+        <div aria-busy="true" aria-label={t('queries.slow.loadingLabel')} role="status">
+          {t('queries.slow.loading')}
         </div>
       </div>
     )
@@ -378,12 +386,12 @@ function InstanceStatements({
         {standaloneBar}
         {statementsQuery.error.kind === 'not_found' ? (
           <EmptyState
-            description="This instance does not report pg_stat_statements. Add the module to shared_preload_libraries and create the extension, then restart the agent."
-            title="pg_stat_statements is not available"
+            description={t('queries.slow.notAvailableText')}
+            title={t('queries.slow.notAvailableTitle')}
           />
         ) : (
           <ErrorState
-            endpoint="statements"
+            endpoint={t('queries.list.statements')}
             failure={statementsQuery.error}
             onRetry={() => void statementsQuery.refetch()}
           />
@@ -400,11 +408,11 @@ function InstanceStatements({
           className="border-warning/40 bg-warning/10 rounded-lg border px-4 py-3 text-sm"
           role="status"
         >
-          <strong>pg_stat_statements is not collected.</strong>{' '}
+          <strong>{t('queries.slow.disabledTitle')}</strong>{' '}
           {response.disabled_reason
-            ? `The agent skips the check: ${response.disabled_reason}.`
-            : 'The agent skips the check on this instance.'}{' '}
-          Statements collected earlier are still shown.
+            ? t('queries.slow.skipWithReason', { reason: response.disabled_reason })
+            : t('queries.slow.skipNone')}{' '}
+          {t('queries.slow.collectedEarlier')}
         </div>
       ) : null}
 
@@ -415,9 +423,14 @@ function InstanceStatements({
         {/* The summary tiles share the list header; from 1600 px on one line (D26). */}
         <div className="flex flex-col gap-4 border-b px-5 py-4 min-[1600px]:flex-row min-[1600px]:items-center min-[1600px]:justify-between min-[1600px]:py-1">
           <div className="min-w-0 min-[1600px]:w-80 min-[1600px]:shrink-0">
-            <h2 className="text-base font-semibold" id="slowest-list-title">
-              Ranked by {ranking === 'mean' ? 'mean time per call' : 'total time'}
-            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold" id="slowest-list-title">
+                {ranking === 'mean'
+                  ? t('queries.slow.rankedByMean')
+                  : t('queries.slow.rankedByTotal')}
+              </h2>
+              <HelpLink anchor="slowest-queries#table" label={t('queries.slow.tableHelp')} />
+            </div>
             <p
               className="text-muted-foreground mt-0.5 text-sm min-[1600px]:line-clamp-2 min-[1600px]:text-xs min-[1600px]:leading-snug"
               title={hint}
@@ -429,26 +442,29 @@ function InstanceStatements({
             <MetricTile
               captionId="slow.slowest-mean"
               className={HEADER_TILE}
-              label="Slowest mean time"
+              label={t('queries.slow.slowestMean')}
               value={rows.length === 0 ? null : formatMilliseconds(slowestMean)}
             />
             <MetricTile
               captionId="slow.total-time"
               className={HEADER_TILE}
-              label="Time spent by these queries"
+              label={t('queries.slow.totalTimeTile')}
               value={rows.length === 0 ? null : formatMilliseconds(totalTime)}
             />
             <MetricTile
               captionId="slow.calls"
               className={HEADER_TILE}
-              label="Calls"
+              label={t('queries.common.calls')}
               value={rows.length === 0 ? null : formatCount(totalCalls)}
             />
             <MetricTile
               captionId="slow.statements-ranked"
               className={HEADER_TILE_FLEX}
-              detail={`At most ${STATEMENT_FETCH_LIMIT} ranked${response?.truncated ? ', some missing' : ''}.`}
-              label="Statements ranked"
+              detail={t('queries.slow.rankedDetail', {
+                limit: STATEMENT_FETCH_LIMIT,
+                missing: response?.truncated ? t('queries.slow.someMissing') : '',
+              })}
+              label={t('queries.slow.statementsRanked')}
               unit="statements"
               value={String(rows.length)}
             />
@@ -458,25 +474,31 @@ function InstanceStatements({
           <div className="p-5">
             {shownTerm === '' ? (
               <EmptyState
-                description={`pg_stat_statements has no entries for ${serverLabel}${database === undefined ? '' : `, database ${database},`} in the selected range (${range.label}). Another server may have statements: pick it in Server, or widen the range.`}
-                title="No statements yet"
+                description={t('queries.slow.noEntriesText', {
+                  server: serverLabel,
+                  scope:
+                    database === undefined ? '' : t('queries.slow.noEntriesDatabase', { database }),
+                  range: t(rangeLabelKey(range)),
+                  field: t('queries.slow.serverLabel'),
+                })}
+                title={t('queries.slow.noStatementsYet')}
               />
             ) : (
               <EmptyState
                 action={
                   <Button onClick={() => clearSearch()} size="sm" type="button" variant="outline">
-                    Show all statements
+                    {t('queries.list.showAll')}
                   </Button>
                 }
-                description="The search covers every statement collected for this server and database in the time range, not only the ranked ones. Try another term or a wider range."
-                title={`No statement matches “${shownTerm}” in this range`}
+                description={t('queries.slow.noMatchText')}
+                title={t('queries.list.noMatchTitle', { term: shownTerm })}
               />
             )}
           </div>
         ) : (
           <div className="p-5 min-[1600px]:p-3">
             <DataTable
-              ariaLabel="Slowest queries"
+              ariaLabel={t('queries.slow.ariaLabel')}
               captionId="slow.table"
               columns={columns}
               data={slowRows}
@@ -484,7 +506,7 @@ function InstanceStatements({
               {...(shownTerm === ''
                 ? {}
                 : { footerNote: matchCountNote(rows.length, response?.has_more === true) })}
-              scope="statements"
+              scope={t('queries.list.statements')}
               tableId="slow"
               toolbarExtra={movableControls}
             />
@@ -496,6 +518,7 @@ function InstanceStatements({
 }
 
 export function SlowQueriesPage() {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   const clustersQuery = useClusters()
   const options = useMemo(() => instanceOptions(clustersQuery.data ?? []), [clustersQuery.data])
@@ -519,32 +542,32 @@ export function SlowQueriesPage() {
   return (
     <div className="space-y-6 min-[1600px]:space-y-4">
       <PageHeader
-        eyebrow="Query performance"
+        help={<HelpLink anchor="slowest-queries" label={t('queries.slow.pageHelp')} />}
+        eyebrow={t('queries.overview.eyebrow')}
         icon={Gauge}
         subtitle={
           <>
-            The statements with the longest execution time on a server, measured by{' '}
-            <code>pg_stat_statements</code> over the selected time range. Use it to find the queries
-            worth optimising first.
+            {t('queries.slow.subtitleBefore')} <code>pg_stat_statements</code>{' '}
+            {t('queries.slow.subtitleAfter')}
           </>
         }
-        title="Slowest queries"
+        title={t('queries.slow.title')}
       />
 
       {clustersQuery.error && clustersQuery.data === undefined ? (
         <ErrorState
-          endpoint="clusters"
+          endpoint={t('queries.slow.clusters')}
           failure={clustersQuery.error}
           onRetry={() => void clustersQuery.refetch()}
         />
       ) : clustersQuery.isPending ? (
-        <div aria-busy="true" aria-label="Loading servers" role="status">
-          Loading servers…
+        <div aria-busy="true" aria-label={t('queries.slow.loadingServersLabel')} role="status">
+          {t('queries.slow.loadingServers')}
         </div>
       ) : instanceId === null ? (
         <EmptyState
-          description="Set up the pglens agent on a PostgreSQL host to start collecting statements."
-          title="No monitored servers yet"
+          description={t('queries.slow.noServersText')}
+          title={t('queries.slow.noServersTitle')}
         />
       ) : (
         <>
@@ -557,7 +580,7 @@ export function SlowQueriesPage() {
                     className="text-muted-foreground text-xs font-medium min-[1600px]:sr-only"
                     htmlFor="slow-instance"
                   >
-                    Server
+                    {t('queries.slow.serverLabel')}
                   </label>
                   <div className="relative">
                     <Server
@@ -573,7 +596,7 @@ export function SlowQueriesPage() {
                       {options.map((option) => (
                         <option key={option.id} value={option.id}>
                           {option.label}
-                          {option.up ? '' : ' (down)'}
+                          {option.up ? '' : t('queries.slow.optionDown')}
                         </option>
                       ))}
                     </NativeSelect>
@@ -581,7 +604,7 @@ export function SlowQueriesPage() {
                 </div>
                 <fieldset>
                   <legend className="text-muted-foreground mb-1.5 text-xs font-medium min-[1600px]:sr-only">
-                    Rank by
+                    {t('queries.slow.rankBy')}
                   </legend>
                   <div className="flex items-center gap-1">
                     <div className="bg-muted inline-flex rounded-lg p-1 min-[1600px]:p-0.5">
@@ -597,7 +620,7 @@ export function SlowQueriesPage() {
                                 ? 'bg-card text-foreground shadow-sm'
                                 : 'text-muted-foreground hover:text-foreground',
                             )}
-                            title={option.hint}
+                            title={t(option.hintKey)}
                           >
                             <input
                               checked={active}
@@ -609,12 +632,12 @@ export function SlowQueriesPage() {
                               value={option.value}
                             />
                             <Icon aria-hidden="true" className="size-4" />
-                            {option.label}
+                            {t(option.labelKey)}
                           </label>
                         )
                       })}
                     </div>
-                    <InfoHint id="slow.rank-by" label="Rank by" />
+                    <InfoHint id="slow.rank-by" label={t('queries.slow.rankBy')} />
                   </div>
                 </fieldset>
               </>

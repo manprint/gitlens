@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { formatTimestamp } from './timestamp'
+import { TIMESTAMP_COLUMN_WIDTH, formatRecentTimestamp, formatTimestamp } from './timestamp'
 
 describe('formatTimestamp', () => {
   it.each([
@@ -37,5 +37,25 @@ describe('formatTimestamp', () => {
     expect(formatTimestamp('2026-01-02T03:04:05.000Z', 'UTC', 'it-IT')).toBe(
       '2026-01-02 03:04:05 UTC',
     )
+  })
+})
+
+describe('formatRecentTimestamp', () => {
+  const now = new Date('2026-11-20T22:30:00.000Z')
+  it('UI-TZ-020 drops the date only when it is today in the console zone', () => {
+    expect(formatRecentTimestamp('2026-11-20T20:32:59Z', now, 'Europe/Rome')).toBe('21:32:59 UTC+1')
+    expect(formatRecentTimestamp('2026-11-20T22:59:00Z', now, 'Europe/Rome')).toBe('23:59:00 UTC+1')
+    expect(formatRecentTimestamp('2026-11-19T20:00:00Z', now, 'Europe/Rome')).toBe(
+      '2026-11-19 21:00:00 UTC+1',
+    )
+    // Already the 21st in Rome while now is the 20th there.
+    expect(formatRecentTimestamp('2026-11-20T23:30:00Z', now, 'Europe/Rome')).toBe(
+      '2026-11-21 00:30:00 UTC+1',
+    )
+    expect(formatRecentTimestamp('bad', now, 'UTC')).toBe('—')
+  })
+
+  it('UI-TZ-021 sizes timestamp columns in rem', () => {
+    expect(TIMESTAMP_COLUMN_WIDTH).toMatch(/^\d+(\.\d+)?rem$/)
   })
 })

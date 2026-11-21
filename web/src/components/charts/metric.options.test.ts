@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { refreshLocale, setServerLanguage } from '@/i18n/store'
 
 import {
+  axisScale,
   buildMetricOption,
-  MAX_RESET_LINES,
+  formatAxisValue,
   formatMetricValue,
   legendRows,
   mixedUnitTooltip,
@@ -15,12 +18,7 @@ interface LineSeries {
   showSymbol: boolean
   data: [string, number | null][]
   markPoint?: unknown
-  markLine?: {
-    silent: boolean
-    symbol: string
-    label: { show: boolean }
-    data: { xAxis: string }[]
-  }
+  markLine?: unknown
 }
 
 interface AxisOption {
@@ -53,7 +51,7 @@ const withResets = (resets: number) =>
   )
 
 describe('buildMetricOption', () => {
-  it('UI-INST-022 preserves nulls, disables interpolation, and annotates resets', () => {
+  it('UI-INST-022 preserves nulls and disables interpolation, with no reset marker', () => {
     const option = buildMetricOption([metric('transactions per second', [1, null, 2])])
     const [series] = seriesOf(option)
 
@@ -63,7 +61,7 @@ describe('buildMetricOption', () => {
       [ts(2 * MINUTE), 2],
     ])
     expect(series?.connectNulls).toBe(false)
-    expect(series?.markLine?.data).toEqual([{ xAxis: ts(MINUTE) }])
+    expect(series?.markLine).toBeUndefined()
   })
 
   it('METOPT-001 formats the x axis by span: HH:mm for 1 h, the date for 48 h', () => {
@@ -86,20 +84,11 @@ describe('buildMetricOption', () => {
     for (const series of seriesOf(option)) expect(series.markPoint).toBeUndefined()
   })
 
-  it('METOPT-004 draws one silent dashed line per reset', () => {
-    const [series] = seriesOf(buildMetricOption([withResets(2)]))
-    expect(series?.markLine?.data).toHaveLength(2)
-    expect(series?.markLine?.symbol).toBe('none')
-    expect(series?.markLine?.label.show).toBe(false)
-    expect(series?.markLine?.silent).toBe(true)
-  })
-
-  it('METOPT-005 draws no reset line above the cap', () => {
-    expect(MAX_RESET_LINES).toBe(12)
-    const [atCap] = seriesOf(buildMetricOption([withResets(12)]))
-    expect(atCap?.markLine?.data).toHaveLength(12)
-    const [overCap] = seriesOf(buildMetricOption([withResets(13)]))
-    expect(overCap?.markLine).toBeUndefined()
+  it('METOPT-004 draws no line at a gap or counter reset: every mark is in the legend', () => {
+    for (const resets of [2, 13]) {
+      const [series] = seriesOf(buildMetricOption([withResets(resets)]))
+      expect(series?.markLine).toBeUndefined()
+    }
   })
 
   it('METOPT-006 confines an axis tooltip to the chart', () => {
@@ -176,12 +165,6 @@ describe('buildMetricOption', () => {
     expect(tooltipHtml(start, [{ seriesName: 'p', value: 25 }], 'percent')).toContain('25.0%')
     expect(tooltipHtml(start, [{ seriesName: 's', value: 90 }], 'seconds')).toContain('1m 30s')
     expect(tooltipHtml(start, [{ seriesName: 'm', value: 5 }], 'ms')).toContain('5')
-  })
-
-  it('METOPT-011 draws no reset line when resets are not annotated', () => {
-    const [series] = seriesOf(buildMetricOption([withResets(2)], { annotateResets: false }))
-    expect(series?.markLine).toBeUndefined()
-    expect(series?.markPoint).toBeUndefined()
   })
 })
 
@@ -260,5 +243,70 @@ describe('legend', () => {
     expect((four.grid as { top: number }).top).toBe(62)
     expect(legendRows([])).toBe(1)
     expect(legendRows(['A very long series name that fills a whole row', 'Next'])).toBe(2)
+  })
+})
+
+describe('axis scale and labels (review 2026-11-21)', () => {
+  afterEach(async () => {
+    await setServerLanguage(undefined)
+    await refreshLocale()
+  })
+
+  it('AXIS-NICE-001 steps byte axes by binary units and duration axes by clock units', () => {
+    expect(axisScale('bytes', [0, 3.3 * 1024 ** 2])).toEqual({
+      interval: 1024 ** 2,
+      max: 4 * 1024 ** 2,
+    })
+    expect(axisScale('bytes', [146.5 * 1024])).toEqual({ interval: 32 * 1024, max: 160 * 1024 })
+    expect(axisScale('ms', [5 * 60_000])).toEqual({ interval: 60_000, max: 300_000 })
+    expect(axisScale('seconds', [95])).toEqual({ interval: 30, max: 120 })
+  })
+
+  it('AXIS-NICE-002 keeps the automatic scale for counts, empty, zero or negative data', () => {
+    expect(axisScale('count', [12])).toEqual({})
+    expect(axisScale('bytes', [])).toEqual({})
+    expect(axisScale('bytes', [0, null])).toEqual({})
+    expect(axisScale('bytes', [-5, 10])).toEqual({})
+    expect(axisScale(undefined, [10])).toEqual({})
+  })
+
+  it('AXIS-NICE-003 the primary and secondary axes take the scale of their own lines', () => {
+    const ts = '2026-11-21T00:00:00Z'
+    const option = withSecondaryAxis(
+      buildMetricOption(
+        [
+          { name: 'files', points: [{ ts, value: 0.2 }] },
+          { name: 'bytes', points: [{ ts, value: 3 * 1024 ** 2 }] },
+        ],
+        { unit: 'count' },
+      ),
+      ['count', 'bytes'],
+    )
+    const [primary, secondary] = option.yAxis as Record<string, unknown>[]
+    expect(primary).not.toHaveProperty('interval')
+    expect(primary).not.toHaveProperty('minInterval')
+    expect(secondary).toMatchObject({ interval: 1024 ** 2, max: 3 * 1024 ** 2 })
+  })
+
+  it('AXIS-NICE-005 a count axis of whole numbers never ticks between them', () => {
+    const ts = '2026-11-21T00:00:00Z'
+    const whole = buildMetricOption([{ name: 'checkpoints', points: [{ ts, value: 2 }] }], {
+      unit: 'count',
+    })
+    const rate = buildMetricOption([{ name: 'rows/s', points: [{ ts, value: 1.5 }] }], {
+      unit: 'count',
+    })
+    expect(whole.yAxis).toMatchObject({ minInterval: 1 })
+    expect(rate.yAxis).not.toHaveProperty('minInterval')
+  })
+
+  it("AXIS-NICE-004 axis numbers follow the console language and drop a whole percent's decimal", async () => {
+    expect(formatAxisValue(100, 'percent')).toBe('100%')
+    expect(formatAxisValue(0.125, 'ratio')).toBe('12.5%')
+    await setServerLanguage('it')
+    expect(formatMetricValue(7000, 'count')).toBe('7000')
+    expect(formatMetricValue(12345.5, 'count')).toBe('12.345,5')
+    expect(formatMetricValue(0.25, 'count')).toBe('0,25')
+    expect(formatAxisValue(12.5, 'percent')).toBe('12,5%')
   })
 })

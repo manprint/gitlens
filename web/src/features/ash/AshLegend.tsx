@@ -1,3 +1,4 @@
+import { useT } from '@/i18n/react'
 import { formatAverage, swatchLetters } from '@/lib/ashGroups'
 import { cn } from '@/lib/utils'
 
@@ -24,6 +25,7 @@ export interface AshLegendProps {
  * shows its series alone in the chart; pressing it again shows them all.
  */
 export function AshLegend({ entries, isolated, label, onToggle }: AshLegendProps) {
+  const t = useT()
   const letters = swatchLetters(entries.map(({ name }) => name))
   return (
     <ul aria-label={label} className="mt-3 space-y-1">
@@ -56,7 +58,7 @@ export function AshLegend({ entries, isolated, label, onToggle }: AshLegendProps
                 <span className="text-muted-foreground">— {entry.description}</span>
               </span>{' '}
               <span className="text-muted-foreground basis-full pl-6 tabular-nums sm:basis-auto sm:pl-0">
-                avg {formatAverage(entry.average)} active backends
+                {t('ash.legend.average', { average: formatAverage(entry.average) })}
               </span>
             </button>
           </li>

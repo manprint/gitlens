@@ -211,7 +211,7 @@ export interface paths {
         };
         /**
          * Return whether the instance is monitored in full, and how to close each gap.
-         * @description Evaluated from the facts and series of the last 24 hours and cached for 30 seconds per instance. The level is partial when at least one item is a warning; infos are features that are off, often by design, and never change it.
+         * @description Evaluated from the facts and series of the last 24 hours and cached for 30 seconds per instance. The level is partial when at least one item is a warning; infos are features that are off, often by design, and never change it. Titles, summaries, impacts, evidence and fix steps read in the language of the request header X-Pglens-Lang (English without it); ids, channels and snippets do not change with the language.
          */
         get: operations["getReadiness"];
         put?: never;
@@ -1001,6 +1001,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notification-channels/{kind}/language": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the language of a notification channel's messages.
+         * @description Stores the language in the pglens database; the next alert of the channel is written in it (the detail: what the alert means, the data, the read-only SQL and what to do). null goes back to the server default (PGLENS_LANG). The webhook address is left alone. Only this server process switches at once; another replica on the same database uses it from its next start.
+         */
+        put: operations["setNotificationLanguage"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notification-channels/{kind}/test": {
         parameters: {
             query?: never;
@@ -1305,6 +1325,16 @@ export interface components {
             configured?: boolean;
             /** Format: date-time */
             expires_at?: string;
+            /**
+             * @description IANA time zone the console shows times in by default (PGLENS_TZ, UTC when unset). The operator can pick another in Settings › Preferences.
+             * @example Europe/Rome
+             */
+            time_zone?: string;
+            /**
+             * @description Default console language (PGLENS_LANG, en when unset).
+             * @example it
+             */
+            language?: string;
         };
         /** @description A uint64 rendered as a decimal string because it exceeds the exact integer range of IEEE-754 numbers. */
         ClusterId: string;
@@ -1348,7 +1378,7 @@ export interface components {
             /** Format: int64 */
             event_id: number;
             ts: components["schemas"]["Timestamp"];
-            /** @description The event type. The server emits failover_detected, role_change, orphan_standby, split_brain_detected, agent_down, agent_up, instance_unreachable, instance_reachable, no_primary_in_cluster, slot_inactive, slot_lost, cluster_id_changed, cluster_identity_conflict, duplicate_instance_suspected, cardinality_truncated and counter_reset_detected. The set is open, so a client must show a type it does not know. */
+            /** @description The event type. The server emits failover_detected, role_change, orphan_standby, split_brain_detected, agent_down, agent_up, instance_unreachable, instance_reachable, no_primary_in_cluster, slot_inactive, slot_lost, cluster_id_changed, cluster_identity_conflict, duplicate_instance_suspected, cardinality_truncated and counter_reset_detected; the agent's watcher adds lock_wait_captured, deadlock_captured, long_query_captured, idle_in_transaction_captured and long_transaction_captured, whose payload is the capture (table, ctid, lock mode, sessions and their statements). The set is open, so a client must show a type it does not know. */
             type: string;
             cluster_id: string | null;
             /** Format: uuid */
@@ -2542,6 +2572,15 @@ export interface components {
             resolved_at?: components["schemas"]["Timestamp"];
             muted_until?: components["schemas"]["Timestamp"];
             mute_reason?: string;
+            /** @description The statement a query finding (object_name queryid:<id>) is about: its latest text kept in query_texts. Absent for other findings and once the text has been purged. */
+            query_text?: string;
+            /** @description The catalog key and arguments title, detail and remediation come from (advisor.<key>.title|detail|remediation). With a request header X-Pglens-Lang naming a language with a catalog (it), the three texts are rendered in it; without the header they are English. Absent for findings written before the catalog had them. */
+            message?: {
+                key: string;
+                args?: {
+                    [key: string]: unknown;
+                };
+            };
         };
         AdvisorRule: {
             id: string;
@@ -2710,6 +2749,12 @@ export interface components {
             source: "env" | "ui";
             /** @description The host name of the webhook address, null when the channel is not configured or its address names no host. The address itself is never returned. */
             host: string | null;
+            /** @description The language of the channel's messages (setNotificationLanguage), one of the console languages; null when the channel uses the server default (PGLENS_LANG). */
+            language: string | null;
+        };
+        NotificationLanguageUpdate: {
+            /** @description A console language code (en, it); null goes back to the server default. */
+            language: string | null;
         };
         NotificationChannelUpdate: {
             /** @description The webhook address: https, or http only for localhost or a literal loopback or private address (127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, an IPv4 one mapped in IPv6), with a host, no fragment and no space, tab or line break. Write-only: it is never returned. */
@@ -2726,7 +2771,7 @@ export interface components {
             /** @description The channel's error with every webhook address and its secret parts removed; absent when delivered. */
             error?: string;
         };
-        /** @description Per-kind arguments: explain requires queryid and may include datname or analyze; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
+        /** @description Per-kind arguments: explain requires queryid and may include datname, analyze or params; cancel and terminate require pid and may include backend_start; pgstattuple requires schema and relation and may include datname. backend_start is the start time of the session the caller saw at pid. Send it back exactly as the API reported it. When it is given and the session at pid started at another time, the agent refuses the command and signals nothing. datname is the database the command runs in; without it, the target DSN's own database. Query text is never sent to this API. */
         CommandArgs: {
             queryid?: number | string;
             datname?: string;
@@ -2736,6 +2781,8 @@ export interface components {
             schema?: string;
             relation?: string;
             backend_start?: components["schemas"]["Timestamp"];
+            /** @description explain only: the values of the statement's $1, $2, ... in order, as text PostgreSQL reads with each parameter's type; null is SQL NULL. The agent binds them and never splices them into the statement. Without them, a statement with placeholders is analyzed with the values of a recent execution pg_stat_activity shows, and planned plan-only with GENERIC_PLAN on PostgreSQL 16+. */
+            params?: (string | null)[];
         };
         /** @description A command request contains identifiers and options only; query text is never sent. */
         CreateCommandRequest: {
@@ -4105,6 +4152,8 @@ export interface operations {
         parameters: {
             query?: {
                 cluster_id?: components["schemas"]["ClusterId"];
+                instance_id?: components["schemas"]["InstanceId"];
+                /** @description One event type, or several separated by commas. */
                 type?: string;
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
@@ -4724,6 +4773,63 @@ export interface operations {
             };
         };
     };
+    setNotificationLanguage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The channel whose language to set. */
+                kind: components["schemas"]["NotificationChannelKind"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationLanguageUpdate"];
+            };
+        };
+        responses: {
+            /** @description The channel's status with its language. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+            /** @description The language is not null nor a console language, or the body has another field. Nothing was changed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The kind is not slack, webhook or google_chat. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description The store is unavailable; nothing was changed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     testNotificationChannel: {
         parameters: {
             query?: never;
@@ -5160,7 +5266,9 @@ export interface operations {
                     /**
                      * @example {
                      *       "authenticated": true,
-                     *       "expires_at": "2026-08-31T13:00:00Z"
+                     *       "expires_at": "2026-08-31T13:00:00Z",
+                     *       "time_zone": "Europe/Rome",
+                     *       "language": "it"
                      *     }
                      */
                     "application/json": components["schemas"]["SessionStatus"];

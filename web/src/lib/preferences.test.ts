@@ -57,7 +57,7 @@ describe('preferences', () => {
     })
   })
 
-  it('PREF-001 defaults: light theme, 1h range, automatic refresh, 20 rows', () => {
+  it('PREF-001 defaults: light theme, 1h range, automatic refresh, 20 rows, server time zone', () => {
     localStorage.clear()
 
     expect(DEFAULT_PREFERENCES).toEqual({
@@ -65,6 +65,8 @@ describe('preferences', () => {
       defaultTimeRange: '1h',
       refreshInterval: 'auto',
       tablePageSize: 20,
+      timeZone: 'server',
+      language: 'server',
     })
     expect(readPreferences()).toEqual(DEFAULT_PREFERENCES)
     expect(getPreferencesSnapshot()).toEqual(DEFAULT_PREFERENCES)
@@ -90,6 +92,8 @@ describe('preferences', () => {
       defaultTimeRange: '6h',
       refreshInterval: '30s',
       tablePageSize: 50,
+      timeZone: 'server',
+      language: 'server',
     })
 
     expect(resetPreferences()).toEqual(DEFAULT_PREFERENCES)
@@ -131,6 +135,16 @@ describe('preferences', () => {
 
     localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(['6h']))
     expect(readPreferences()).toEqual(DEFAULT_PREFERENCES)
+    localStorage.clear()
+  })
+
+  it('PREF-005 a language is server, browser or a registry code; another one reads as server', () => {
+    for (const language of ['it', 'browser', 'en-XA']) {
+      localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({ language }))
+      expect(readPreferences().language).toBe(language)
+    }
+    localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({ language: 'xx' }))
+    expect(readPreferences().language).toBe('server')
     localStorage.clear()
   })
 

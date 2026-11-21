@@ -2,17 +2,15 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { messages as english } from '@/i18n/messages/en'
 import { expectNoA11yViolations } from '@/test/a11y'
 
 import { SqlText } from './SqlText'
 
-import {
-  FULL_SEARCH_HINT,
-  HighlightedText,
-  SEARCH_DEBOUNCE_MS,
-  SEARCH_TOO_SHORT,
-  SearchBox,
-} from './SearchBox'
+import { HighlightedText, SEARCH_DEBOUNCE_MS, SearchBox } from './SearchBox'
+
+const SEARCH_TOO_SHORT = english['shell.search.tooShort']
+const FULL_SEARCH_HINT = english['shell.search.fullHint']
 
 const box = () => screen.getByRole('searchbox', { name: 'Search statements' })
 const type = (text: string) => fireEvent.change(box(), { target: { value: text } })

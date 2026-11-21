@@ -1,0 +1,8 @@
+{
+  "advisor.security.monitoring_role_can_write.title": "Il ruolo di monitoraggio può scrivere nel database",
+  "advisor.security.monitoring_role_can_write.detail": "pglens si connette come {role} (problemi rilevati: {problems}). pglens legge soltanto, ma chi possiede le sue credenziali potrebbe modificare i dati.",
+  "advisor.security.monitoring_role_can_write.remediation": "Esegui di nuovo deploy/sql/monitoring_user.sql come amministratore: rifiuta il ruolo ed elenca lo statement che rimuove ciascun problema.",
+  "advisor.security.monitoring_role_read_only_off.title": "Il ruolo di monitoraggio non imposta le transazioni in sola lettura come predefinite",
+  "advisor.security.monitoring_role_read_only_off.detail": "default_transaction_read_only è {value} per {role} in questo database. pglens lo imposta in ogni sessione che apre; il valore predefinito del ruolo è la seconda protezione.",
+  "advisor.security.monitoring_role_read_only_off.remediation": "Esegui di nuovo deploy/sql/monitoring_user.sql: imposta il valore predefinito del ruolo e rimuove le eccezioni specifiche del database."
+}

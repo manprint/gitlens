@@ -3,8 +3,10 @@ package advisor
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/manprint/pglens/internal/i18n"
 	"github.com/manprint/pglens/internal/pgtype"
 )
 
@@ -46,8 +48,14 @@ func (r queryAdvisorRule) Needs() []string                { return append([]stri
 func (r queryAdvisorRule) MinTier() pgtype.PermTier       { return pgtype.TierReadOnly }
 func (r queryAdvisorRule) Evaluate(s *Snapshot) []Finding { return r.eval(s) }
 
-func queryFinding(r string, sev Severity, q StatementStat, title, detail, remediation string, evidence map[string]any) Finding {
-	return Finding{RuleID: r, Severity: sev, State: StateOpen, Scope: ScopeInstance, Datname: q.Datname, ObjectName: fmt.Sprintf("queryid:%d", q.QueryID), Title: title, Detail: detail, Remediation: remediation, Evidence: evidence}
+// queryFinding is a finding about one statement, its message the rule's own.
+func queryFinding(r string, sev Severity, q StatementStat, args i18n.Args, evidence map[string]any) Finding {
+	// A string: a JSON number past 2^53 reaches the browser rounded and names
+	// another statement.
+	if _, ok := evidence["queryid"]; ok {
+		evidence["queryid"] = strconv.FormatInt(q.QueryID, 10)
+	}
+	return Finding{RuleID: r, Severity: sev, State: StateOpen, Scope: ScopeInstance, Datname: q.Datname, ObjectName: fmt.Sprintf("queryid:%d", q.QueryID), Evidence: evidence}.say(r, args)
 }
 
 func metricValue(s *Snapshot, name string) (float64, bool) { return s.Metric(name, nil) }
@@ -87,13 +95,15 @@ func canonicalLabel(canonical, key string) string {
 	return ""
 }
 
-func metricRule(id string, sev Severity, metric string, threshold float64, title, remediation string) queryAdvisorRule {
+func metricRule(id string, sev Severity, metric string, threshold float64) queryAdvisorRule {
 	return queryAdvisorRule{id: id, severity: sev, needs: []string{metric}, eval: func(s *Snapshot) []Finding {
 		v, ok := metricValue(s, metric)
 		if !ok || v <= threshold {
 			return nil
 		}
-		return []Finding{{RuleID: id, Severity: sev, State: StateOpen, Scope: ScopeInstance, Title: title, Detail: fmt.Sprintf("%s is %.2f, above %.2f", metric, v, threshold), Remediation: remediation, Evidence: map[string]any{"metric": metric, "observed": v, "threshold": threshold}}}
+		return []Finding{Finding{RuleID: id, Severity: sev, State: StateOpen, Scope: ScopeInstance,
+			Evidence: map[string]any{"metric": metric, "observed": v, "threshold": threshold},
+		}.say(id, i18n.Args{"metric": metric, "observed": i18n.Fixed{V: v, Digits: 2}, "threshold": i18n.Fixed{V: threshold, Digits: 2}})}
 	}}
 }
 
@@ -103,7 +113,9 @@ func init() {
 			var out []Finding
 			for _, q := range s.Statements {
 				if q.Calls >= 10 && q.MeanExecTimeMs > slowMeanMS {
-					out = append(out, queryFinding("query.slow_mean", SeverityWarning, q, "Slow query", fmt.Sprintf("mean execution time is %.1f ms", q.MeanExecTimeMs), "Tune or index the query", map[string]any{"queryid": q.QueryID, "observed_ms": q.MeanExecTimeMs, "threshold_ms": slowMeanMS}))
+					out = append(out, queryFinding("query.slow_mean", SeverityWarning, q,
+						i18n.Args{"mean_ms": i18n.Fixed{V: q.MeanExecTimeMs, Digits: 1}, "calls": fmt.Sprintf("%.0f", q.Calls), "threshold_ms": slowMeanMS},
+						map[string]any{"queryid": q.QueryID, "observed_ms": q.MeanExecTimeMs, "threshold_ms": slowMeanMS}))
 				}
 			}
 			return out
@@ -120,20 +132,25 @@ func init() {
 					share = q.TotalExecTimeMs / total
 				}
 				if share > totalShare {
-					out = append(out, queryFinding("query.total_time_share", SeverityWarning, q, "Dominant query", fmt.Sprintf("query accounts for %.1f%% of execution time", share*100), "Optimize the dominant query", map[string]any{"queryid": q.QueryID, "share": share, "threshold": totalShare}))
+					out = append(out, queryFinding("query.total_time_share", SeverityWarning, q,
+						i18n.Args{"share_pct": i18n.Fixed{V: share * 100, Digits: 1}, "calls": fmt.Sprintf("%.0f", q.Calls), "mean_ms": i18n.Fixed{V: q.MeanExecTimeMs, Digits: 1}},
+						map[string]any{"queryid": q.QueryID, "share": share, "threshold": totalShare}))
 				}
 			}
 			return out
 		}},
 		{id: "query.regression", severity: SeverityCritical, needs: []string{"Statements", "Baseline"}, eval: func(s *Snapshot) []Finding {
 			if s.Baseline == nil {
-				return []Finding{{RuleID: "query.regression", Severity: SeverityCritical, State: StateDegraded, Scope: ScopeInstance, Title: "Query regression unavailable", Detail: "seven-day query baseline is unavailable", DegradedReason: "insufficient query history"}}
+				return []Finding{Finding{RuleID: "query.regression", Severity: SeverityCritical, State: StateDegraded, Scope: ScopeInstance,
+					DegradedReason: "insufficient query history"}.say("query.regression.unavailable", nil)}
 			}
 			var out []Finding
 			for _, q := range s.Statements {
 				base := s.Baseline.MeanExecTimeByQueryID[q.QueryID]
 				if base > 0 && q.MeanExecTimeMs >= regressionFactor*base && q.MeanExecTimeMs >= 100 {
-					out = append(out, queryFinding("query.regression", SeverityCritical, q, "Query regression", fmt.Sprintf("mean time %.1f ms is %.1fx baseline", q.MeanExecTimeMs, q.MeanExecTimeMs/base), "Investigate the query plan regression", map[string]any{"queryid": q.QueryID, "baseline_ms": base, "observed_ms": q.MeanExecTimeMs}))
+					out = append(out, queryFinding("query.regression", SeverityCritical, q,
+						i18n.Args{"mean_ms": i18n.Fixed{V: q.MeanExecTimeMs, Digits: 1}, "ratio": i18n.Fixed{V: q.MeanExecTimeMs / base, Digits: 1}, "base_ms": i18n.Fixed{V: base, Digits: 1}},
+						map[string]any{"queryid": q.QueryID, "baseline_ms": base, "observed_ms": q.MeanExecTimeMs}))
 				}
 			}
 			return out
@@ -158,7 +175,8 @@ func init() {
 					if hasFiles {
 						evidence["pg_temp_files_total"] = files
 					}
-					out = append(out, queryFinding("query.temp_bytes_high", SeverityWarning, q, "High temporary write volume", fmt.Sprintf("average temporary bytes per call is %.0f", avg), fmt.Sprintf("Review the query and current work_mem (%.0f bytes)", workMem), evidence))
+					out = append(out, queryFinding("query.temp_bytes_high", SeverityWarning, q,
+						i18n.Args{"avg_bytes": fmt.Sprintf("%.0f", avg), "work_mem_bytes": fmt.Sprintf("%.0f", workMem)}, evidence))
 				}
 			}
 			return out
@@ -172,14 +190,16 @@ func init() {
 					miss = q.SharedBlksRead / total
 				}
 				if q.Calls > 1000 && miss > cacheMissShare {
-					out = append(out, queryFinding("query.cache_miss_high", SeverityInfo, q, "High cache miss ratio", fmt.Sprintf("shared block read ratio is %.1f%%", miss*100), "Review working-set size and indexing", map[string]any{"queryid": q.QueryID, "read_ratio": miss, "threshold": cacheMissShare}))
+					out = append(out, queryFinding("query.cache_miss_high", SeverityInfo, q,
+						i18n.Args{"read_pct": i18n.Fixed{V: miss * 100, Digits: 1}},
+						map[string]any{"queryid": q.QueryID, "read_ratio": miss, "threshold": cacheMissShare}))
 				}
 			}
 			return out
 		}},
-		withXminHolder(metricRule("txn.long_running", SeverityWarning, "pg_max_xact_age_seconds", longTxnSeconds, "Long-running transaction", "Commit, roll back, or investigate the transaction")),
-		metricRule("txn.idle_in_transaction", SeverityWarning, "pg_max_idle_in_transaction_seconds", idleTxnSeconds, "Idle transaction", "Close or commit the idle transaction"),
-		metricRule("txn.prepared_orphan", SeverityCritical, "pg_oldest_prepared_xact_seconds", preparedSeconds, "Orphaned prepared transaction", "Resolve the prepared transaction so vacuum can proceed"),
+		withXminHolder(metricRule("txn.long_running", SeverityWarning, "pg_max_xact_age_seconds", longTxnSeconds)),
+		metricRule("txn.idle_in_transaction", SeverityWarning, "pg_max_idle_in_transaction_seconds", idleTxnSeconds),
+		metricRule("txn.prepared_orphan", SeverityCritical, "pg_oldest_prepared_xact_seconds", preparedSeconds),
 		{id: "txn.high_rollback_ratio", severity: SeverityInfo, needs: []string{"pg_xact_rollback_ratio"}, eval: func(s *Snapshot) []Finding {
 			// database_stats emits the ratio per database. The rule read the
 			// unlabelled series, which does not exist, so it never fired.
@@ -190,11 +210,13 @@ func init() {
 					continue
 				}
 				db := canonicalLabel(labels, "database")
-				out = append(out, Finding{RuleID: "txn.high_rollback_ratio", Severity: SeverityInfo, State: StateOpen, Scope: ScopeDatabase, Datname: db, Title: "High rollback ratio", Detail: fmt.Sprintf("%.1f%% of the transactions of database %q rolled back since its statistics were reset, above %.0f%%", v*100, db, rollbackShare*100), Remediation: "Investigate transaction failures and retry behavior", Evidence: map[string]any{"metric": "pg_xact_rollback_ratio", "database": db, "observed": v, "threshold": rollbackShare}})
+				out = append(out, Finding{RuleID: "txn.high_rollback_ratio", Severity: SeverityInfo, State: StateOpen, Scope: ScopeDatabase, Datname: db,
+					Evidence: map[string]any{"metric": "pg_xact_rollback_ratio", "database": db, "observed": v, "threshold": rollbackShare},
+				}.say("txn.high_rollback_ratio", i18n.Args{"rollback_pct": i18n.Fixed{V: v * 100, Digits: 1}, "database_quoted": strconv.Quote(db), "threshold_pct": fmt.Sprintf("%.0f", rollbackShare*100)}))
 			}
 			return out
 		}},
-		metricRule("txn.wraparound_risk", SeverityCritical, "pg_max_datfrozenxid_age", wraparoundAge, "Transaction ID wraparound risk", "Run maintenance immediately and resolve vacuum starvation"),
+		metricRule("txn.wraparound_risk", SeverityCritical, "pg_max_datfrozenxid_age", wraparoundAge),
 	}
 	for _, r := range rules {
 		Register(r)

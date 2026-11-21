@@ -24,9 +24,11 @@ import (
 // arguments, and evaluates STABLE ones for estimates.
 //
 // Every EXPLAIN therefore runs only after guardPlanning has found no function
-// in the database that the planner may run, with as few privileges as the
-// session can drop to (dropExplainPrivileges), on a connection that is closed
-// afterwards (discardConn). EXPLAIN ANALYZE, which executes the statement, runs
+// in the database that the planner may run and that could act outside the
+// transaction (the code check in explain_code.go reads the functions the
+// database defines), with as few privileges as the session can drop to
+// (dropExplainPrivileges), on a connection that is closed afterwards
+// (discardConn). EXPLAIN ANALYZE, which executes the statement, runs
 // only when guardAnalyze finds nothing in the statement, in the database or in
 // the VERBOSE plan that could act outside the transaction.
 //
@@ -35,7 +37,8 @@ import (
 // but is not a function in the database, such as a planner hook loaded with
 // shared_preload_libraries; the IMMUTABLE and STABLE functions of installed
 // extensions that a superuser owns, which guardPlanning does not list, so plain
-// EXPLAIN folds them unchecked (ANALYZE refuses the ones outside
+// EXPLAIN folds them unchecked; the effects of a function the code check reads
+// but cannot see, such as a call through an operator inside a body (ANALYZE refuses the ones outside
 // sideEffectFreeExtensions that a statement reaches); and the remote planning
 // of foreign-data wrappers other than postgres_fdw, whose use_remote_estimate
 // guardPlanning refuses.
@@ -48,30 +51,32 @@ import (
 // added is not the extension's code: it is checked like any user function, so
 // plain EXPLAIN is refused where one is IMMUTABLE or STABLE.
 var sideEffectFreeExtensions = map[string]bool{
-	"btree_gin":      true,
-	"btree_gist":     true,
-	"citext":         true,
-	"cube":           true,
-	"earthdistance":  true,
-	"fuzzystrmatch":  true,
-	"hstore":         true,
-	"intarray":       true,
-	"isn":            true,
-	"ltree":          true,
-	"pg_trgm":        true,
-	"pgcrypto":       true,
-	"postgis":        true,
-	"postgis_sfcgal": true,
-	"seg":            true,
-	"unaccent":       true,
-	"uuid-ossp":      true,
+	"btree_gin":          true,
+	"btree_gist":         true,
+	"citext":             true,
+	"cube":               true,
+	"earthdistance":      true,
+	"fuzzystrmatch":      true,
+	"hstore":             true,
+	"intarray":           true,
+	"isn":                true,
+	"ltree":              true,
+	"pg_stat_statements": true,
+	"pg_trgm":            true,
+	"pgcrypto":           true,
+	"postgis":            true,
+	"postgis_sfcgal":     true,
+	"seg":                true,
+	"unaccent":           true,
+	"uuid-ossp":          true,
 }
 
 // extensionFunctionsDenied are the functions of a side-effect-free extension
 // that change the database or the session. The read-only transaction refuses
 // the DDL ones anyway; listing them gives a clear refusal instead.
 var extensionFunctionsDenied = map[string]map[string]bool{
-	"pg_trgm": {"set_limit": true},
+	"pg_stat_statements": {"pg_stat_statements_reset": true},
+	"pg_trgm":            {"set_limit": true},
 	"postgis": {
 		"addgeometrycolumn":          true,
 		"dropgeometrycolumn":         true,
@@ -87,14 +92,17 @@ var extensionFunctionsDenied = map[string]map[string]bool{
 // PostgreSQL marks a function with effects, and new ones appear with every
 // major version.
 var builtinVolatileAllowed = map[string]bool{
-	"array_sample":                         true,
-	"array_shuffle":                        true,
-	"bernoulli":                            true,
-	"clock_timestamp":                      true,
-	"current_query":                        true,
-	"currval":                              true,
-	"gen_random_uuid":                      true,
-	"lastval":                              true,
+	"array_sample":    true,
+	"array_shuffle":   true,
+	"bernoulli":       true,
+	"clock_timestamp": true,
+	"current_query":   true,
+	"currval":         true,
+	"gen_random_uuid": true,
+	"lastval":         true,
+	// The read-only transaction refuses both on any sequence but a
+	// temporary one, which ends with the session.
+	"nextval":                              true,
 	"pg_blocking_pids":                     true,
 	"pg_collation_actual_version":          true,
 	"pg_control_checkpoint":                true,
@@ -131,6 +139,7 @@ var builtinVolatileAllowed = map[string]bool{
 	"pg_xact_commit_timestamp":             true,
 	"pg_xact_commit_timestamp_origin":      true,
 	"pg_xact_status":                       true,
+	"setval":                               true,
 	"random":                               true,
 	"random_normal":                        true,
 	"system":                               true,
@@ -145,10 +154,21 @@ var builtinVolatileAllowed = map[string]bool{
 var builtinVolatileAllowedPrefixes = []string{"pg_stat_get_"}
 
 // builtinDenied are built-ins with effects that PostgreSQL does not declare
-// VOLATILE: both assign a transaction ID, even in a read-only transaction.
-var builtinDenied = map[string]bool{
-	"pg_current_xact_id": true,
-	"txid_current":       true,
+// VOLATILE: two assign a transaction ID, even in a read-only transaction, and
+// the others run SQL text given to them at run time, which no check sees.
+var builtinDenied = map[string]string{
+	"pg_current_xact_id":            "assigns a transaction ID even in a read-only transaction",
+	"txid_current":                  "assigns a transaction ID even in a read-only transaction",
+	"query_to_xml":                  "runs SQL text given at run time, which pglens cannot check",
+	"query_to_xml_and_xmlschema":    "runs SQL text given at run time, which pglens cannot check",
+	"query_to_xmlschema":            "runs SQL text given at run time, which pglens cannot check",
+	"ts_stat":                       "runs SQL text given at run time, which pglens cannot check",
+	"table_to_xml":                  "reads a relation named at run time, which pglens cannot check",
+	"table_to_xml_and_xmlschema":    "reads a relation named at run time, which pglens cannot check",
+	"schema_to_xml":                 "reads relations named at run time, which pglens cannot check",
+	"schema_to_xml_and_xmlschema":   "reads relations named at run time, which pglens cannot check",
+	"database_to_xml":               "reads every relation of the database, which pglens cannot check",
+	"database_to_xml_and_xmlschema": "reads every relation of the database, which pglens cannot check",
 }
 
 // refusedPlanNodes run code the plan does not show: a foreign scan talks to
@@ -199,8 +219,8 @@ func functionHazard(f catalogFunction) string {
 	if f.Schema != "pg_catalog" && f.Schema != "information_schema" {
 		return "is a user-defined function: its body is not part of the plan, and the volatility it declares is not enforced"
 	}
-	if builtinDenied[f.Name] {
-		return "assigns a transaction ID even in a read-only transaction"
+	if reason := builtinDenied[f.Name]; reason != "" {
+		return reason
 	}
 	if f.Volatility == "v" && !builtinVolatileAllowedName(f.Name) {
 		return "is a volatile built-in function that pglens does not know to be free of effects outside the transaction"
@@ -383,14 +403,14 @@ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
                     AND ow.rolsuper)`
 
 // guardPlanning refuses every EXPLAIN, plan-only or ANALYZE, while the database
-// defines a function the planner may run, or a foreign table whose planning
-// queries the remote server. A plan does not show those runs, and they happen
-// before any plan exists, so the check reads the catalog rather than a plan: it
-// does not depend on which functions a statement names, directly or through
-// views, operators, casts or policies. The cost is that a database with its
-// own IMMUTABLE or STABLE functions refuses EXPLAIN altogether, and the refusal
-// names the function.
-func guardPlanning(ctx context.Context, conn check.Conn) error {
+// defines a function the planner may run that the code check does not admit,
+// or a foreign table whose planning queries the remote server. A plan does not
+// show those runs, and they happen before any plan exists, so the check reads
+// the catalog rather than a plan: it does not depend on which functions a
+// statement names, directly or through views, operators, casts or policies.
+// A function the database defines is admitted when its code is (see
+// explain_code.go); the refusal names the first one that is not, and why.
+func guardPlanning(ctx context.Context, conn check.Conn, code *codeGraph) error {
 	var raw json.RawMessage
 	if err := conn.QueryRow(ctx, plannableFunctionLookup).Scan(&raw); err != nil {
 		return fmt.Errorf("look up the functions the planner may run: %w", err)
@@ -399,8 +419,15 @@ func guardPlanning(ctx context.Context, conn check.Conn) error {
 	if err := json.Unmarshal(raw, &functions); err != nil {
 		return fmt.Errorf("decode the functions the planner may run: %w", err)
 	}
+	names := make([]string, 0, len(functions))
 	for _, f := range functions {
-		if reason := functionHazard(f); reason != "" {
+		names = append(names, f.Name)
+	}
+	if err := code.ensure(ctx, names); err != nil {
+		return err
+	}
+	for _, f := range functions {
+		if reason := code.hazard(f); reason != "" {
 			return rejectedf("EXPLAIN refused: the database defines %s, which %s; the planner may run such a function while it plans a statement, and a plan does not show that", f, reason)
 		}
 	}
@@ -439,18 +466,19 @@ WHERE EXISTS (SELECT 1 FROM pg_catalog.unnest(COALESCE(ft.ftoptions, '{}') || CO
 // It runs inside the read-only transaction, after dropExplainPrivileges and
 // before the statement is executed, and returns a RejectedError naming the
 // first hazard it finds.
-func guardAnalyze(ctx context.Context, conn check.Conn, statement string) error {
+// explain runs one EXPLAIN of the statement with the values the command uses.
+func guardAnalyze(ctx context.Context, conn check.Conn, code *codeGraph, statement string, explain func(context.Context, string) (json.RawMessage, error)) error {
 	// The statement's own calls are checked before anything is planned, so
 	// that a function named directly is refused before the planner can fold
 	// it. The plan check below is the complete one; names the statement uses
 	// that are not functions (keywords, type names) are ignored here.
 	if refs := scanCalls(statement, false); len(refs) > 0 {
-		functions, err := lookupFunctions(ctx, conn, refs)
+		functions, err := lookupFunctions(ctx, conn, code, refs)
 		if err != nil {
 			return err
 		}
 		for _, ref := range refs {
-			if reason := refHazard(ref, functions, false); reason != "" {
+			if reason := refHazard(ref, functions, false, code.hazard); reason != "" {
 				return rejectedf("EXPLAIN ANALYZE refused: the statement calls %s", reason)
 			}
 		}
@@ -460,14 +488,21 @@ func guardAnalyze(ctx context.Context, conn check.Conn, statement string) error 
 	if err != nil {
 		return err
 	}
+	hiddenNames := make([]string, 0, len(hidden))
 	for _, call := range hidden {
-		if reason := functionHazard(call.catalogFunction); reason != "" {
+		hiddenNames = append(hiddenNames, call.Name)
+	}
+	if err := code.ensure(ctx, hiddenNames); err != nil {
+		return err
+	}
+	for _, call := range hidden {
+		if reason := code.hazard(call.catalogFunction); reason != "" {
 			return rejectedf("EXPLAIN ANALYZE refused: %s calls %s, which %s; a plan does not always show such calls", call.Object, call.catalogFunction, reason)
 		}
 	}
 
-	var plan json.RawMessage
-	if err := conn.QueryRow(ctx, "EXPLAIN (VERBOSE, FORMAT JSON, COSTS OFF) "+statement).Scan(&plan); err != nil {
+	plan, err := explain(ctx, "EXPLAIN (VERBOSE, FORMAT JSON, COSTS OFF) "+statement)
+	if err != nil {
 		return rejectedf("EXPLAIN ANALYZE refused: the statement cannot be planned for inspection: %v", err)
 	}
 	facts, err := inspectPlan(plan)
@@ -482,12 +517,12 @@ func guardAnalyze(ctx context.Context, conn check.Conn, statement string) error 
 	if len(facts.calls) == 0 {
 		return nil
 	}
-	functions, err := lookupFunctions(ctx, conn, facts.calls)
+	functions, err := lookupFunctions(ctx, conn, code, facts.calls)
 	if err != nil {
 		return err
 	}
 	for _, ref := range facts.calls {
-		if reason := refHazard(ref, functions, true); reason != "" {
+		if reason := refHazard(ref, functions, true, code.hazard); reason != "" {
 			return rejectedf("EXPLAIN ANALYZE refused: the plan calls %s", reason)
 		}
 	}
@@ -497,7 +532,7 @@ func guardAnalyze(ctx context.Context, conn check.Conn, statement string) error 
 // refHazard describes why ref is unsafe, or returns "". A name that matches
 // no function is unsafe in a plan (strict), where every lowercase call is a
 // function, and ignored in statement text, where it may be a keyword.
-func refHazard(ref funcRef, functions []catalogFunction, strict bool) string {
+func refHazard(ref funcRef, functions []catalogFunction, strict bool, hazard func(catalogFunction) string) string {
 	matched := false
 	for _, f := range functions {
 		if f.Name != ref.Name {
@@ -512,7 +547,7 @@ func refHazard(ref funcRef, functions []catalogFunction, strict bool) string {
 		matched = true
 		// Overloads are not told apart: the plan does not show argument
 		// types, so one unsafe overload makes the name unsafe.
-		if reason := functionHazard(f); reason != "" {
+		if reason := hazard(f); reason != "" {
 			return fmt.Sprintf("%s, which %s", f, reason)
 		}
 	}
@@ -522,7 +557,9 @@ func refHazard(ref funcRef, functions []catalogFunction, strict bool) string {
 	return ""
 }
 
-func lookupFunctions(ctx context.Context, conn check.Conn, refs []funcRef) ([]catalogFunction, error) {
+// lookupFunctions reads the functions refs name, and has code read the
+// user-defined ones among them.
+func lookupFunctions(ctx context.Context, conn check.Conn, code *codeGraph, refs []funcRef) ([]catalogFunction, error) {
 	names := make([]string, 0, len(refs))
 	seen := make(map[string]bool, len(refs))
 	for _, ref := range refs {
@@ -539,6 +576,9 @@ func lookupFunctions(ctx context.Context, conn check.Conn, refs []funcRef) ([]ca
 	var functions []catalogFunction
 	if err := json.Unmarshal(raw, &functions); err != nil {
 		return nil, fmt.Errorf("decode functions for the explain guard: %w", err)
+	}
+	if err := code.ensure(ctx, names); err != nil {
+		return nil, err
 	}
 	return functions, nil
 }

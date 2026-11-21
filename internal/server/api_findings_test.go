@@ -98,8 +98,8 @@ func TestFindingPathID_DecodesTheWildcardOnce(t *testing.T) {
 func TestScanFinding_ClusterIDIsAnUnsignedString(t *testing.T) {
 	now := time.Now().UTC()
 	cluster := int64(-446744073709551616) // 18000000000000000000 as a bigint
-	row := &mockRow{vals: []any{"f1", "rule", "warning", "open", "cluster", &cluster, (*uuid.UUID)(nil), "", "", "t", "d", "r", []byte(`{}`), (*string)(nil), now, now, (*time.Time)(nil), (*time.Time)(nil), (*string)(nil)}}
-	f, err := scanFinding(row)
+	row := &mockRow{vals: []any{"f1", "rule", "warning", "open", "cluster", &cluster, (*uuid.UUID)(nil), "", "", "t", "d", "r", []byte(`{}`), (*string)(nil), now, now, (*time.Time)(nil), (*time.Time)(nil), (*string)(nil), []byte(nil), (*string)(nil)}}
+	f, err := scanFinding(row, "")
 	require.NoError(t, err)
 	require.NotNil(t, f.ClusterID)
 	require.Equal(t, "18000000000000000000", *f.ClusterID)
@@ -166,4 +166,31 @@ func TestFindingsAPI_WritesOnlyUnderTheMuteAction(t *testing.T) {
 			require.Equal(t, tc.writes, pool.execCalls)
 		})
 	}
+}
+
+// TestScanFinding_RendersTheMessageInTheRequestLanguage (plan 006 F5): the
+// console sends X-Pglens-Lang; other clients get the stored English.
+func TestScanFinding_RendersTheMessageInTheRequestLanguage(t *testing.T) {
+	now := time.Now().UTC()
+	message := []byte(`{"key":"function.untracked","args":{"database":"app","count":2,"databaseIdent":"app"}}`)
+	row := func() *mockRow {
+		return &mockRow{vals: []any{"f1", "function.untracked", "info", "open", "database", (*int64)(nil), (*uuid.UUID)(nil), "app", "functions", "english title", "english detail", "english fix", []byte(`{}`), (*string)(nil), now, now, (*time.Time)(nil), (*time.Time)(nil), (*string)(nil), message, (*string)(nil)}}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/findings", nil)
+	f, err := scanFinding(row(), requestLocale(req))
+	require.NoError(t, err)
+	require.Equal(t, "english title", f.Title)
+	require.JSONEq(t, string(message), string(f.Message))
+
+	req.Header.Set(langHeader, "it-IT")
+	f, err = scanFinding(row(), requestLocale(req))
+	require.NoError(t, err)
+	require.Equal(t, "Le chiamate di funzione non sono tracciate nel database app", f.Title)
+	require.Contains(t, f.Detail, "le sue 2 funzioni")
+	require.Contains(t, f.Remediation, "ALTER DATABASE app SET track_functions")
+
+	req.Header.Set(langHeader, "en")
+	f, err = scanFinding(row(), requestLocale(req))
+	require.NoError(t, err)
+	require.Equal(t, "english title", f.Title)
 }

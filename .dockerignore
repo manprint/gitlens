@@ -58,3 +58,4 @@ pglens-server
 # Lint/editor config, irrelevant inside the image
 .golangci.yml
 .editorconfig
+web/src/node_modules/

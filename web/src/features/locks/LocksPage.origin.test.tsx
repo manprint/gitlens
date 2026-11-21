@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
 import { withOrigins, withTruncatedConnections } from '@/test/fixtures/getLocks'
-import { renderWithProviders } from '@/test/render'
+import { renderInRouter as render, renderWithProviders } from '@/test/render'
 import { columnTexts } from '@/test/table'
 import { NOW } from '@/test/time'
 
@@ -11,12 +11,14 @@ const mocks = vi.hoisted(() => ({
   instance: vi.fn(),
   locks: vi.fn(),
   activity: vi.fn(),
+  events: vi.fn(() => ({ data: [], isPending: false, isError: false, refetch: vi.fn() })),
 }))
 
 vi.mock('@/api/queries', () => ({
   useInstance: mocks.instance,
   useLocks: mocks.locks,
   useInstanceActivity: mocks.activity,
+  useEvents: mocks.events,
 }))
 
 import { ActivitySection } from './ActivitySection'
@@ -199,6 +201,7 @@ describe('origin sessions on the Locks page', () => {
       'Application sessions',
       'pglens sessions',
       'Activity',
+      'Captured incidents',
     ])
     expect(screen.getByRole('tab', { name: 'Blocking' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.queryByRole('table')).not.toBeInTheDocument()

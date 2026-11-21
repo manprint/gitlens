@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/url"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -43,13 +45,7 @@ func SPAHandler(assets fs.FS) http.Handler {
 			} else {
 				w.Header().Set("Cache-Control", webUINoCache)
 			}
-			// The README the interface links to is read in the browser. Go
-			// has no type for .md and a host's mime.types may say
-			// text/markdown, which browsers offer as a download.
-			if path.Ext(requestPath) == ".md" {
-				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			}
-			http.ServeFileFS(w, r, assets, requestPath)
+			serveWebUIFile(w, r, assets, requestPath)
 			return
 		}
 
@@ -59,8 +55,66 @@ func SPAHandler(assets fs.FS) http.Handler {
 		}
 
 		w.Header().Set("Cache-Control", webUINoCache)
-		http.ServeFileFS(w, r, assets, "index.html")
+		serveWebUIFile(w, r, assets, "index.html")
 	})
+}
+
+// serveWebUIFile serves name, or the gzip copy the build writes next to it
+// (name.gz) to a client that accepts gzip: the bundle is about 3.5 MB of
+// text, a quarter of that compressed, and the server compresses nothing at
+// run time.
+func serveWebUIFile(w http.ResponseWriter, r *http.Request, assets fs.FS, name string) {
+	// The README the interface links to is read in the browser. Go has no
+	// type for .md and a host's mime.types may say text/markdown, which
+	// browsers offer as a download.
+	contentType := mime.TypeByExtension(path.Ext(name))
+	if path.Ext(name) == ".md" {
+		contentType = "text/plain; charset=utf-8"
+	}
+	compressed := name + ".gz"
+	if info, err := fs.Stat(assets, compressed); err == nil && info.Mode().IsRegular() {
+		w.Header().Add("Vary", "Accept-Encoding")
+		if acceptsGzip(r.Header.Get("Accept-Encoding")) {
+			if contentType != "" {
+				w.Header().Set("Content-Type", contentType)
+			}
+			w.Header().Set("Content-Encoding", "gzip")
+			http.ServeFileFS(w, r, assets, compressed)
+			return
+		}
+	}
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	http.ServeFileFS(w, r, assets, name)
+}
+
+// acceptsGzip reports whether an Accept-Encoding header admits gzip: named
+// with a weight above zero, or, when not named, covered by *.
+func acceptsGzip(header string) bool {
+	named, star := -1.0, -1.0
+	for _, part := range strings.Split(header, ",") {
+		coding, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		weight := 1.0
+		for _, param := range strings.Split(params, ";") {
+			key, value, _ := strings.Cut(strings.TrimSpace(param), "=")
+			if strings.EqualFold(strings.TrimSpace(key), "q") {
+				if q, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+					weight = q
+				}
+			}
+		}
+		switch strings.ToLower(strings.TrimSpace(coding)) {
+		case "gzip", "x-gzip":
+			named = max(named, weight)
+		case "*":
+			star = max(star, weight)
+		}
+	}
+	if named >= 0 {
+		return named > 0
+	}
+	return star > 0
 }
 
 // contentSecurityPolicy is sent with every response. The interface has one

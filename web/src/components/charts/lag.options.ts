@@ -74,7 +74,6 @@ export function buildLagOption(series: AlignedReplicationSeries): EChartsOption 
     xAxis: timeAxisOption(spanMs),
     yAxis: { type: 'value', min: 0, name: 'seconds' },
     dataZoom: [
-      { type: 'inside', xAxisIndex: 0, filterMode: 'none', throttle: 50 },
       {
         type: 'slider',
         xAxisIndex: 0,

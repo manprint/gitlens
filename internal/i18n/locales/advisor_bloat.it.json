@@ -1,0 +1,5 @@
+{
+  "advisor.bloat.estimate_blind.title": "Stima del bloat non disponibile",
+  "advisor.bloat.estimate_blind.detail": "{count, plural, one {# tabella ha} other {# tabelle hanno}} statistiche di colonna che il ruolo di monitoraggio non può leggere, quindi per {count, plural, one {quella} other {esse}} non si stima il bloat",
+  "advisor.bloat.estimate_blind.remediation": "Concedi al ruolo di monitoraggio SELECT sulle colonne di queste tabelle e l’accesso alle righe che la row security non nasconde, oppure accetta che non vengano stimate"
+}

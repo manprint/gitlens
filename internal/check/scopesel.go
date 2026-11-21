@@ -78,6 +78,27 @@ func (s *scopedSelectors) TopN() int {
 	return s.opts.TopN
 }
 
+// prefilterLimit is how many rows per ranking a check reads from PostgreSQL
+// before its selector picks the reported keys. It stays above the selector's
+// own per-ranking budget, so the narrowing never hides a fresh key.
+func (s *scopedSelectors) prefilterLimit() int { return max(300, 2*s.TopN()) }
+
+// retained lists the keys the next Select of t's scope could keep as history.
+// It does not advance the scope's cycle.
+func (s *scopedSelectors) retained(t Target) []string {
+	s.mu.Lock()
+	st, ok := s.scope[scopeKey(t)]
+	var cycle uint64
+	if ok {
+		cycle = st.cycle + 1
+	}
+	s.mu.Unlock()
+	if !ok {
+		return []string{}
+	}
+	return st.selector.Retained(cycle)
+}
+
 // next returns the selector for t's scope together with this scope's own next
 // cycle number.
 func (s *scopedSelectors) next(t Target) (*cardinality.Selector, uint64) {

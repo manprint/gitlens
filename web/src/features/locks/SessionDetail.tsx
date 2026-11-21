@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import type { PermTier } from '@/api/types'
 import { CopyButton } from '@/components/layout/CopyButton'
+import { useT } from '@/i18n/react'
 import { formatCount, formatTimestamp } from '@/lib/format'
 import {
   blockedByThis,
@@ -64,56 +65,59 @@ export function SessionDetail({
   instanceId: string | undefined
   sampleStale: boolean
 }) {
+  const t = useT()
   const query = sessionQueryText(session)
   const blockedBy = (session.blocked_by ?? []).map(String)
   const backendStart =
-    typeof session.backend_start === 'string' ? formatTimestamp(session.backend_start, 'UTC') : NONE
+    typeof session.backend_start === 'string' ? formatTimestamp(session.backend_start) : NONE
   return (
     <div className="space-y-3" data-testid="session-detail">
       <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label="PID">{sessionPid(session)}</Field>
-        <Field label="Origin">
+        <Field label={t('locks.sessions.pid')}>{sessionPid(session)}</Field>
+        <Field label={t('locks.detail.origin')}>
           <OriginBadge session={session} />
         </Field>
-        <Field label="State">{sessionState(session) ?? NONE}</Field>
-        <Field label="Wait event type">{textOr(session.wait_event_type)}</Field>
-        <Field label="Wait event">{textOr(session.wait_event)}</Field>
-        <Field label="Transaction age">{formatAge(transactionAge(session))}</Field>
-        <Field label="Query age">{formatAge(queryAge(session))}</Field>
-        <Field label="State age">{formatAge(stateAge(session))}</Field>
-        <Field label="Backend start">{backendStart}</Field>
-        <Field label="Client address">{sessionClient(session) ?? NONE}</Field>
-        <Field label="Application">{sessionApplication(session) ?? NONE}</Field>
-        <Field label="User">{sessionUser(session) ?? NONE}</Field>
-        <Field label="Database">{sessionDatabase(session) ?? NONE}</Field>
-        <Field label="Backend XID age">{countText(session.backend_xid_age)}</Field>
-        <Field label="Backend xmin age">{countText(session.backend_xmin_age)}</Field>
-        <Field label="Query ID">{sessionQueryId(session) ?? NONE}</Field>
-        <Field label="Leader PID">
+        <Field label={t('locks.sessions.state')}>{sessionState(session) ?? NONE}</Field>
+        <Field label={t('locks.detail.waitEventType')}>{textOr(session.wait_event_type)}</Field>
+        <Field label={t('locks.detail.waitEvent')}>{textOr(session.wait_event)}</Field>
+        <Field label={t('locks.sessions.transactionAge')}>
+          {formatAge(transactionAge(session))}
+        </Field>
+        <Field label={t('locks.sessions.queryAge')}>{formatAge(queryAge(session))}</Field>
+        <Field label={t('locks.detail.stateAge')}>{formatAge(stateAge(session))}</Field>
+        <Field label={t('locks.detail.backendStart')}>{backendStart}</Field>
+        <Field label={t('locks.detail.clientAddress')}>{sessionClient(session) ?? NONE}</Field>
+        <Field label={t('locks.sessions.application')}>{sessionApplication(session) ?? NONE}</Field>
+        <Field label={t('locks.sessions.user')}>{sessionUser(session) ?? NONE}</Field>
+        <Field label={t('locks.sessions.database')}>{sessionDatabase(session) ?? NONE}</Field>
+        <Field label={t('locks.detail.backendXidAge')}>{countText(session.backend_xid_age)}</Field>
+        <Field label={t('locks.detail.backendXminAge')}>
+          {countText(session.backend_xmin_age)}
+        </Field>
+        <Field label={t('locks.detail.queryId')}>{sessionQueryId(session) ?? NONE}</Field>
+        <Field label={t('locks.detail.leaderPid')}>
           {typeof session.leader_pid === 'number' || typeof session.leader_pid === 'string'
             ? String(session.leader_pid)
             : NONE}
         </Field>
-        <Field label="Blocked by">{listText(blockedBy)}</Field>
-        <Field label="Blocking">{listText(blockedByThis(sessions, session.pid))}</Field>
+        <Field label={t('locks.detail.blockedBy')}>{listText(blockedBy)}</Field>
+        <Field label={t('locks.detail.blocking')}>
+          {listText(blockedByThis(sessions, session.pid))}
+        </Field>
       </dl>
       <div>
         <div className="flex items-center gap-2">
           <span className="text-muted-foreground text-xs">
             {query === null
-              ? 'Query text'
+              ? t('locks.detail.queryText')
               : query.source === 'raw'
-                ? 'Query text (raw)'
-                : 'Query text (normalised)'}
+                ? t('locks.detail.queryTextRaw')
+                : t('locks.detail.queryTextNormalised')}
           </span>
           {query === null ? null : <CopyButton text={query.text} />}
         </div>
         {query === null ? (
-          <p className="text-muted-foreground text-sm">
-            No text is known for this session: the agent sends the raw text only when
-            checks.locks.session_query_text is on, and the normalised text needs a query ID that
-            pg_stat_statements has recorded.
-          </p>
+          <p className="text-muted-foreground text-sm">{t('locks.detail.noQueryText')}</p>
         ) : (
           <pre className="bg-muted/50 max-h-40 overflow-auto rounded-md border p-2 font-mono text-xs break-words whitespace-pre-wrap">
             {query.text}

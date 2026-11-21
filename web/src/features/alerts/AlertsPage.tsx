@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAlert, useAlerts, useCachedClusters, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { InfoHint } from '@/components/layout/InfoHint'
@@ -11,6 +12,7 @@ import { SimpleTable } from '@/components/layout/SimpleTable'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useT } from '@/i18n/react'
 import { matchSilence, rankAlerts, summariseAlerts, type Alert, type Silence } from '@/lib/alerts'
 import { nameLookup } from '@/lib/names'
 
@@ -20,7 +22,7 @@ import {
   readAlertsSection,
   withSection,
 } from './alertingSections'
-import { alertColumns } from './AlertRow'
+import { alertColumns, stateText } from './AlertRow'
 import { DeliverySection } from './DeliverySection'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Callout } from '@/components/ui/callout'
@@ -70,19 +72,20 @@ function matchesFilter(
 }
 
 function Detail({ alertKey }: { alertKey: string }) {
+  const t = useT()
   const detailQuery = useAlert(alertKey)
 
   if (detailQuery.isPending) {
     return (
-      <div aria-busy="true" aria-label="Loading alert detail" role="status">
-        Loading alert detail…
+      <div aria-busy="true" aria-label={t('alerts.detail.loadingLabel')} role="status">
+        {t('alerts.detail.loading')}
       </div>
     )
   }
   if (detailQuery.error) {
     return (
       <ErrorState
-        endpoint="alert detail"
+        endpoint={t('alerts.endpoint.alertDetail')}
         failure={detailQuery.error}
         onRetry={() => void detailQuery.refetch()}
       />
@@ -95,24 +98,27 @@ function Detail({ alertKey }: { alertKey: string }) {
     <div className="space-y-3" data-testid="alert-detail">
       <dl className="grid gap-2 text-sm sm:grid-cols-2">
         <div>
-          <dt className="font-medium">Rule</dt>
+          <dt className="font-medium">{t('alerts.detail.rule')}</dt>
           <dd>{alert.rule_id}</dd>
         </div>
         <div>
-          <dt className="font-medium">State</dt>
-          <dd>{alert.state}</dd>
+          <dt className="font-medium">{t('alerts.column.state')}</dt>
+          <dd>{stateText(alert.state, t)}</dd>
         </div>
         <div>
-          <dt className="font-medium">Labels</dt>
+          <dt className="font-medium">{t('alerts.detail.labels')}</dt>
           <dd>
             <code>{JSON.stringify(alert.labels)}</code>
           </dd>
         </div>
         <div>
-          <dt className="font-medium">History</dt>
+          <dt className="font-medium">{t('alerts.detail.history')}</dt>
           <dd>
-            Started {alert.started_at}; last evaluated {alert.last_eval_at}; resolved{' '}
-            {alert.resolved_at ?? 'not yet'}.
+            {t('alerts.detail.historyText', {
+              started: alert.started_at,
+              evaluated: alert.last_eval_at,
+              resolved: alert.resolved_at ?? t('alerts.detail.notYet'),
+            })}
           </dd>
         </div>
       </dl>
@@ -136,6 +142,7 @@ function SummaryTile({
   value: number
   tone?: keyof typeof TILE_TONE
 }) {
+  const t = useT()
   return (
     <div className="rounded-lg border px-4 py-3 min-[1600px]:flex min-[1600px]:items-baseline min-[1600px]:gap-2 min-[1600px]:px-3 min-[1600px]:py-1">
       <dt className="text-muted-foreground text-xs font-medium tracking-wide uppercase">{label}</dt>
@@ -144,7 +151,7 @@ function SummaryTile({
       >
         {value}
         <span className="text-muted-foreground ml-1 text-xs font-normal">
-          {value === 1 ? 'alert' : 'alerts'}
+          {t('alerts.tile.unit', { count: value })}
         </span>
       </dd>
     </div>
@@ -152,6 +159,7 @@ function SummaryTile({
 }
 
 export function AlertsPage() {
+  const t = useT()
   const alertsQuery = useAlerts({ state: 'all' })
   const silencesQuery = useSilences({ all: true })
   const location = useLocation()
@@ -176,8 +184,8 @@ export function AlertsPage() {
   // A silence that could not be loaded is not known to be absent, so the page
   // must not say it is missing from the list.
   const silenceNote = silencesQuery.error
-    ? 'The silence named in this link could not be checked, so no alerts are shown.'
-    : 'The silence named in this link is not in the current silences list.'
+    ? t('alerts.silence.unchecked')
+    : t('alerts.silence.missing')
   const summary = useMemo(() => summariseAlerts(alerts), [alerts])
   const visibleAlerts = useMemo(
     () =>
@@ -211,12 +219,13 @@ export function AlertsPage() {
       alertColumns({
         names,
         onSelect: setSelectedAlertKey,
+        t,
         silenceFor: (alert) =>
           alert.suppressed
             ? activeSilences.find((silence) => matchSilence(alert, silence))
             : undefined,
       }),
-    [activeSilences, names],
+    [activeSilences, names, t],
   )
   const section = readAlertsSection(searchParams.get('section'))
 
@@ -245,7 +254,7 @@ export function AlertsPage() {
   if (alertsQuery.error && !alertsQuery.data) {
     return (
       <ErrorState
-        endpoint="alerts"
+        endpoint={t('alerts.endpoint.alerts')}
         failure={alertsQuery.error}
         onRetry={() => void alertsQuery.refetch()}
       />
@@ -253,8 +262,8 @@ export function AlertsPage() {
   }
   if (alertsQuery.isPending || silencesQuery.isPending) {
     return (
-      <section aria-busy="true" aria-label="Loading alerts" role="status">
-        Loading alerts…
+      <section aria-busy="true" aria-label={t('alerts.loading.label')} role="status">
+        {t('alerts.loading.text')}
       </section>
     )
   }
@@ -266,66 +275,66 @@ export function AlertsPage() {
     <>
       <span className="flex items-center gap-1">
         <label className={filterLabel} htmlFor="alerts-state">
-          <span className="font-medium">State</span>
+          <span className="font-medium">{t('alerts.column.state')}</span>
           <NativeSelect
             className={filterControl}
             id="alerts-state"
             onChange={(event) => updateFilter('state', event.target.value, 'firing')}
             value={state}
           >
-            <option value="firing">Firing</option>
-            <option value="all">All states</option>
-            <option value="pending">Pending</option>
-            <option value="resolved">Resolved</option>
+            <option value="firing">{t('alerts.filter.firing')}</option>
+            <option value="all">{t('alerts.filter.allStates')}</option>
+            <option value="pending">{t('alerts.filter.pending')}</option>
+            <option value="resolved">{t('alerts.status.resolved')}</option>
           </NativeSelect>
         </label>
-        <InfoHint id="alerts.filter-state" label="State filter" />
+        <InfoHint id="alerts.filter-state" label={t('alerts.filter.stateHint')} />
       </span>
       <span className="flex items-center gap-1">
         <label className={filterLabel} htmlFor="alerts-severity">
-          <span className="font-medium">Severity</span>
+          <span className="font-medium">{t('alerts.column.severity')}</span>
           <NativeSelect
             className={filterControl}
             id="alerts-severity"
             onChange={(event) => updateFilter('severity', event.target.value)}
             value={severity}
           >
-            <option value="all">All severities</option>
-            <option value="critical">Critical</option>
-            <option value="warning">Warning</option>
-            <option value="info">Info</option>
+            <option value="all">{t('alerts.filter.allSeverities')}</option>
+            <option value="critical">{t('alerts.filter.critical')}</option>
+            <option value="warning">{t('alerts.filter.warning')}</option>
+            <option value="info">{t('alerts.filter.info')}</option>
           </NativeSelect>
         </label>
-        <InfoHint id="alerts.filter-severity" label="Severity filter" />
+        <InfoHint id="alerts.filter-severity" label={t('alerts.filter.severityHint')} />
       </span>
       <span className="flex items-center gap-1">
         <label className={filterLabel} htmlFor="alerts-cluster">
-          <span className="font-medium">Cluster</span>
+          <span className="font-medium">{t('alerts.column.cluster')}</span>
           <Input
             className={`w-44 ${filterControl}`}
             id="alerts-cluster"
             onChange={(event) => updateFilter('cluster_id', event.target.value)}
-            placeholder="Cluster ID"
+            placeholder={t('alerts.filter.clusterPlaceholder')}
             value={clusterId}
           />
         </label>
-        <InfoHint id="alerts.filter-cluster" label="Cluster filter" />
+        <InfoHint id="alerts.filter-cluster" label={t('alerts.filter.clusterHint')} />
       </span>
       <span className="flex items-center gap-1">
         <label className={filterLabel} htmlFor="alerts-suppressed">
-          <span className="font-medium">Suppression</span>
+          <span className="font-medium">{t('alerts.filter.suppression')}</span>
           <NativeSelect
             className={filterControl}
             id="alerts-suppressed"
             onChange={(event) => updateFilter('suppressed', event.target.value)}
             value={suppressed}
           >
-            <option value="all">All alerts</option>
-            <option value="suppressed">Suppressed</option>
-            <option value="unsuppressed">Not suppressed</option>
+            <option value="all">{t('alerts.filter.allAlerts')}</option>
+            <option value="suppressed">{t('alerts.status.suppressed')}</option>
+            <option value="unsuppressed">{t('alerts.filter.notSuppressed')}</option>
           </NativeSelect>
         </label>
-        <InfoHint id="alerts.filter-suppression" label="Suppression filter" />
+        <InfoHint id="alerts.filter-suppression" label={t('alerts.filter.suppressionHint')} />
       </span>
     </>
   )
@@ -333,29 +342,30 @@ export function AlertsPage() {
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="alerts" label={t('alerts.page.helpLabel')} />}
         icon={Bell}
-        eyebrow="Alerting"
-        title="Alerts and events"
-        subtitle="Alerts raised by the alert rules: what is firing now, what was resolved, and what is silenced. Open an alert for its labels, history and delivery."
+        eyebrow={t('alerts.page.eyebrow')}
+        title={t('alerts.page.title')}
+        subtitle={t('alerts.page.subtitle')}
         freshness={<FreshnessBadge dataUpdatedAt={alertsQuery.dataUpdatedAt} policy="alerts" />}
       />
 
       {alertsQuery.error ? (
         <ErrorState
-          endpoint="alerts"
+          endpoint={t('alerts.endpoint.alerts')}
           failure={alertsQuery.error}
           onRetry={() => void alertsQuery.refetch()}
         />
       ) : null}
       {silencesQuery.error ? (
         <Callout variant="warning">
-          Suppression details are unavailable; alerts remain visible without silence context.
+          {t('alerts.callout.silencesUnavailable')}
           <button
             className="ml-2 underline"
             onClick={() => void silencesQuery.refetch()}
             type="button"
           >
-            Retry silences
+            {t('alerts.callout.retry')}
           </button>
         </Callout>
       ) : null}
@@ -367,76 +377,100 @@ export function AlertsPage() {
           className="flex flex-col gap-4 min-[1600px]:flex-row min-[1600px]:items-center min-[1600px]:justify-between"
           data-testid="alerts-tab-row"
         >
-          <TabsList aria-label="Alert sections">
+          <TabsList aria-label={t('alerts.tabs.label')}>
             {ALERTS_SECTIONS.map((entry) => (
               <TabsTrigger key={entry.id} value={entry.id}>
-                {entry.label}
+                {t(entry.labelKey)}
               </TabsTrigger>
             ))}
           </TabsList>
           <div className="flex items-center gap-1">
             {/* Firing alerts are counted by severity; suppressed alerts are shown separately. */}
             <dl
-              aria-label="Alert summary"
+              aria-label={t('alerts.summary.title')}
               className="grid grid-cols-2 gap-3 min-[1600px]:flex min-[1600px]:gap-2 sm:grid-cols-3 lg:grid-cols-5"
             >
               <SummaryTile
-                label="Critical firing"
+                label={t('alerts.summary.criticalFiring')}
                 tone="critical"
                 value={summary.firing.critical}
               />
-              <SummaryTile label="Warning firing" tone="warning" value={summary.firing.warning} />
-              <SummaryTile label="Info firing" tone="info" value={summary.firing.info} />
-              <SummaryTile label="Suppressed" value={summary.suppressed} />
-              <SummaryTile label="Resolved" value={summary.resolved} />
+              <SummaryTile
+                label={t('alerts.summary.warningFiring')}
+                tone="warning"
+                value={summary.firing.warning}
+              />
+              <SummaryTile
+                label={t('alerts.summary.infoFiring')}
+                tone="info"
+                value={summary.firing.info}
+              />
+              <SummaryTile label={t('alerts.status.suppressed')} value={summary.suppressed} />
+              <SummaryTile label={t('alerts.status.resolved')} value={summary.resolved} />
             </dl>
-            <InfoHint id="alerts.summary" label="Alert summary counts" />
+            <InfoHint id="alerts.summary" label={t('alerts.summary.countsHint')} />
+            <HelpLink anchor="alerts#summary-tiles" label={t('alerts.summary.title')} />
           </div>
         </div>
         <TabsContent className="space-y-8 min-[1600px]:space-y-4" value="alerts">
           {selectedAlertKey ? (
-            <Section captionId="alerts.detail" title={`Alert detail: ${selectedAlertKey}`}>
+            <Section
+              actions={
+                <HelpLink anchor="alerts#alert-detail" label={t('alerts.detail.helpLabel')} />
+              }
+              captionId="alerts.detail"
+              title={t('alerts.detail.title', { key: selectedAlertKey })}
+            >
               <button
                 className="mb-3 underline"
                 onClick={() => setSelectedAlertKey(null)}
                 type="button"
               >
-                Close detail
+                {t('alerts.detail.close')}
               </button>
               <Detail alertKey={selectedAlertKey} />
             </Section>
           ) : null}
 
-          <Section actions={filters} captionId="alerts.list" title="Alerts">
+          <Section
+            actions={
+              <>
+                {filters}
+                <HelpLink anchor="alerts#alert-table" label={t('alerts.list.tableHelp')} />
+              </>
+            }
+            captionId="alerts.list"
+            title={t('alerts.section.alerts')}
+          >
             <p aria-live="polite" className="text-muted-foreground mb-3 text-sm">
-              {`${visibleAlerts.length} of ${alerts.length} alerts shown; filters are kept in the URL so the view can be shared.`}
+              {t('alerts.list.shown', { shown: visibleAlerts.length, total: alerts.length })}
             </p>
             {silenceId ? (
               <p className="mb-3 text-sm" role="status">
                 {silenceFilter
-                  ? `Showing alerts matched by silence “${silenceFilter.reason}”.`
+                  ? t('alerts.list.silenceMatched', { reason: silenceFilter.reason })
                   : silenceNote}{' '}
                 <button
                   className="text-foreground underline"
                   onClick={() => updateFilter('silence_id', '')}
                   type="button"
                 >
-                  Show all alerts
+                  {t('alerts.list.showAll')}
                 </button>
               </p>
             ) : null}
             <SimpleTable
-              ariaLabel="Alerts"
+              ariaLabel={t('alerts.section.alerts')}
               captionId="alerts.table"
               columns={columns}
               emptyState={
                 <EmptyState
                   description={
                     alerts.length === 0
-                      ? 'No alerts have been emitted by the monitored fleet.'
-                      : 'Try clearing one or more filters or choose a different state.'
+                      ? t('alerts.empty.noneEmitted')
+                      : t('alerts.empty.tryFilters')
                   }
-                  title={alerts.length === 0 ? 'No alerts' : 'No alerts match these filters'}
+                  title={alerts.length === 0 ? t('alerts.empty.none') : t('alerts.empty.noMatch')}
                 />
               }
               rowKey={(alert) => alert.alert_key}
@@ -447,7 +481,11 @@ export function AlertsPage() {
           </Section>
         </TabsContent>
         <TabsContent value="delivery">
-          <Section captionId="alerts.delivery" title="Notification delivery">
+          <Section
+            actions={<HelpLink anchor="alerts#delivery" label={t('alerts.section.delivery')} />}
+            captionId="alerts.delivery"
+            title={t('alerts.section.delivery')}
+          >
             <DeliverySection />
           </Section>
         </TabsContent>

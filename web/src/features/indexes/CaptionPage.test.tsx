@@ -188,13 +188,11 @@ describe('index analysis captions', () => {
     openHint('Tables', 'indexes.dead-rows-table')
   })
 
-  it('CAPTION-PAGE-007 the suggestions tab is captioned', async () => {
-    const { ids } = await pageIds('/indexes?tab=suggestions')
-    expect(ids).toEqual(
-      expect.arrayContaining(['indexes.suggestions', 'indexes.suggestions-table']),
-    )
-    openHint('Index suggestions', 'indexes.suggestions')
-    openHint('Suggested indexes', 'indexes.suggestions-table')
+  it('CAPTION-PAGE-007 the missing indexes tab is captioned', async () => {
+    const { ids } = await pageIds('/indexes?tab=missing')
+    expect(ids).toEqual(expect.arrayContaining(['indexes.missing', 'indexes.missing-table']))
+    openHint('Missing indexes', 'indexes.missing')
+    openHint('Missing index candidates', 'indexes.missing-table')
   })
 
   it('CAPTION-PAGE-008 the index tax tab is captioned', async () => {

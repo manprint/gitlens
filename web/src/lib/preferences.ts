@@ -1,3 +1,5 @@
+import { localeCodes } from '@/i18n/locales'
+
 import type { RangePreset } from './timerange'
 
 export const PREFERENCES_STORAGE_KEY = 'pglens.preferences'
@@ -7,8 +9,12 @@ export type ThemePreference = 'dark' | 'light' | 'system'
 /** The default time ranges offered: `15m` is deliberately not one (R-11.0 P2). */
 export const DEFAULT_TIME_RANGES = [
   '1h',
+  '2h',
+  '4h',
   '6h',
+  '8h',
   '24h',
+  '3d',
   '7d',
 ] as const satisfies readonly RangePreset[]
 export type DefaultTimeRange = (typeof DEFAULT_TIME_RANGES)[number]
@@ -21,11 +27,24 @@ export type RefreshIntervalPreference = (typeof REFRESH_INTERVALS)[number]
 export const TABLE_PAGE_SIZES = [20, 50, 100] as const
 export type TablePageSize = (typeof TABLE_PAGE_SIZES)[number]
 
+/** `server` follows PGLENS_TZ, `browser` this browser's zone (lib/timezone). */
+export const TIME_ZONE_PREFERENCES = ['server', 'browser', 'UTC'] as const
+export type TimeZonePreference = (typeof TIME_ZONE_PREFERENCES)[number]
+
+/** `server` follows PGLENS_LANG, `browser` this browser's languages, else a registry code (plan 006 D6). */
+export type LanguagePreference = string
+
+export function languagePreferences(): LanguagePreference[] {
+  return ['server', 'browser', ...localeCodes()]
+}
+
 export interface Preferences {
   theme: ThemePreference
   defaultTimeRange: DefaultTimeRange
   refreshInterval: RefreshIntervalPreference
   tablePageSize: TablePageSize
+  timeZone: TimeZonePreference
+  language: LanguagePreference
 }
 
 // index.html repeats the theme default for the first paint; keep the two in step.
@@ -34,6 +53,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   defaultTimeRange: '1h',
   refreshInterval: 'auto',
   tablePageSize: 20,
+  timeZone: 'server',
+  language: 'server',
 }
 
 type PreferencesStorage = Pick<Storage, 'getItem' | 'setItem'>
@@ -76,6 +97,8 @@ function normalizePreferences(value: unknown): Preferences {
       candidate.tablePageSize,
       DEFAULT_PREFERENCES.tablePageSize,
     ),
+    timeZone: oneOf(TIME_ZONE_PREFERENCES, candidate.timeZone, DEFAULT_PREFERENCES.timeZone),
+    language: oneOf(languagePreferences(), candidate.language, DEFAULT_PREFERENCES.language),
   }
 }
 

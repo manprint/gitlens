@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/manprint/pglens/internal/readiness"
 )
 
 var readinessTestID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
@@ -174,4 +176,54 @@ func TestRDYAPI003_Summary(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	require.Empty(t, body["instances"], "no instance: an empty list, not null")
 	require.NotNil(t, body["instances"])
+}
+
+// RDY-API-004: the report reads in the language of X-Pglens-Lang; both
+// languages share one cached input (plan 006 F5).
+func TestRDYAPI004_ReportFollowsTheLanguageHeader(t *testing.T) {
+	pool := &mockPool{}
+	scriptReadiness(pool, healthySettings(), []string{"locks"})
+	a := &API{pool: pool}
+	h := readinessRouter(a)
+	path := "/api/v1/instances/" + readinessTestID.String() + "/readiness"
+	title := func(lang string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if lang != "" {
+			req.Header.Set(langHeader, lang)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		var body struct {
+			Items []struct{ ID, Title string } `json:"items"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		for _, item := range body.Items {
+			if item.ID == "RDY-CHK-01" {
+				return item.Title
+			}
+		}
+		t.Fatalf("no RDY-CHK-01 in %s", rec.Body.String())
+		return ""
+	}
+	require.Equal(t, "A check is failing", title(""))
+	calls := pool.queryRowCalls + pool.queryCalls
+	require.Equal(t, "Un controllo fallisce", title("it"))
+	require.Equal(t, "A check is failing", title("en"))
+	require.Equal(t, calls, pool.queryRowCalls+pool.queryCalls, "one cached input serves both languages")
+}
+
+// TestReadinessCache_PutDropsExpiredEntries: an expired input is never read
+// again, so the next put removes it (a deleted instance leaves nothing).
+func TestReadinessCache_PutDropsExpiredEntries(t *testing.T) {
+	now := time.Date(2026, 11, 21, 3, 0, 0, 0, time.UTC)
+	c := readinessCache{ttl: time.Minute, now: func() time.Time { return now }}
+	gone, kept := uuid.New(), uuid.New()
+	c.put(gone, readiness.Input{})
+	now = now.Add(2 * time.Minute)
+	c.put(kept, readiness.Input{})
+
+	require.Len(t, c.entries, 1)
+	_, ok := c.get(kept)
+	require.True(t, ok)
 }

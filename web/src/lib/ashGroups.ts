@@ -1,44 +1,57 @@
+import type { MessageKey } from '@/i18n/messages/en'
+import { activeIntl, translate } from '@/i18n/store'
+
 import type { AshGroupBy } from './ash'
 
 export type AshWaitGroupId = 'cpu' | 'io' | 'locks' | 'client' | 'other'
 
 export interface AshWaitGroup {
   id: AshWaitGroupId
-  label: string
+  /** The chart title, in the console language through `labelKey`. */
+  labelKey: MessageKey
   /** Wait event types the group plots; `other` also takes every unknown type. */
   types: readonly string[]
 }
 
 /** The wait groups in display order; each gets its own chart and y axis. */
 export const ASH_WAIT_GROUPS: readonly AshWaitGroup[] = [
-  { id: 'cpu', label: 'CPU', types: ['CPU'] },
-  { id: 'io', label: 'I/O', types: ['IO'] },
-  { id: 'locks', label: 'Locks and contention', types: ['Lock', 'LWLock', 'BufferPin', 'Buffer'] },
-  { id: 'client', label: 'Client and inter-process', types: ['Client', 'IPC'] },
-  { id: 'other', label: 'Other waits', types: ['Timeout', 'Activity', 'Extension', 'other'] },
+  { id: 'cpu', labelKey: 'ash.waitGroup.cpu', types: ['CPU'] },
+  { id: 'io', labelKey: 'ash.waitGroup.io', types: ['IO'] },
+  {
+    id: 'locks',
+    labelKey: 'ash.waitGroup.locks',
+    types: ['Lock', 'LWLock', 'BufferPin', 'Buffer'],
+  },
+  { id: 'client', labelKey: 'ash.waitGroup.client', types: ['Client', 'IPC'] },
+  {
+    id: 'other',
+    labelKey: 'ash.waitGroup.other',
+    types: ['Timeout', 'Activity', 'Extension', 'other'],
+  },
 ]
 
-/** One plain sentence per wait event type, for the legend. */
-export const ASH_WAIT_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  CPU: 'Backend running on CPU (no wait event reported)',
-  IO: 'Waiting for a read or write to storage',
-  Lock: 'Waiting for a heavyweight lock held by another transaction',
-  LWLock: 'Waiting for an internal lightweight lock (buffer, WAL, catalog contention)',
-  BufferPin: 'Waiting for exclusive access to a data buffer',
-  Buffer: 'Waiting for exclusive access to a data buffer',
-  Client: 'Waiting for the client application to send or receive data',
-  IPC: 'Waiting for another server process (parallel workers, replication)',
-  Timeout: 'Sleeping until a timer fires',
-  Activity: 'Background process idle in its main loop',
-  Extension: 'Waiting inside an extension',
-  other: 'Wait events not classified above',
+/** The catalog key of the legend sentence of each wait event type. */
+export const ASH_WAIT_DESCRIPTIONS: Readonly<Record<string, MessageKey>> = {
+  CPU: 'ash.waitType.CPU',
+  IO: 'ash.waitType.IO',
+  Lock: 'ash.waitType.Lock',
+  LWLock: 'ash.waitType.LWLock',
+  BufferPin: 'ash.waitType.BufferPin',
+  Buffer: 'ash.waitType.Buffer',
+  Client: 'ash.waitType.Client',
+  IPC: 'ash.waitType.IPC',
+  Timeout: 'ash.waitType.Timeout',
+  Activity: 'ash.waitType.Activity',
+  Extension: 'ash.waitType.Extension',
+  other: 'ash.waitType.other',
 }
 
 const FOLDED = /^other( \(folded\))?$/u
 
 /** The legend sentence for a wait event type; unknown types name themselves. */
 export function waitDescription(type: string): string {
-  return ASH_WAIT_DESCRIPTIONS[type] ?? `Wait event type ${type}`
+  const key = ASH_WAIT_DESCRIPTIONS[type]
+  return key ? translate(key) : translate('ash.waitType.unknown', { type })
 }
 
 /** The group of a wait event type; an unknown type is never dropped, it is "other". */
@@ -110,7 +123,12 @@ export function groupSeries<S extends GroupableSeries>(
 
 /** A small average as `<0.01` rather than a misleading `0.00`. */
 export function formatAverage(value: number): string {
-  return value > 0 && value < 0.005 ? '<0.01' : value.toFixed(2)
+  const two = new Intl.NumberFormat(activeIntl(), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: false,
+  })
+  return value > 0 && value < 0.005 ? `<${two.format(0.01)}` : two.format(value)
 }
 
 /**

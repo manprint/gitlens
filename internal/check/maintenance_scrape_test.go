@@ -42,7 +42,7 @@ func TestTableStats_ScrapeCoversRows(t *testing.T) {
 				int64(9), int64(10), int64(11),
 				&now, nil, &now, nil,
 				float64(1), float64(2), int64(3), float64(4),
-				int64(5), int64(6), uint32(7),
+				int64(5), int64(6), uint32(7), int64(1),
 			}}}, nil
 		},
 		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
@@ -76,7 +76,7 @@ func TestTableStats_AgeIsMeasuredOnTheServerClock(t *testing.T) {
 				int64(9), int64(10), int64(11),
 				nil, nil, &analyzed, nil,
 				float64(1), float64(2), int64(3), float64(4),
-				int64(5), int64(6), uint32(7),
+				int64(5), int64(6), uint32(7), int64(1),
 			}}}, nil
 		},
 		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
@@ -102,7 +102,7 @@ func TestIndexStats_ScrapeCoversRows(t *testing.T) {
 			return &mockRows{rows: [][]any{{
 				"public", "t", "i", int64(1), int64(2), int64(3), int64(4),
 				int64(5), int64(4096), true, false, true, uint32(16384),
-				nil, nil, nil,
+				nil, nil, nil, int64(1),
 			}}}, nil
 		},
 		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
@@ -195,7 +195,7 @@ func TestRelationSizes_VanishedRelationIsLeftOut(t *testing.T) {
 					int64(9), int64(10), int64(11),
 					&now, nil, &now, nil,
 					float64(1), float64(2), int64(3), float64(4),
-					int64(5), int64(6), uint32(7),
+					int64(5), int64(6), uint32(7), int64(1),
 				}}}, nil
 			},
 			queryRowFunc: vanished,
@@ -214,7 +214,7 @@ func TestRelationSizes_VanishedRelationIsLeftOut(t *testing.T) {
 				return &mockRows{rows: [][]any{{
 					"public", "t", "i", int64(1), int64(2), int64(3), int64(4),
 					int64(5), int64(4096), true, false, true, uint32(16384),
-					nil, nil, nil,
+					nil, nil, nil, int64(1),
 				}}}, nil
 			},
 			queryRowFunc: vanished,
@@ -262,6 +262,10 @@ func sizeProbe(sizeQuery string, locked uint32, failure error, sizes []any) func
 	}
 }
 
+// fixtureRelationCount is the relation count a fixture row reports: more
+// than any test lists, as in a database larger than the scrape's top-N.
+const fixtureRelationCount = int64(1 << 20)
+
 func tableStatsFixture(relname string, oid uint32) []any {
 	now := time.Now()
 	return []any{
@@ -272,6 +276,7 @@ func tableStatsFixture(relname string, oid uint32) []any {
 		&now, nil, &now, nil,
 		float64(1), float64(2), int64(3), float64(4),
 		int64(5), int64(6), oid,
+		fixtureRelationCount,
 	}
 }
 
@@ -279,7 +284,7 @@ func indexStatsFixture(indexname string, oid uint32) []any {
 	return []any{
 		"public", "t", indexname, int64(1), int64(2), int64(3), int64(4),
 		int64(5), int64(4096), true, false, true, oid,
-		nil, nil, nil,
+		nil, nil, nil, fixtureRelationCount,
 	}
 }
 

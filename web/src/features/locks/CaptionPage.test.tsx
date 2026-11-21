@@ -1,10 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { captionOf, type CaptionId } from '@/lib/captions'
 import { expectCaptionedCards, expectClearCard } from '@/test/clearCard'
 import { withOrigins, withTruncatedConnections } from '@/test/fixtures/getLocks'
-import { renderWithProviders } from '@/test/render'
+import { renderInRouter as render, renderWithProviders } from '@/test/render'
 import { NOW } from '@/test/time'
 
 const mocks = vi.hoisted(() => ({

@@ -5,8 +5,9 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAdvisorRules, useClusters, useFindings } from '@/api/queries'
 import type { Cluster } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { FULL_SEARCH_HINT, SearchBox } from '@/components/layout/SearchBox'
+import { SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { EmptyState, ErrorState } from '@/components/state'
@@ -14,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useSearchDraft, useShownTerm } from '@/hooks/useSearch'
+import { useT } from '@/i18n/react'
 import type { CaptionId } from '@/lib/captions'
 import { searchTermOf } from '@/lib/highlight'
 import { clusterLabel, instanceLabel, nameLookup } from '@/lib/names'
@@ -52,6 +54,12 @@ const scopeFilters: readonly ScopeFilter[] = ['all', 'cluster', 'instance']
 // The server's maximum. It returns open and degraded findings first, so a
 // full page is cut in the muted and resolved ones.
 const FINDINGS_LIMIT = 1000
+
+const FILTER_HINT: Record<'state' | 'severity' | 'scope', CaptionId> = {
+  state: 'findings.filter-state',
+  severity: 'findings.filter-severity',
+  scope: 'findings.filter-scope',
+}
 
 function readFilter<T extends string>(value: string | null, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback
@@ -175,6 +183,7 @@ function FilterControl({
   hint?: CaptionId
   children: ReactNode
 }) {
+  const t = useT()
   return (
     <div className="text-muted-foreground flex flex-col gap-1 text-xs">
       <span aria-hidden="true" className="font-medium min-[1600px]:hidden">
@@ -185,7 +194,7 @@ function FilterControl({
       ) : (
         <div className="flex items-center gap-1">
           {children}
-          <InfoHint id={hint} label={`${label} filter`} />
+          <InfoHint id={hint} label={t('findings.page.filterHint', { label })} />
         </div>
       )}
     </div>
@@ -206,6 +215,7 @@ function FilterLineNote({ children }: { children: string }) {
 }
 
 export function FindingsPage() {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   // The search runs on the server over every finding, whatever its state (D20).
   const q = searchParams.get('q') ?? ''
@@ -324,11 +334,11 @@ export function FindingsPage() {
     <SearchBox
       busy={findingsQuery.isFetching && term !== ''}
       draft={searchDraft}
-      hint={FULL_SEARCH_HINT}
+      fullSearch
       id="findings-search"
-      label="Search findings"
+      label={t('findings.page.searchLabel')}
       onChange={setSearch}
-      placeholder="Rule, title, object"
+      placeholder={t('findings.page.searchPlaceholder')}
       value={q}
     />
   )
@@ -352,8 +362,8 @@ export function FindingsPage() {
     return (
       <div className="space-y-4">
         {term === '' ? null : <div className="flex">{searchBox}</div>}
-        <section aria-busy="true" aria-label="Loading advisor findings" role="status">
-          Loading advisor findings…
+        <section aria-busy="true" aria-label={t('findings.page.loadingLabel')} role="status">
+          {t('findings.page.loading')}
         </section>
       </div>
     )
@@ -369,8 +379,12 @@ export function FindingsPage() {
 
   const shownText =
     shownTerm === ''
-      ? `${visibleFindings.length} of ${findings.length} findings shown`
-      : `${visibleFindings.length} of ${findings.length} findings matching “${shownTerm}” shown`
+      ? t('findings.page.shownAll', { shown: visibleFindings.length, total: findings.length })
+      : t('findings.page.shownMatching', {
+          shown: visibleFindings.length,
+          total: findings.length,
+          term: shownTerm,
+        })
   // What hides the matches of a search (D20): the state filter alone, or the other filters too.
   const matchesInOtherStates =
     shownTerm !== '' &&
@@ -380,7 +394,11 @@ export function FindingsPage() {
     )
   const description =
     defaultView && (hiddenMuted > 0 || hiddenResolved > 0)
-      ? `${shownText}; ${hiddenMuted} muted and ${hiddenResolved} resolved hidden.`
+      ? t('findings.page.hiddenStates', {
+          shown: shownText,
+          muted: hiddenMuted,
+          resolved: hiddenResolved,
+        })
       : shownText
 
   // One table per tab (15.3, D26); the tab list sits in the page header line.
@@ -391,16 +409,17 @@ export function FindingsPage() {
       value={view}
     >
       <PageHeader
+        help={<HelpLink anchor="findings" label={t('findings.page.helpLabel')} />}
         icon={Lightbulb}
-        eyebrow="Checkup"
-        title="Advisor findings"
-        subtitle="Automatic health checks on the collected PostgreSQL statistics: missing or unused indexes, bloat, vacuum, configuration and more. Each finding shows its evidence and what to do; recommendations are candidates for review."
+        eyebrow={t('findings.page.eyebrow')}
+        title={t('findings.advisorFindings')}
+        subtitle={t('findings.page.subtitle')}
         freshness={<FreshnessBadge dataUpdatedAt={findingsQuery.dataUpdatedAt} policy="findings" />}
         actions={
-          <TabsList aria-label="Findings views">
+          <TabsList aria-label={t('findings.page.viewsLabel')}>
             {FINDINGS_VIEWS.map((entry) => (
               <TabsTrigger key={entry.id} value={entry.id}>
-                {entry.label}
+                {t(entry.labelKey)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -422,53 +441,55 @@ export function FindingsPage() {
             failure={rulesQuery.error}
             onRetry={() => void rulesQuery.refetch()}
           />
-          <p role="status">
-            Advisor rule explanations are unavailable; findings remain visible without catalogue
-            context.
-          </p>
+          <p role="status">{t('findings.page.rulesUnavailable')}</p>
         </div>
       ) : null}
 
       <TabsContent value="findings">
         <Section
-          title="Findings"
+          title={t('findings.view.findings')}
           captionId="findings.list"
           actions={
             <>
-              <div aria-label="Finding summary" className="flex flex-wrap gap-2" role="group">
+              <div
+                aria-label={t('findings.page.summaryLabel')}
+                className="flex flex-wrap gap-2"
+                role="group"
+              >
                 <SummaryButton
                   active={severity === 'critical'}
                   count={summary.critical}
-                  label="Critical"
+                  label={t('findings.page.severityCritical')}
                   onClick={() => selectSeverity('critical')}
                 />
                 <SummaryButton
                   active={severity === 'warning'}
                   count={summary.warning}
-                  label="Warning"
+                  label={t('findings.page.severityWarning')}
                   onClick={() => selectSeverity('warning')}
                 />
                 <SummaryButton
                   active={severity === 'info'}
                   count={summary.info}
-                  label="Info"
+                  label={t('findings.page.severityInfo')}
                   onClick={() => selectSeverity('info')}
                 />
                 <SummaryButton
                   active={state === 'degraded'}
                   count={summary.degraded}
-                  label="Rules not evaluated"
+                  label={t('findings.page.notEvaluated')}
                   onClick={selectDegraded}
                 />
               </div>
-              <InfoHint id="findings.summary" label="Finding summary" />
+              <InfoHint id="findings.summary" label={t('findings.page.summaryLabel')} />
+              <HelpLink anchor="findings#findings-table" label={t('findings.page.tableHelp')} />
             </>
           }
         >
           <div className="space-y-3">
             {/* The filters are kept in the URL so a findings view can be shared. */}
             <div
-              aria-label="Finding filters"
+              aria-label={t('findings.page.filtersLabel')}
               className="flex flex-wrap items-end gap-3"
               role="group"
             >
@@ -483,12 +504,12 @@ export function FindingsPage() {
                   type="button"
                   variant={state === 'all' ? 'secondary' : 'outline'}
                 >
-                  All states
+                  {t('findings.page.allStates')}
                 </Button>
               ) : null}
-              <FilterControl hint="findings.filter-state" label="State">
+              <FilterControl hint={FILTER_HINT.state} label={t('findings.page.state')}>
                 <NativeSelect
-                  aria-label="State"
+                  aria-label={t('findings.page.state')}
                   className="h-8 px-2 text-sm min-[1600px]:h-7"
                   id="findings-state"
                   onChange={(event) =>
@@ -496,17 +517,17 @@ export function FindingsPage() {
                   }
                   value={state}
                 >
-                  <option value="active">Open and degraded</option>
-                  <option value="all">All states</option>
-                  <option value="open">Open</option>
-                  <option value="degraded">Degraded</option>
-                  <option value="muted">Muted</option>
-                  <option value="resolved">Resolved</option>
+                  <option value="active">{t('findings.page.stateActive')}</option>
+                  <option value="all">{t('findings.page.allStates')}</option>
+                  <option value="open">{t('findings.page.stateOpen')}</option>
+                  <option value="degraded">{t('findings.page.stateDegraded')}</option>
+                  <option value="muted">{t('findings.page.stateMuted')}</option>
+                  <option value="resolved">{t('findings.page.stateResolved')}</option>
                 </NativeSelect>
               </FilterControl>
-              <FilterControl hint="findings.filter-severity" label="Severity">
+              <FilterControl hint={FILTER_HINT.severity} label={t('findings.table.severity')}>
                 <NativeSelect
-                  aria-label="Severity"
+                  aria-label={t('findings.table.severity')}
                   className="h-8 px-2 text-sm min-[1600px]:h-7"
                   id="findings-severity"
                   onChange={(event) =>
@@ -514,15 +535,15 @@ export function FindingsPage() {
                   }
                   value={severity}
                 >
-                  <option value="all">All severities</option>
-                  <option value="critical">Critical</option>
-                  <option value="warning">Warning</option>
-                  <option value="info">Info</option>
+                  <option value="all">{t('findings.ruleCatalogue.allSeverities')}</option>
+                  <option value="critical">{t('findings.page.severityCritical')}</option>
+                  <option value="warning">{t('findings.page.severityWarning')}</option>
+                  <option value="info">{t('findings.page.severityInfo')}</option>
                 </NativeSelect>
               </FilterControl>
-              <FilterControl hint="findings.filter-scope" label="Scope">
+              <FilterControl hint={FILTER_HINT.scope} label={t('findings.page.scope')}>
                 <NativeSelect
-                  aria-label="Scope"
+                  aria-label={t('findings.page.scope')}
                   className="h-8 px-2 text-sm min-[1600px]:h-7"
                   id="findings-scope"
                   onChange={(event) =>
@@ -530,20 +551,20 @@ export function FindingsPage() {
                   }
                   value={scope}
                 >
-                  <option value="all">All scopes</option>
-                  <option value="cluster">Cluster</option>
-                  <option value="instance">Instance</option>
+                  <option value="all">{t('findings.ruleCatalogue.allScopes')}</option>
+                  <option value="cluster">{t('findings.page.cluster')}</option>
+                  <option value="instance">{t('findings.page.instance')}</option>
                 </NativeSelect>
               </FilterControl>
-              <FilterControl label="Cluster">
+              <FilterControl label={t('findings.page.cluster')}>
                 <NativeSelect
-                  aria-label="Cluster"
+                  aria-label={t('findings.page.cluster')}
                   className="h-8 w-44 px-2 text-sm min-[1600px]:h-7"
                   id="findings-cluster"
                   onChange={(event) => updateFilter('cluster_id', event.target.value)}
                   value={clusterId}
                 >
-                  <option value="">All clusters</option>
+                  <option value="">{t('findings.page.allClusters')}</option>
                   {clusterFilterOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -551,15 +572,15 @@ export function FindingsPage() {
                   ))}
                 </NativeSelect>
               </FilterControl>
-              <FilterControl label="Instance">
+              <FilterControl label={t('findings.page.instance')}>
                 <NativeSelect
-                  aria-label="Instance"
+                  aria-label={t('findings.page.instance')}
                   className="h-8 w-56 px-2 text-sm min-[1600px]:h-7"
                   id="findings-instance"
                   onChange={(event) => updateFilter('instance_id', event.target.value)}
                   value={instanceId}
                 >
-                  <option value="">All instances</option>
+                  <option value="">{t('findings.page.allInstances')}</option>
                   {instanceFilterOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -577,13 +598,11 @@ export function FindingsPage() {
               </p>
               {findings.length >= FINDINGS_LIMIT ? (
                 <FilterLineNote>
-                  {`Only the first ${FINDINGS_LIMIT} findings were returned. Open and degraded findings come first, so muted and resolved findings may be missing from the counts and the list.`}
+                  {t('findings.page.limitReached', { limit: FINDINGS_LIMIT })}
                 </FilterLineNote>
               ) : null}
               {allFindingsDegraded ? (
-                <FilterLineNote>
-                  Rules could not be evaluated; this is not a healthy “no findings” result.
-                </FilterLineNote>
+                <FilterLineNote>{t('findings.page.allDegraded')}</FilterLineNote>
               ) : null}
             </div>
 
@@ -599,7 +618,7 @@ export function FindingsPage() {
                       type="button"
                       variant="outline"
                     >
-                      Show all findings
+                      {t('findings.page.showAll')}
                     </Button>
                   ) : matchesInOtherStates ? (
                     <Button
@@ -608,7 +627,7 @@ export function FindingsPage() {
                       type="button"
                       variant="outline"
                     >
-                      Search all states
+                      {t('findings.page.searchAllStates')}
                     </Button>
                   ) : (
                     <Button
@@ -627,28 +646,30 @@ export function FindingsPage() {
                       type="button"
                       variant="outline"
                     >
-                      Clear filters
+                      {t('findings.page.clearFilters')}
                     </Button>
                   )
                 }
                 description={
                   findings.length === 0
-                    ? 'No finding of any state matches the search: rule, title, detail, remediation, object, database, mute reason and evidence were searched.'
+                    ? t('findings.page.noMatchAny')
                     : matchesInOtherStates
-                      ? `${findings.length} ${findings.length === 1 ? 'finding matches' : 'findings match'} in other states.`
-                      : `${findings.length} ${findings.length === 1 ? 'finding matches' : 'findings match'}, hidden by the severity, scope, cluster or instance filter.`
+                      ? t('findings.page.matchesOtherStates', { count: findings.length })
+                      : t('findings.page.matchesHidden', { count: findings.length })
                 }
-                title={`No finding matches “${shownTerm}”`}
+                title={t('findings.page.noMatchTitle', { term: shownTerm })}
               />
             ) : (
               <EmptyState
                 description={
                   findings.length === 0
-                    ? `No findings are currently firing. ${rules.length} advisor rule${rules.length === 1 ? '' : 's'} evaluated successfully.`
-                    : 'Try clearing one or more filters or choose a different state.'
+                    ? t('findings.page.noFindingsFiring', { count: rules.length })
+                    : t('findings.page.tryFilters')
                 }
                 title={
-                  findings.length === 0 ? 'No active findings' : 'No findings match these filters'
+                  findings.length === 0
+                    ? t('findings.page.noActive')
+                    : t('findings.page.noMatchFilters')
                 }
               />
             )}

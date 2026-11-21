@@ -14,6 +14,18 @@ describe('FreshnessBadge', () => {
     expect(container).toHaveTextContent('Updated 0s ago')
   })
 
+  it('keeps the ticking age in a fixed-width slot so the badge does not resize', async () => {
+    render(<FreshnessBadge dataUpdatedAt={NOW.getTime()} policy="fleet" />)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000)
+    })
+
+    const slot = screen.getByText('12s')
+    expect(slot).toHaveClass('inline-block', 'min-w-[3ch]', 'tabular-nums')
+    expect(screen.getByRole('status')).toHaveTextContent('Updated 12s ago')
+  })
+
   it('switches to the Stale primitive after the policy threshold', async () => {
     render(<FreshnessBadge dataUpdatedAt={NOW.getTime()} policy="fleet" />)
 

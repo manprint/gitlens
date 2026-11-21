@@ -203,7 +203,7 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
       within(tabs)
         .getAllByRole('tab')
         .map((tab) => tab.textContent),
-    ).toEqual(['Indexes', 'Cleanup', 'Dead rows', 'Suggestions', 'Index tax'])
+    ).toEqual(['Indexes', 'Missing indexes', 'Cleanup', 'Dead rows', 'Index tax'])
     const controls = screen.getByTestId('index-page-controls')
     expect(controls).toHaveClass('min-[1600px]:flex-nowrap')
     expect(controls).toContainElement(tabs)
@@ -223,7 +223,7 @@ describe('IndexAnalysisPage on a Full HD screen (15.3)', () => {
     expect(within(table).getByTitle('customer_id, created_at')).toHaveClass('min-[1600px]:truncate')
     const partial = within(table).getByText('partial')
     expect(partial).toHaveClass('min-[1600px]:py-0')
-    const flags = within(table).getByTitle('partial, unused')
+    const flags = within(table).getByTitle(/^Flags: unused, partial\. /)
     // Whole badges only: the row stays one badge line and hides the overflow.
     expect(flags).toHaveClass('min-[1600px]:max-h-5', 'min-[1600px]:overflow-hidden')
     expect(flags).toContainElement(partial)

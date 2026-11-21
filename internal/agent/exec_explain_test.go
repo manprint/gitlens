@@ -40,6 +40,13 @@ type explainConn struct {
 	verboseErr  error
 	guardSQL    []string
 	released    bool
+
+	// recent are the texts pg_stat_activity shows for the queryid; bound
+	// records the values an EXPLAIN was bound with.
+	recent    []string
+	recentSQL []string
+	bound     [][]byte
+	boundSQL  string
 }
 
 func (c *explainConn) guardAnswer(sql string) string {
@@ -73,7 +80,30 @@ func (c *explainConn) SimpleQuery(_ context.Context, sql string) ([]*pgconn.Resu
 	return []*pgconn.Result{{Rows: [][][]byte{{c.plan}}}}, nil
 }
 
-func (c *explainConn) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
+func (c *explainConn) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "pg_stat_activity") {
+		c.recentSQL = append(c.recentSQL, sql)
+		return &textRows{values: c.recent}, nil
+	}
+	return &textRows{}, nil
+}
+
+// textRows is a one-column text result; the methods it leaves to the
+// embedded nil pgx.Rows are not called.
+type textRows struct {
+	pgx.Rows
+	values []string
+	next   int
+}
+
+func (r *textRows) Close()     {}
+func (r *textRows) Err() error { return nil }
+func (r *textRows) Next() bool { r.next++; return r.next <= len(r.values) }
+func (r *textRows) Scan(dest ...any) error {
+	*(dest[0].(*string)) = r.values[r.next-1]
+	return nil
+}
+
 func (c *explainConn) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	if strings.HasPrefix(sql, "SELECT n.nspname") { // check.ExtensionSchema
 		return explainRow{value: "public"}
@@ -107,6 +137,17 @@ func (c *explainConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.Comm
 	return pgconn.CommandTag{}, nil
 }
 func (c *explainConn) Release() { c.released = true }
+
+// QueryBound stands in for the extended-protocol path parameter values take.
+func (c *explainConn) QueryBound(_ context.Context, sql string, values [][]byte) (json.RawMessage, error) {
+	c.execSQL = append(c.execSQL, sql)
+	c.bound = values
+	if strings.HasPrefix(sql, "EXPLAIN (VERBOSE, FORMAT JSON, COSTS OFF)") && c.verbosePlan != nil {
+		return c.verbosePlan, c.verboseErr
+	}
+	c.boundSQL = sql
+	return c.plan, c.explainErr
+}
 
 // explainDatname is the database the fake connection reports as current.
 const explainDatname = "appdb"
@@ -339,7 +380,8 @@ func TestExplain_PlaceholdersBeforePG16AreRejected(t *testing.T) {
 	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1)})
 	var rejected *RejectedError
 	require.True(t, errors.As(err, &rejected))
-	require.Contains(t, rejected.Error(), "PostgreSQL 16")
+	require.Contains(t, rejected.Error(), "PostgreSQL before 16")
+	require.Contains(t, rejected.Error(), "a value for its parameter $1")
 	require.Empty(t, conn.execSQL)
 }
 
@@ -451,3 +493,112 @@ type versionedTarget struct {
 }
 
 func (t *versionedTarget) PGVersion() pgtype.PGVersion { return t.version }
+
+func explainValuesFrom(t *testing.T, result json.RawMessage) string {
+	t.Helper()
+	var payload struct {
+		ValuesFrom string `json:"values_from"`
+	}
+	require.NoError(t, json.Unmarshal(result, &payload))
+	return payload.ValuesFrom
+}
+
+// Values the user enters are bound over the extended protocol, never spliced
+// into the statement, for the plan and for the guard's VERBOSE plan alike.
+func TestExplain_AnalyzeBindsGivenValues(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1 AND name = $2", plan: []byte(`[{"Plan":{}}]`)}
+	name := "o'brien"
+	result, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn},
+		command.Args{QueryID: int64Ptr(1), Analyze: true, Params: []*string{strPtr("42"), &name}})
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{[]byte("42"), []byte("o'brien")}, conn.bound)
+	require.Contains(t, conn.boundSQL, "EXPLAIN (ANALYZE")
+	require.Contains(t, conn.boundSQL, "id = $1 AND name = $2")
+	require.NotContains(t, conn.boundSQL, "o'brien")
+	require.Empty(t, conn.simpleSQL)
+	require.Equal(t, "values", explainValuesFrom(t, result))
+}
+
+func TestExplain_NullParamIsBoundAsNull(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`)}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn},
+		command.Args{QueryID: int64Ptr(1), Params: []*string{nil}})
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{nil}, conn.bound)
+}
+
+func TestExplain_ParamCountMustMatchPlaceholders(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1 AND v > $2", plan: []byte(`[{"Plan":{}}]`)}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn},
+		command.Args{QueryID: int64Ptr(1), Analyze: true, Params: []*string{strPtr("1")}})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected))
+	require.Contains(t, rejected.Error(), "2 parameter(s)")
+	require.Empty(t, conn.execSQL)
+}
+
+func TestExplain_BoundValuesErrorIsRejected(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`),
+		explainErr: &pgconn.PgError{Severity: "ERROR", Code: "22P02", Message: `invalid input syntax for type integer: "abc"`}}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn},
+		command.Args{QueryID: int64Ptr(1), Params: []*string{strPtr("abc")}})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected))
+	require.Contains(t, rejected.Error(), "values given")
+	require.Contains(t, rejected.Error(), "invalid input syntax")
+}
+
+// Without values, ANALYZE takes the constants of an execution
+// pg_stat_activity shows for the same queryid.
+func TestExplain_AnalyzeUsesRecentExecution(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`),
+		recent: []string{"SELECT * FROM t WHERE id = 7;"}}
+	result, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn},
+		command.Args{QueryID: int64Ptr(1), Analyze: true})
+	require.NoError(t, err)
+	require.Len(t, conn.recentSQL, 1)
+	require.Contains(t, conn.recentSQL[0], "query_id = $1")
+	require.Contains(t, strings.Join(conn.execSQL, "\n"), "EXPLAIN (ANALYZE, FORMAT JSON, VERBOSE, COSTS, BUFFERS) SELECT * FROM t WHERE id = 7")
+	require.Empty(t, conn.simpleSQL)
+	require.Equal(t, "recent_execution", explainValuesFrom(t, result))
+}
+
+// A recent execution is used only when it is one statement of the same kind,
+// with constants, and no sign of a credential.
+func TestExplain_RecentExecutionSkipsUnusableTexts(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`),
+		recent: []string{
+			"SELECT * FROM t WHERE id = $1",
+			"SELECT * FROM t WHERE id = 1; DELETE FROM t",
+			"DELETE FROM t WHERE id = 1",
+			"SELECT * FROM t WHERE id = 2 AND password = 'hunter2'",
+			"SELECT * FROM t WHERE id = 3",
+		}}
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn},
+		command.Args{QueryID: int64Ptr(1), Analyze: true})
+	require.NoError(t, err)
+	joined := strings.Join(conn.execSQL, "\n")
+	require.Contains(t, joined, "WHERE id = 3")
+	require.NotContains(t, joined, "hunter2")
+	require.NotContains(t, joined, "DELETE")
+}
+
+func TestExplain_BeforePG16UsesRecentExecution(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`),
+		recent: []string{"SELECT * FROM t WHERE id = 9"}}
+	target := &versionedTarget{dispatcherTarget: dispatcherTarget{conn: conn}, version: 150004}
+	result, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1)})
+	require.NoError(t, err)
+	require.NotContains(t, strings.Join(conn.execSQL, "\n"), "GENERIC_PLAN")
+	require.Equal(t, "recent_execution", explainValuesFrom(t, result))
+}
+
+func TestExplain_GenericPlanReportsValuesFrom(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`)}
+	result, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	require.NoError(t, err)
+	require.Equal(t, "generic", explainValuesFrom(t, result))
+	require.Empty(t, conn.recentSQL, "a generic plan needs no execution")
+}
+
+func strPtr(s string) *string { return &s }

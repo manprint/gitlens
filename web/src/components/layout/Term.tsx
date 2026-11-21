@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react'
 
-import { glossary, type Term as GlossaryTerm } from '@/lib/glossary'
+import { glossaryOf, type Term as GlossaryTerm } from '@/lib/glossary'
 
 /**
  * A glossary term with a dotted underline; its definition is the element's description (D30).
@@ -17,7 +17,7 @@ export function Term({
   bare?: boolean
 }) {
   const definitionId = `${useId().replaceAll(':', '')}-term`
-  const { short } = glossary[term]
+  const { short } = glossaryOf(term)
   const look = 'cursor-help rounded-sm underline decoration-dotted underline-offset-2 outline-none'
   if (bare) {
     return (

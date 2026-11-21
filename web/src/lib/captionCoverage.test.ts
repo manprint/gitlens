@@ -136,6 +136,8 @@ const CAPTION_ALLOWLIST: Record<string, Partial<Record<Tag, number>>> = {}
 
 /** Computed caption ids; each needs a run-time test that its specs all have one. */
 const DYNAMIC_ALLOWLIST: Record<string, Partial<Record<Tag, number>>> = {
+  // A wrapper with a required captionId (OVC-003 and CGRP-001 check its callers).
+  'components/charts/ChartGroup.tsx': { Section: 1 },
   'features/ash/AshBreakdown.tsx': { ChartCard: 1 },
   'features/ash/AshChartGrid.tsx': { ChartCard: 1 },
   'features/instance/CatalogSection.tsx': { DataTable: 2 },

@@ -161,6 +161,27 @@ func sortByRank(cs []Candidate) {
 	})
 }
 
+// Retained lists the keys Select(cycle, ...) could keep without their being
+// fresh: those last fresh within the hysteresis window. A caller that narrows
+// its candidates before Select (an SQL-side top-N) passes these along, so the
+// narrowing never drops a key the selector would have retained.
+func (s *Selector) Retained(cycle uint64) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var threshold uint64
+	if cycle > uint64(s.opts.Hysteresis) {
+		threshold = cycle - uint64(s.opts.Hysteresis)
+	}
+	keys := make([]string, 0, len(s.lastSeen))
+	for k, last := range s.lastSeen {
+		if last >= threshold {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // Forget drops retention state for keys not seen within the window, bounding
 // memory when a workload changes shape.
 func (s *Selector) Forget(cycle uint64) int {

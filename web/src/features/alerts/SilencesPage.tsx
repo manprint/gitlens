@@ -5,13 +5,15 @@ import { Link } from 'react-router-dom'
 import { useDeleteSilence } from '@/api/silences'
 import { useAlerts, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { Button } from '@/components/ui/button'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
-import { formatDuration, formatTimestamp } from '@/lib/format'
+import { TIMESTAMP_COLUMN_WIDTH, formatDuration, formatTimestamp } from '@/lib/format'
+import { useT, type Translate } from '@/i18n/react'
 import { silenceWindow, type Silence } from '@/lib/alerts'
 
 import { SilenceEditor } from './SilenceEditor'
@@ -37,103 +39,106 @@ function readMatchers(silence: Silence): SilenceMatcher[] {
   )
 }
 
-function matcherLabel(silence: Silence): string {
+function matcherLabel(silence: Silence, t: Translate): string {
   const matchers = readMatchers(silence)
-  if (matchers.length === 0) return 'No matchers'
+  if (matchers.length === 0) return t('alerts.silences.noMatchers')
   return matchers
     .map(
       (matcher) =>
-        `${matcher.negate ? 'not ' : ''}${matcher.name}${matcher.is_regex ? '~' : '='}${matcher.value}`,
+        `${matcher.negate ? `${t('alerts.silences.not')} ` : ''}${matcher.name}${matcher.is_regex ? '~' : '='}${matcher.value}`,
     )
     .join(', ')
 }
 
-function windowLabel(silence: Silence): string {
+function windowLabel(silence: Silence, t: Translate): string {
   const window = silenceWindow(silence, new Date())
   if (window.state === 'pending')
-    return `Pending · starts in ${formatDuration(Math.ceil(window.remainingSeconds))}`
+    return t('alerts.silences.pendingIn', {
+      duration: formatDuration(Math.ceil(window.remainingSeconds)),
+    })
   if (window.state === 'active')
-    return `Active · ends in ${formatDuration(Math.ceil(window.remainingSeconds))}`
-  return 'Expired'
+    return t('alerts.silences.activeEndsIn', {
+      duration: formatDuration(Math.ceil(window.remainingSeconds)),
+    })
+  return t('alerts.silences.expired')
 }
 
-const SILENCE_STATES = [
-  { value: 'pending', label: 'Pending' },
-  { value: 'active', label: 'Active' },
-  { value: 'expired', label: 'Expired' },
-]
-
-const SILENCE_TOOLBAR: TableToolbarSpec<Silence> = {
-  searchFields: [matcherLabel, (silence) => silence.reason],
-  filters: [
-    {
-      id: 'state',
-      label: 'State',
-      kind: 'select',
-      options: SILENCE_STATES,
-      accessor: (silence) => silenceWindow(silence, new Date()).state,
-    },
-  ],
+function silenceToolbar(t: Translate): TableToolbarSpec<Silence> {
+  return {
+    searchFields: [(silence) => matcherLabel(silence, t), (silence) => silence.reason],
+    filters: [
+      {
+        id: 'state',
+        label: t('alerts.column.state'),
+        kind: 'select',
+        options: [
+          { value: 'pending', label: t('alerts.filter.pending') },
+          { value: 'active', label: t('alerts.silences.active') },
+          { value: 'expired', label: t('alerts.silences.expired') },
+        ],
+        accessor: (silence) => silenceWindow(silence, new Date()).state,
+      },
+    ],
+  }
 }
 
 function silenceColumns(
+  t: Translate,
   onEnd: (silence: Silence) => void,
   ending: boolean,
 ): SimpleColumn<Silence>[] {
   return [
     {
       id: 'matchers',
-      header: 'Matchers',
+      header: t('alerts.silences.matchers'),
       help: 'silences.matchers',
-      sortValue: matcherLabel,
+      sortValue: (silence) => matcherLabel(silence, t),
       className: 'font-mono text-xs',
       width: '30%',
-      truncate: matcherLabel,
-      cell: matcherLabel,
+      truncate: (silence) => matcherLabel(silence, t),
+      cell: (silence) => matcherLabel(silence, t),
     },
     {
       id: 'reason',
-      header: 'Reason',
+      header: t('alerts.silences.reason'),
       truncate: (silence) => silence.reason,
       cell: (silence) => silence.reason,
     },
     {
       id: 'start',
-      header: 'Start',
-      width: '12.5rem',
+      header: t('alerts.silences.start'),
+      width: TIMESTAMP_COLUMN_WIDTH,
       sortValue: (silence) => Date.parse(silence.starts_at),
       className: 'whitespace-nowrap',
       cell: (silence) => (
-        <time dateTime={silence.starts_at}>{formatTimestamp(silence.starts_at, 'UTC')}</time>
+        <time dateTime={silence.starts_at}>{formatTimestamp(silence.starts_at)}</time>
       ),
     },
     {
       id: 'end',
-      header: 'End',
-      width: '12.5rem',
+      header: t('alerts.silences.end'),
+      width: TIMESTAMP_COLUMN_WIDTH,
       sortValue: (silence) => Date.parse(silence.ends_at),
       className: 'whitespace-nowrap',
-      cell: (silence) => (
-        <time dateTime={silence.ends_at}>{formatTimestamp(silence.ends_at, 'UTC')}</time>
-      ),
+      cell: (silence) => <time dateTime={silence.ends_at}>{formatTimestamp(silence.ends_at)}</time>,
     },
     {
       id: 'state',
-      header: 'State',
+      header: t('alerts.column.state'),
       width: '13rem',
       className: 'whitespace-nowrap',
-      truncate: windowLabel,
-      cell: windowLabel,
+      truncate: (silence) => windowLabel(silence, t),
+      cell: (silence) => windowLabel(silence, t),
     },
     {
       id: 'actions',
-      header: 'Actions',
+      header: t('alerts.silences.actions'),
       srOnlyHeader: true,
       width: '8rem',
       className: 'text-right',
       cell: (silence) => (
         <Button
-          aria-label={`End silence ${silence.silence_id}`}
+          aria-label={t('alerts.silences.endAria', { id: silence.silence_id })}
           // From 1600 px the button fits the one-line row (D26).
           className="min-[1600px]:h-6 min-[1600px]:text-xs"
           disabled={ending}
@@ -142,7 +147,7 @@ function silenceColumns(
           type="button"
           variant="outline"
         >
-          End silence
+          {t('alerts.silences.endButton')}
         </Button>
       ),
     },
@@ -150,6 +155,7 @@ function silenceColumns(
 }
 
 export function SilencesPage() {
+  const t = useT()
   const silencesQuery = useSilences({ all: true })
   const alertsQuery = useAlerts({ state: 'firing' })
   const deleteSilence = useDeleteSilence()
@@ -165,36 +171,32 @@ export function SilencesPage() {
   const { mutate: deleteMutate, isPending: deletePending } = deleteSilence
   const endSilence = useCallback(
     (silence: Silence) => {
-      if (
-        !window.confirm(
-          `End silence ${silence.silence_id}? Notifications will no longer be suppressed.`,
-        )
-      )
-        return
+      if (!window.confirm(t('alerts.silences.confirmEnd', { id: silence.silence_id }))) return
       setStatus(null)
       deleteMutate(
         { silenceId: silence.silence_id },
-        { onSuccess: () => setStatus(`Ended silence ${silence.silence_id}.`) },
+        { onSuccess: () => setStatus(t('alerts.silences.ended', { id: silence.silence_id })) },
       )
     },
-    [deleteMutate],
+    [deleteMutate, t],
   )
   const columns = useMemo(
-    () => silenceColumns(endSilence, deletePending),
-    [endSilence, deletePending],
+    () => silenceColumns(t, endSilence, deletePending),
+    [t, endSilence, deletePending],
   )
+  const toolbar = useMemo(() => silenceToolbar(t), [t])
 
   if (silencesQuery.isPending || alertsQuery.isPending) {
     return (
-      <section aria-busy="true" aria-label="Loading silences" role="status">
-        Loading silences…
+      <section aria-busy="true" aria-label={t('alerts.silences.loadingLabel')} role="status">
+        {t('alerts.silences.loading')}
       </section>
     )
   }
   if (silencesQuery.error) {
     return (
       <ErrorState
-        endpoint="silences"
+        endpoint={t('alerts.endpoint.silences')}
         failure={silencesQuery.error}
         onRetry={() => void silencesQuery.refetch()}
       />
@@ -204,43 +206,43 @@ export function SilencesPage() {
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="silences" label={t('alerts.silences.helpLabel')} />}
         icon={BellOff}
-        eyebrow="Alerting"
+        eyebrow={t('alerts.page.eyebrow')}
         actions={
           <>
             <Link
               className="hover:bg-muted inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors"
               to="/alerts"
             >
-              Alerts
+              {t('alerts.section.alerts')}
             </Link>
             <Link
               className="hover:bg-muted inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors"
               to="/alerts/rules"
             >
-              Rules
+              {t('alerts.silences.rules')}
             </Link>
             <Button onClick={() => setEditorOpen((open) => !open)} type="button">
-              {editorOpen ? 'Close editor' : 'Create silence'}
+              {editorOpen ? t('alerts.silences.closeEditor') : t('alerts.silences.create')}
             </Button>
           </>
         }
         freshness={<FreshnessBadge dataUpdatedAt={silencesQuery.dataUpdatedAt} policy="findings" />}
-        subtitle="Suppress notifications during planned work while keeping alert evaluation and visibility intact."
-        title="Alert silences"
+        subtitle={t('alerts.silences.subtitle')}
+        title={t('alerts.silences.title')}
       />
 
       <AlertListTruncated truncated={alertsQuery.truncated} />
       {alertsQuery.error ? (
         <div className="border-warning/40 bg-warning/10 rounded-lg border p-3 text-sm" role="alert">
-          Current firing alerts are unavailable; the silence list remains available but creation
-          preview is disabled.
+          {t('alerts.silences.firingUnavailable')}
           <button
             className="ml-2 underline"
             onClick={() => void alertsQuery.refetch()}
             type="button"
           >
-            Retry firing alerts
+            {t('alerts.silences.retryFiring')}
           </button>
         </div>
       ) : null}
@@ -259,18 +261,25 @@ export function SilencesPage() {
           onCancel={() => setEditorOpen(false)}
           onCreated={() => {
             setEditorOpen(false)
-            setStatus('Silence created.')
+            setStatus(t('alerts.silences.created'))
           }}
           previewUnavailable={Boolean(alertsQuery.error)}
         />
       ) : null}
 
-      <Section captionId="silences.list" title="Stored silences">
+      <Section
+        actions={<HelpLink anchor="silences#list" label={t('alerts.silences.stored')} />}
+        captionId="silences.list"
+        title={t('alerts.silences.stored')}
+      >
         {sortedSilences.length === 0 ? (
-          <EmptyState description="No silences have been created." title="No stored silences" />
+          <EmptyState
+            description={t('alerts.silences.emptyDescription')}
+            title={t('alerts.silences.emptyTitle')}
+          />
         ) : (
           <SimpleTable
-            ariaLabel="Alert silences"
+            ariaLabel={t('alerts.silences.tableLabel')}
             captionId="silences.table"
             columns={columns}
             emptyState={null}
@@ -278,7 +287,7 @@ export function SilencesPage() {
             rows={sortedSilences}
             scope="silences"
             tableId="silences"
-            toolbar={SILENCE_TOOLBAR}
+            toolbar={toolbar}
           />
         )}
       </Section>

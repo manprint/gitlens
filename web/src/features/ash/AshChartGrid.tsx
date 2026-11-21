@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { ChartCard } from '@/components/charts/ChartCard'
+import { useT } from '@/i18n/react'
 import { TimeSeriesChart } from '@/components/charts/TimeSeriesChart'
 import {
   ASH_EVENT_COLORS,
@@ -30,16 +31,12 @@ const GROUP_CAPTIONS: Record<AshWaitGroupId, CaptionId> = {
   other: 'ash.chart-other',
 }
 
-/** Charts of the grid share one tooltip pointer and zoom through this group. */
-export const ASH_CHART_GROUP = 'ash-wait-groups'
-
 export interface AshChartGridProps {
   groups: readonly AshGroupedSeries<AshChartSeries>[]
   /** `wait_event` series are events: colours by position, descriptions by their type. */
   groupBy: 'wait_event_type' | 'wait_event'
   /** Type of each wait event, when the series are events. */
   eventTypes?: ReadonlyMap<string, string>
-  cpuCount?: number | null
   foldedCount: number
   range: { from: Date; to: Date }
   stepSeconds: number
@@ -62,11 +59,10 @@ const percent = (share: number) =>
 
 /**
  * One chart per wait group, each on its own y axis so a small group is not
- * squashed by a large one. The charts share the page's time axis and, through
- * `echarts.connect`, their tooltip pointer and zoom.
+ * squashed by a large one. The charts share the page's time axis; each keeps its
+ * own tooltip and zoom.
  */
 export function AshChartGrid({
-  cpuCount,
   eventTypes = new Map(),
   foldedCount,
   groupBy,
@@ -76,6 +72,7 @@ export function AshChartGrid({
   stepSeconds,
 }: AshChartGridProps) {
   const [isolated, setIsolated] = useState<ReadonlyMap<AshWaitGroupId, string>>(new Map())
+  const t = useT()
   // Every card spans the selected range, so the shared zoom lines them up.
   const spanMs = range.to.getTime() - range.from.getTime()
   const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
@@ -97,9 +94,7 @@ export function AshChartGrid({
         const visible = alone === null ? ordered : ordered.filter(({ name }) => name === alone)
         const option = buildAshGroupOption(visible, {
           colorOf,
-          cpuCount: cpuCount ?? null,
           foldedCount: ordered.some(({ name }) => name === 'other') ? foldedCount : 0,
-          showCpuCount: group.id === 'cpu',
           spanMs,
           stack: group.id,
           window: range,
@@ -112,17 +107,19 @@ export function AshChartGrid({
             range={range}
             state="ready"
             stepSeconds={stepSeconds}
-            subtitle={`avg ${formatAverage(total)} active backends · ${percent(share)} of all waits`}
-            title={group.label}
+            subtitle={t('ash.chartGrid.subtitle', {
+              average: formatAverage(total),
+              share: percent(share),
+            })}
+            title={t(group.labelKey)}
           >
             <TimeSeriesChart
-              ariaLabel={`${group.label} average active backends`}
-              dataTableLabel={`${group.label} average active backends data`}
-              group={ASH_CHART_GROUP}
+              ariaLabel={t('ash.breakdown.averageTitle', { title: t(group.labelKey) })}
+              dataTableLabel={t('ash.breakdown.averageTable', { title: t(group.labelKey) })}
               {...interactionProps}
               option={option}
               series={visible}
-              valueLabel="Average active backends"
+              valueLabel={t('ash.chartGrid.valueLabel')}
             />
             <AshLegend
               entries={ordered.map((entry) => ({
@@ -132,7 +129,7 @@ export function AshChartGrid({
                 name: displayName(entry.name),
               }))}
               isolated={alone === null ? null : displayName(alone)}
-              label={`${group.label} legend`}
+              label={t('ash.legend.label', { title: t(group.labelKey) })}
               onToggle={(name) => {
                 const raw = ordered.find((entry) => displayName(entry.name) === name)?.name
                 if (raw === undefined) return

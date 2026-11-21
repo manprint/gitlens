@@ -789,7 +789,7 @@ export function useEvents(params: WindowlessParameters<'/api/v1/events'>, window
           signal,
         }),
       ),
-    queryKey: qk.events(params.cluster_id, params.type, window, params.limit),
+    queryKey: qk.events(params.cluster_id, params.type, window, params.limit, params.instance_id),
   })
 }
 
@@ -1291,6 +1291,38 @@ export function useSetNotificationChannel(): UseMutationResult<
       ),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: qk.notificationChannels() }),
     gcTime: 0,
+    retry: false,
+  })
+}
+
+/**
+ * `PUT /api/v1/notification-channels/{kind}/language` (setNotificationLanguage):
+ * sets the language of a channel's messages; null goes back to the server
+ * default (plan 006 F7). The answer is the channel's status row.
+ */
+export function useSetNotificationLanguage(): UseMutationResult<
+  NotificationChannelRow,
+  ApiFailure,
+  { kind: NotificationChannelKind; language: string | null }
+> {
+  const queryClient = useQueryClient()
+  return useMutation<
+    NotificationChannelRow,
+    ApiFailure,
+    { kind: NotificationChannelKind; language: string | null }
+  >({
+    mutationFn: ({ kind, language }) =>
+      getApi(() =>
+        client.PUT('/api/v1/notification-channels/{kind}/language', {
+          params: { path: { kind } },
+          body: { language },
+        }),
+      ),
+    onSuccess: (row) =>
+      queryClient.setQueryData<NotificationChannelRow[]>(qk.notificationChannels(), (rows) =>
+        replaceNotificationChannel(rows, row),
+      ),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: qk.notificationChannels() }),
     retry: false,
   })
 }

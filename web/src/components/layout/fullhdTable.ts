@@ -14,9 +14,13 @@ export const FULLHD_FIXED = 'min-[1600px]:table-fixed'
 /** One compact line per row: the `--table-row-h` token (28 px). */
 export const FULLHD_ROW = 'min-[1600px]:h-(--table-row-h)'
 // Inline badges, buttons and chips align to the top of the 20 px line, so their
-// baseline does not stretch the line box and the row stays 28 px.
+// baseline does not stretch the line box and the row stays 28 px. A small
+// qualifier (`text-xs`) takes the 20 px line height, so it sits on the same line
+// as the figure instead of above it. Content never spills into the next column of
+// the fixed layout: it is clipped with an ellipsis (a free-text column also sets
+// `truncate`, so its full text is in the title).
 export const FULLHD_CELL =
-  'min-[1600px]:px-2 min-[1600px]:py-1 min-[1600px]:align-middle min-[1600px]:[&_*]:align-top'
+  'min-[1600px]:px-2 min-[1600px]:py-1 min-[1600px]:align-middle min-[1600px]:[&_*]:align-top min-[1600px]:[&_.text-xs]:leading-5 min-[1600px]:overflow-hidden min-[1600px]:text-ellipsis'
 export const FULLHD_HEADER_CELL = 'min-[1600px]:px-2 min-[1600px]:py-1'
 /** A free-text cell: one line with an ellipsis; the full text is in its `title`. */
 export const FULLHD_TRUNCATE = 'min-[1600px]:block min-[1600px]:truncate'

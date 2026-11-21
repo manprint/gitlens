@@ -2,6 +2,7 @@ import { Component, type ReactNode } from 'react'
 
 import type { ApiFailure } from '@/api/client'
 import { ErrorState } from '@/components/state/ErrorState'
+import { translate } from '@/i18n/store'
 
 interface ErrorBoundaryProps {
   children: ReactNode
@@ -29,10 +30,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return (
       <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 p-6">
         <h1 className="text-foreground text-2xl font-semibold tracking-tight">
-          The application could not render.
+          {translate('shell.app.renderFailed')}
         </h1>
         <ErrorState endpoint="pglens" failure={failure} onRetry={() => window.location.reload()} />
-        <p className="text-muted-foreground text-sm">Build {__PGLENS_BUILD__}</p>
+        <p className="text-muted-foreground text-sm">
+          {translate('shell.app.build', { build: __PGLENS_BUILD__ })}
+        </p>
       </main>
     )
   }

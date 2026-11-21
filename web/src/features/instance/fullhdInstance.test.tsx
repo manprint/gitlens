@@ -72,7 +72,7 @@ function renderRelations(search = '') {
 }
 
 describe('Instance tabs at Full HD', () => {
-  it('FHD-APPLY-040 the header holds the title and views, then the section tabs beside the metrics', () => {
+  it('FHD-APPLY-040 the header holds the title, then the section tabs beside the metrics', () => {
     const instance = makeGetInstance() as unknown as Schemas['Instance']
     renderWithProviders(
       <Tabs value="overview">
@@ -93,14 +93,12 @@ describe('Instance tabs at Full HD', () => {
     const header = screen.getByTestId('instance-header')
     expect(header).toHaveClass('space-y-5', 'min-[1600px]:grid', 'min-[1600px]:space-y-0')
     const sectionTabs = screen.getByTestId('instance-section-tabs')
-    expect(sectionTabs).toHaveClass('mt-8', 'min-[1600px]:mt-0', 'min-[1600px]:row-start-2')
+    expect(sectionTabs).toHaveClass('min-[1600px]:col-start-1', 'min-[1600px]:row-start-2')
     expect(
       within(sectionTabs).getByRole('tablist', { name: 'Instance sections' }),
     ).toBeInTheDocument()
-    expect(within(header).getByRole('navigation', { name: 'Instance views' })).toHaveClass(
-      'min-[1600px]:col-start-3',
-      'min-[1600px]:row-start-1',
-    )
+    // The views of the instance live in the sidebar, not in the header.
+    expect(within(header).queryByRole('navigation')).not.toBeInTheDocument()
     // The metrics are one line: each label beside its value, the dt and dd kept.
     expect(within(header).getAllByRole('term')).toHaveLength(5)
     expect(within(header).getAllByRole('definition')).toHaveLength(5)

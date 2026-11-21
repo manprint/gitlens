@@ -1,3 +1,4 @@
+import { useT, type Translate } from '@/i18n/react'
 import { useCoverage } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { InfoHint } from '@/components/layout/InfoHint'
@@ -28,20 +29,26 @@ function minutesUntilExpected(coverage: Coverage): number | null {
  * is not due, so with one failing the due time speaks of the pending checks
  * only.
  */
-function coverageParts(coverage: Coverage): { lead: string; count: string; due: string } {
+function coverageParts(
+  coverage: Coverage,
+  t: Translate,
+): { lead: string; count: string; due: string } {
   const pending = coverage.checks.filter((check) => check.state === 'pending').length
   const failed = coverage.checks.some((check) => check.state === 'failed')
-  const count = `${coverage.reported} of ${coverage.total} checks have a current result`
-  if (pending === 0) return { lead: 'Incomplete data', count, due: '' }
+  const count = t('instance.coverage.count', {
+    reported: coverage.reported,
+    total: coverage.total,
+  })
+  if (pending === 0) return { lead: t('instance.coverage.incomplete'), count, due: '' }
   const minutes = minutesUntilExpected(coverage)
-  const rest = failed ? 'the pending ones' : 'the rest'
+  const rest = failed ? t('instance.coverage.restPending') : t('instance.coverage.restRest')
   const due =
     minutes === null
       ? ''
       : minutes > 0
-        ? ` — ${rest} are expected within ${minutes} min`
-        : ` — ${rest} are overdue`
-  return { lead: 'Collecting data', count, due }
+        ? t('instance.coverage.dueWithin', { rest, minutes })
+        : t('instance.coverage.dueOverdue', { rest })
+  return { lead: t('instance.coverage.collecting'), count, due }
 }
 
 /**
@@ -63,15 +70,18 @@ export function CoverageBanner({
   compact?: boolean
 }) {
   const coverage = useCoverage(instanceId)
+  const t = useT()
   const data = coverage.data
   if (data === undefined || data.total === 0 || data.reported >= data.total) return null
   const failed = data.checks.filter((check) => check.state === 'failed').map((check) => check.check)
-  const { lead, count, due } = coverageParts(data)
-  const sentence = `${lead}: ${count}${due}.`
+  const { lead, count, due } = coverageParts(data, t)
+  const sentence = t('instance.coverage.sentence', { lead, count, due })
   const failedText =
     failed.length === 0
       ? null
-      : `${failed.length === 1 ? 'Failed on its last run: ' : 'Failed on their last run: '}${failed.join(', ')}.`
+      : failed.length === 1
+        ? t('instance.coverage.failedOne', { checks: failed.join(', ') })
+        : t('instance.coverage.failedMany', { checks: failed.join(', ') })
   const common = {
     'aria-live': 'polite',
     'data-caption-id': 'instance.coverage',
@@ -84,7 +94,7 @@ export function CoverageBanner({
     return (
       <Callout {...common} className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1">
         <span className="shrink-0 font-medium whitespace-nowrap" data-testid="coverage-count">
-          {data.reported}/{data.total} checks
+          {t('instance.coverage.checks', { reported: data.reported, total: data.total })}
         </span>
         <span
           className="text-muted-foreground block w-0 min-w-0 flex-1 truncate"
@@ -102,7 +112,7 @@ export function CoverageBanner({
             </>
           }
           id="instance.coverage"
-          label="Data collection"
+          label={t('instance.coverage.label')}
         />
       </Callout>
     )
@@ -117,7 +127,7 @@ export function CoverageBanner({
           </p>
         )}
       </div>
-      <InfoHint className="shrink-0" id="instance.coverage" label="Data collection" />
+      <InfoHint className="shrink-0" id="instance.coverage" label={t('instance.coverage.label')} />
     </Callout>
   )
 }

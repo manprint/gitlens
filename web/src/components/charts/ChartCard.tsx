@@ -4,6 +4,7 @@ import type { ApiFailure } from '@/api/client'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Caption } from '@/components/layout/Caption'
 import { InfoHint } from '@/components/layout/InfoHint'
+import { useT } from '@/i18n/react'
 import type { CaptionId } from '@/lib/captions'
 import { formatRangeLabel } from '@/lib/chartTime'
 import { cn } from '@/lib/utils'
@@ -30,8 +31,6 @@ export interface ChartCardProps {
   captionId?: CaptionId
 }
 
-const NO_FAILURE: ApiFailure = { kind: 'network', message: 'The chart data could not be loaded.' }
-
 /** A titled chart with its range and step, and the shared loading, empty and error states. */
 export function ChartCard({
   title,
@@ -47,6 +46,7 @@ export function ChartCard({
   children,
   captionId,
 }: ChartCardProps) {
+  const t = useT()
   const titleId = `${useId().replaceAll(':', '')}-chart-title`
 
   return (
@@ -77,17 +77,20 @@ export function ChartCard({
         {state === 'loading' ? (
           <div
             aria-busy="true"
-            aria-label={`Loading ${title}`}
+            aria-label={t('shell.chart.loading', { title })}
             className="bg-muted/40 animate-pulse rounded-lg"
             role="status"
             style={{ height }}
           />
         ) : state === 'empty' ? (
-          <EmptyState description="No data in this range" title={`No ${title} data`} />
+          <EmptyState
+            description={t('shell.chart.emptyText')}
+            title={t('shell.chart.emptyTitle', { title })}
+          />
         ) : state === 'error' ? (
           <ErrorState
             endpoint={title}
-            failure={error ?? NO_FAILURE}
+            failure={error ?? { kind: 'network', message: t('shell.chart.failed') }}
             onRetry={onRetry ?? (() => undefined)}
           />
         ) : (

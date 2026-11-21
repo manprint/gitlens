@@ -108,9 +108,9 @@ func TestNOTI001_EnvConfiguredChannelsShowHostOnly(t *testing.T) {
 	rec := retentionRequest(t, api, http.MethodGet, "/api/v1/notification-channels", "")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `[
-		{"kind":"slack","configured":true,"source":"env","host":"hooks.slack.com"},
-		{"kind":"webhook","configured":true,"source":"env","host":"alerts.canary.example"},
-		{"kind":"google_chat","configured":true,"source":"env","host":"chat.googleapis.com"}
+		{"kind":"slack","configured":true,"source":"env","host":"hooks.slack.com","language":null},
+		{"kind":"webhook","configured":true,"source":"env","host":"alerts.canary.example","language":null},
+		{"kind":"google_chat","configured":true,"source":"env","host":"chat.googleapis.com","language":null}
 	]`, rec.Body.String())
 
 	// The host is the host name only: no port, user information or path.
@@ -129,9 +129,9 @@ func TestNOTI002_UnconfiguredChannels(t *testing.T) {
 	rec := retentionRequest(t, NewAPI(nil), http.MethodGet, "/api/v1/notification-channels", "")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `[
-		{"kind":"slack","configured":false,"source":"env","host":null},
-		{"kind":"webhook","configured":false,"source":"env","host":null},
-		{"kind":"google_chat","configured":false,"source":"env","host":null}
+		{"kind":"slack","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"webhook","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 
 	api := NewAPI(nil)

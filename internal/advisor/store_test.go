@@ -37,6 +37,7 @@ func TestPgStore_PersistsAndQueriesFindings(t *testing.T) {
 		pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 		pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 		pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+		pgxmock.AnyArg(),
 	).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	require.NoError(t, store.UpsertFinding(ctx, finding, now))
 

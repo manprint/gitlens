@@ -1,4 +1,5 @@
-import { formatWindow } from './advisorSettings'
+import { localeInfo } from '@/i18n/locales'
+import { activeLocale, translate } from '@/i18n/store'
 import { formatBytes } from './format'
 import type { IndexRow } from './indexAnalysis'
 
@@ -20,6 +21,8 @@ export interface CleanupCandidate {
   reason: CleanupReason
   /** One sentence for the operator: what was found, not a verdict. */
   why: string
+  /** The same sentence in English: the SQL script stays English. */
+  whyEn: string
   /** The index that keeps serving the same queries, for a duplicate or a redundant prefix. */
   coveredBy: string | null
   /** Space the drop gives back. */
@@ -116,30 +119,58 @@ function enforcesConstraint(row: IndexRow): boolean {
   return row.primary || row.unique
 }
 
+function duplicateGroup(row: IndexRow, byName: ReadonlyMap<string, IndexRow>): IndexRow[] {
+  return [row, ...row.duplicateOf.flatMap((name) => byName.get(`${row.datname}.${name}`) ?? [])]
+}
+
+function duplicateOfConstraint(
+  row: IndexRow,
+  byName: ReadonlyMap<string, IndexRow>,
+  locale: string,
+): Pick<CleanupCandidate, 'reason' | 'why' | 'coveredBy' | 'basis'> | null {
+  if (row.duplicateOf.length === 0) return null
+  const keeper = keeperOf(duplicateGroup(row, byName))
+  if (keeper.key === row.key || !enforcesConstraint(keeper)) return null
+  return {
+    reason: 'duplicate',
+    why: translate(
+      'indexes.lib.cleanup.why.duplicateConstraint',
+      { keeper: `${keeper.schema}.${keeper.name}` },
+      locale,
+    ),
+    coveredBy: `${keeper.schema}.${keeper.name}`,
+    basis: 'advisor',
+  }
+}
+
 function classify(
   row: IndexRow,
   byName: ReadonlyMap<string, IndexRow>,
   window: number | null,
+  locale: string,
 ): Pick<CleanupCandidate, 'reason' | 'why' | 'coveredBy' | 'basis'> | null {
-  if (enforcesConstraint(row)) return null
+  if (row.primary) return null
+  // A unique index is listed only as the duplicate of another unique or primary
+  // index, which keeps the column unique once it is gone.
+  if (row.unique) return duplicateOfConstraint(row, byName, locale)
   if (!row.valid || row.invalidFinding !== null) {
     return {
       reason: 'invalid',
-      why: 'The index is invalid: queries cannot use it, and a failed build leaves it behind.',
+      why: translate('indexes.lib.cleanup.why.invalid', {}, locale),
       coveredBy: null,
       basis: 'advisor',
     }
   }
   if (row.duplicateOf.length > 0) {
-    const group = [
-      row,
-      ...row.duplicateOf.flatMap((name) => byName.get(`${row.datname}.${name}`) ?? []),
-    ]
-    const keeper = keeperOf(group)
+    const keeper = keeperOf(duplicateGroup(row, byName))
     if (keeper.key !== row.key) {
       return {
         reason: 'duplicate',
-        why: `It has the same definition as ${keeper.schema}.${keeper.name}, which stays.`,
+        why: translate(
+          'indexes.lib.cleanup.why.duplicate',
+          { keeper: `${keeper.schema}.${keeper.name}` },
+          locale,
+        ),
         coveredBy: `${keeper.schema}.${keeper.name}`,
         basis: 'advisor',
       }
@@ -152,20 +183,20 @@ function classify(
       reason: 'redundant',
       why:
         covering === null
-          ? 'Its columns are a prefix of a longer index.'
-          : `Its columns are a prefix of ${covering}, which can serve the same lookups.`,
+          ? translate('indexes.lib.cleanup.why.redundant', {}, locale)
+          : translate('indexes.lib.cleanup.why.redundantCovering', { covering }, locale),
       coveredBy: covering,
       basis: 'advisor',
     }
   }
   if (row.unusedFinding !== null) {
-    const basis = observationBasis(row.unusedFinding.evidence)
+    const basis = observationBasis(row.unusedFinding.evidence, locale)
     return {
       reason: 'unused',
       why:
         basis === null
-          ? 'The advisor saw no scans of this index within its observation window.'
-          : `The advisor saw no scans of this index: ${basis}.`,
+          ? translate('indexes.lib.cleanup.why.unused', {}, locale)
+          : translate('indexes.lib.cleanup.why.unusedBasis', { basis }, locale),
       coveredBy: null,
       basis: 'advisor',
     }
@@ -173,7 +204,7 @@ function classify(
   if (row.lastScanStatus === 'never_since_reset') {
     return {
       reason: 'never-scanned',
-      why: neverScannedWhy(row, window),
+      why: neverScannedWhy(row, window, locale),
       coveredBy: null,
       basis: 'statistics',
     }
@@ -194,14 +225,16 @@ export const UNUSED_INDEX_MIN_BYTES = 10 * 1024 * 1024
  * statistics or in pglens's history, here and on the standbys: a statistics
  * reset newer than the window, a short history, a scan seen before the reset
  * or on a standby, or an evaluation still to come all keep the finding away.
- * Primary keys and unique indexes never reach this point (enforcesConstraint).
+ * Primary keys and unique indexes never reach this point (classify).
  */
-function neverScannedWhy(row: IndexRow, window: number | null): string {
-  const counter = 'No scan since the statistics were last reset.'
+function neverScannedWhy(row: IndexRow, window: number | null, locale: string): string {
+  const counter = translate('indexes.lib.cleanup.neverScanned.counter', {}, locale)
   if (row.bytes !== null && row.bytes <= UNUSED_INDEX_MIN_BYTES) {
-    return `${counter} The advisor leaves out indexes of ${formatBytes(UNUSED_INDEX_MIN_BYTES)} or less, so this is the raw counter, not a verdict.`
+    const size = formatBytes(UNUSED_INDEX_MIN_BYTES, intlOf(locale))
+    return `${counter} ${translate('indexes.lib.cleanup.neverScanned.leftOut', { size }, locale)}`
   }
-  return `${counter} The advisor calls an index unused only after ${windowPhrase(window)} with no scan, here and on any standby, so this is the raw counter, not a verdict.`
+  const phrase = windowPhrase(window, locale)
+  return `${counter} ${translate('indexes.lib.cleanup.neverScanned.window', { window: phrase }, locale)}`
 }
 
 type Evidence = Record<string, unknown> | null | undefined
@@ -211,17 +244,38 @@ function seconds(evidence: Evidence, key: string): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 }
 
+/** The Intl locale of a console language: the format of its numbers and sizes. */
+function intlOf(locale: string): string {
+  return localeInfo(locale).intl
+}
+
+/** A count of days, hours or seconds, in the words the window and span texts use. */
+function unitText(unit: 'days' | 'hours' | 'seconds', n: number, locale: string): string {
+  const args = { count: n, n: String(n) }
+  if (unit === 'days') return translate('indexes.lib.cleanup.unit.days', args, locale)
+  if (unit === 'hours') return translate('indexes.lib.cleanup.unit.hours', args, locale)
+  return translate('indexes.lib.cleanup.unit.seconds', args, locale)
+}
+
+/** A window in the unit that reads it exactly: "7 days", "36 hours", "5400 seconds". */
+function windowLabel(seconds: number, locale: string): string {
+  if (seconds % 86_400 === 0) return unitText('days', seconds / 86_400, locale)
+  if (seconds % 3_600 !== 0) {
+    return translate('indexes.lib.cleanup.window.seconds', { n: String(seconds) }, locale)
+  }
+  return unitText('hours', seconds / 3_600, locale)
+}
+
 /**
  * An observed span in the unit the window is written in ("38 hours" next to
  * "36 hours", "9 days" next to "7 days"), rounded down so it never claims more
  * history than there is. A span at least as long as the window never reads
  * shorter than it, because the window is a whole number of that unit.
  */
-function spanText(total: number, window: number): string {
-  const unit = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
-  if (window % 86_400 === 0) return unit(Math.floor(total / 86_400), 'day', 'days')
-  if (window % 3_600 === 0) return unit(Math.floor(total / 3_600), 'hour', 'hours')
-  return unit(Math.floor(total), 'second', 'seconds')
+function spanText(total: number, window: number, locale: string): string {
+  if (window % 86_400 === 0) return unitText('days', Math.floor(total / 86_400), locale)
+  if (window % 3_600 === 0) return unitText('hours', Math.floor(total / 3_600), locale)
+  return unitText('seconds', Math.floor(total), locale)
 }
 
 /** The day of an RFC 3339 time, as the advisor writes it in the finding detail; null when unreadable. */
@@ -243,30 +297,43 @@ function resetDay(value: unknown): string | null {
  * fields, or when its observation is shorter than the window, which no verdict
  * rests on.
  */
-export function observationBasis(evidence: Evidence): string | null {
+export function observationBasis(
+  evidence: Evidence,
+  locale: string = activeLocale(),
+): string | null {
   const window = seconds(evidence, 'window_seconds')
-  const windowText =
-    window === null || window === 0 ? null : `the window is ${formatWindow(window)}`
+  const windowPart =
+    window === null || window === 0
+      ? null
+      : translate(
+          'indexes.lib.cleanup.basis.window',
+          { window: windowLabel(window, locale) },
+          locale,
+        )
+  const joined = (basis: string): string =>
+    windowPart === null
+      ? basis
+      : translate('indexes.lib.cleanup.basis.withWindow', { basis, window: windowPart }, locale)
   if (evidence?.window === 'since statistics reset') {
     const day = resetDay(evidence.stats_reset)
-    const reset =
+    return joined(
       day === null
-        ? 'PostgreSQL statistics show no scan since their last reset (time unknown)'
-        : `PostgreSQL statistics show no scan since their reset on ${day}`
-    return windowText === null ? reset : `${reset}; ${windowText}`
+        ? translate('indexes.lib.cleanup.basis.resetUnknown', {}, locale)
+        : translate('indexes.lib.cleanup.basis.resetDay', { day }, locale),
+    )
   }
   const lastScan = resetDay(evidence?.last_scan)
   if (lastScan !== null) {
-    const scan = `PostgreSQL statistics show the last scan on ${lastScan}`
-    return windowText === null ? scan : `${scan}; ${windowText}`
+    return joined(translate('indexes.lib.cleanup.basis.lastScan', { day: lastScan }, locale))
   }
   const observed = seconds(evidence, 'observed_for_seconds')
   if (observed === null || window === null || window === 0 || observed < window) return null
-  const covered =
+  const span = spanText(observed, window, locale)
+  return joined(
     evidence?.observed_source === 'postgres_stats'
-      ? `PostgreSQL statistics cover ${spanText(observed, window)}`
-      : `pglens history covers ${spanText(observed, window)}`
-  return `${covered}; ${windowText}`
+      ? translate('indexes.lib.cleanup.basis.statsCover', { span }, locale)
+      : translate('indexes.lib.cleanup.basis.historyCovers', { span }, locale),
+  )
 }
 
 /**
@@ -287,16 +354,19 @@ function unusedWindowSeconds(
 }
 
 /** "7 days" for a known window, else a phrase that names no length. */
-export function windowPhrase(window: number | null): string {
-  return window === null ? 'its full observation window' : formatWindow(window)
+export function windowPhrase(window: number | null, locale: string = activeLocale()): string {
+  return window === null
+    ? translate('indexes.lib.cleanup.window.fullWindow', {}, locale)
+    : windowLabel(window, locale)
 }
 
 /** The unused-index window as the cleanup texts name it: "7 days", or a phrase that names no length. */
 export function unusedWindowPhrase(
   rows: readonly IndexRow[],
   configuredWindow: number | null = null,
+  locale: string = activeLocale(),
 ): string {
-  return windowPhrase(unusedWindowSeconds(rows, configuredWindow))
+  return windowPhrase(unusedWindowSeconds(rows, configuredWindow), locale)
 }
 
 /**
@@ -312,11 +382,13 @@ export function buildCleanup(
   const window = unusedWindowSeconds(rows, configuredWindow)
   const candidates: CleanupCandidate[] = []
   for (const row of rows) {
-    const found = classify(row, byName, window)
+    const found = classify(row, byName, window, activeLocale())
     if (found === null) continue
+    const english = classify(row, byName, window, 'en')
     candidates.push({
       row,
       ...found,
+      whyEn: english?.why ?? found.why,
       reclaimBytes: row.bytes ?? 0,
       writeRate: writeRates.get(row.tableKey) ?? null,
       dropStatement: dropStatement(row),
@@ -381,7 +453,7 @@ export function cleanupScript(
     '',
   ]
   const describe = (candidate: CleanupCandidate) =>
-    `-- ${candidate.reason}: ${candidate.row.schema}.${candidate.row.name} on ${candidate.row.table}: ${candidate.why}`
+    `-- ${candidate.reason}: ${candidate.row.schema}.${candidate.row.name} on ${candidate.row.table}: ${candidate.whyEn}`
   for (const candidate of confirmed) lines.push(describe(candidate), candidate.dropStatement)
   if (provisional.length > 0) {
     lines.push(
@@ -391,6 +463,7 @@ export function cleanupScript(
           candidates.map((candidate) => candidate.row),
           configuredWindow,
         ),
+        'en',
       )}`,
       '-- with no scan), so none of them is active below. Uncomment one only after you have checked it.',
     )

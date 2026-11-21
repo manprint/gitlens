@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  SESSION_FILTERS,
+  sessionFilters,
   SESSION_SEARCH_FIELDS,
   SESSION_SORT,
   blockedByThis,
@@ -83,7 +83,7 @@ describe('sessions library', () => {
 
   it('SESSLIB-004 sorts, searches and filters the table rows', () => {
     const waiting: Session = { pid: 9, blocked_by: [1], state: 'idle in transaction (aborted)' }
-    const byId = (id: string) => SESSION_FILTERS.find((filter) => filter.id === id)
+    const byId = (id: string) => sessionFilters().find((filter) => filter.id === id)
     expect(byId('waiting')?.predicate?.(waiting, 'only')).toBe(true)
     expect(byId('waiting')?.predicate?.(app, 'only')).toBe(false)
     expect(byId('waiting')?.predicate?.(app, '')).toBe(true)

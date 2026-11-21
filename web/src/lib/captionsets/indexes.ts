@@ -9,7 +9,7 @@ export const indexesCaptions = {
     unit: 'indexes, findings',
     window: 'Latest collection and latest advisor evaluation.',
     howToRead:
-      'The tabs split the indexes into the inventory, the removable ones, tables with dead rows, suggested new indexes and the cost of the indexes of each table.',
+      'The tabs split the indexes into the inventory, the missing ones with the statements to create them, the removable ones, tables with dead rows and the cost of the indexes of each table.',
   },
   'indexes.inventory': {
     what: 'Every index the agent reported for the server, one row per index, with its columns, access method, size, scan rate and last scan time.',
@@ -190,12 +190,12 @@ export const indexesCaptions = {
     unit: 'rows, percent, bytes (estimated), per second',
     window: 'Latest collection; the trend follows the selected time range.',
   },
-  'indexes.suggestions-table': {
-    what: 'One row per suggested index: its table and key columns, the share of statement time involved, an estimated size, the table writes and a verdict.',
+  'indexes.missing-table': {
+    what: 'One row per missing index: what to do, where it was found, the table and columns, why, and the statement to copy.',
     source:
-      'getIndexSuggestions (internal/indexadvice): the statements of pg_stat_statements that filter or sort on a column no index leads with.',
-    unit: 'percent, milliseconds per second, bytes (estimated), per second',
-    window: 'The window picked on the tab.',
+      'buildMissingIndexes (missingIndexes.ts): index suggestions, unindexed foreign keys and spatial columns of the advisor, and tables read by full scans.',
+    unit: 'indexes',
+    window: 'The window picked on the tab for statements; latest evaluation for the rest.',
   },
   'indexes.tax-table': {
     what: 'One row per table: how many indexes it has, their size against the table, the space that looks unused and the index entries its writes add.',

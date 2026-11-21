@@ -5,10 +5,12 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAlerts, useClusters, useReadinessSummary } from '@/api/queries'
 import type { Cluster, Schemas } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
+import { useT } from '@/i18n/react'
 import { AGENT_STALE_AFTER_SECONDS, deriveAgentHealth } from '@/lib/fleet'
 import { clusterLabel } from '@/lib/names'
 import { clusterReadiness } from '@/lib/readiness'
@@ -70,6 +72,7 @@ function summarize(clusters: readonly Cluster[], firingAlerts: number | null): F
 }
 
 export function FleetPage() {
+  const t = useT()
   const clustersQuery = useClusters()
   const alertsQuery = useAlerts({ state: 'firing' })
   // One request for every card; a failed or pending summary shows no badge.
@@ -184,8 +187,8 @@ export function FleetPage() {
 
   if (clustersQuery.isPending || alertsQuery.isPending) {
     return (
-      <section aria-busy="true" aria-label="Loading fleet overview" role="status">
-        Loading fleet overview…
+      <section aria-busy="true" aria-label={t('fleet.page.loadingLabel')} role="status">
+        {t('fleet.page.loading')}
       </section>
     )
   }
@@ -193,24 +196,25 @@ export function FleetPage() {
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="fleet" label={t('fleet.page.helpLabel')} />}
         icon={LayoutDashboard}
-        eyebrow="Dashboard"
-        title="Fleet overview"
-        subtitle="Every monitored PostgreSQL cluster at a glance: its health, its instances and their replication lag. Click a tile to filter, or a cluster to open it."
+        eyebrow={t('fleet.page.eyebrow')}
+        title={t('fleet.page.title')}
+        subtitle={t('fleet.page.subtitle')}
         freshness={<FreshnessBadge dataUpdatedAt={clustersQuery.dataUpdatedAt} policy="fleet" />}
       />
 
       {alertsQuery.error ? (
         <Callout variant="warning">
-          <strong>Alert counts unavailable.</strong>
-          <p>Firing alerts could not be loaded, but the cluster grid remains available.</p>
+          <strong>{t('fleet.page.alertsUnavailable')}</strong>
+          <p>{t('fleet.page.alertsUnavailableBody')}</p>
           <Button
             size="sm"
             variant="outline"
             onClick={() => void alertsQuery.refetch()}
             type="button"
           >
-            Retry alerts
+            {t('fleet.page.retryAlerts')}
           </Button>
         </Callout>
       ) : null}
@@ -232,7 +236,7 @@ export function FleetPage() {
 
       <div className="max-w-xl space-y-1.5">
         <label className="text-sm font-medium" htmlFor="fleet-filter">
-          Filter clusters
+          {t('fleet.page.filterLabel')}
         </label>
         <div className="relative">
           <Search
@@ -245,28 +249,33 @@ export function FleetPage() {
             data-primary-filter
             id="fleet-filter"
             onChange={(event) => updateSearchParam('q', event.target.value)}
-            placeholder="Search cluster name or instance address"
+            placeholder={t('fleet.page.filterPlaceholder')}
             type="search"
             value={textFilter}
           />
         </div>
         <p className="text-muted-foreground text-xs" id="fleet-filter-help">
-          Search by cluster name or instance address. Press <kbd>/</kbd> to jump here.
+          {t('fleet.page.filterHelpBefore')}
+          <kbd>/</kbd>
+          {t('fleet.page.filterHelpAfter')}
         </p>
       </div>
 
       <Section
-        title="Clusters"
+        title={t('fleet.page.clustersTitle')}
         captionId="fleet.clusters"
         actions={
-          <span className="text-muted-foreground text-sm">
-            {visibleClusters.length} of {clusters.length} clusters shown
-          </span>
+          <>
+            <span className="text-muted-foreground text-sm">
+              {t('fleet.page.shown', { shown: visibleClusters.length, total: clusters.length })}
+            </span>
+            <HelpLink anchor="fleet#cluster-cards" label={t('fleet.page.clusterCards')} />
+          </>
         }
       >
         {visibleClusters.length > 0 ? (
           <div
-            aria-label="Cluster cards"
+            aria-label={t('fleet.page.clusterCards')}
             className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
             role="list"
           >
@@ -295,18 +304,20 @@ export function FleetPage() {
           </div>
         ) : clusters.length === 0 ? (
           <EmptyState
-            description="Set up the pglens agent on a PostgreSQL host to add your first cluster."
-            title="No monitored clusters yet"
+            description={t('fleet.page.noClustersDescription')}
+            title={t('fleet.page.noClustersTitle')}
           />
         ) : (
           <EmptyState
-            description="Try clearing the search or changing the active fleet filters."
-            title="No clusters match these filters"
+            description={t('fleet.page.noMatchDescription')}
+            title={t('fleet.page.noMatchTitle')}
           />
         )}
       </Section>
 
-      <small className="text-muted-foreground block text-xs">Build {__PGLENS_BUILD__}</small>
+      <small className="text-muted-foreground block text-xs">
+        {t('fleet.page.build')} {__PGLENS_BUILD__}
+      </small>
     </div>
   )
 }

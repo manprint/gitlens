@@ -1,4 +1,6 @@
 import type { Schemas } from '@/api/types'
+import type { MessageKey } from '@/i18n/messages/en'
+import { translate } from '@/i18n/store'
 
 export type ReadinessReport = Schemas['ReadinessReport']
 export type ReadinessItem = Schemas['ReadinessItem']
@@ -23,13 +25,13 @@ const CHANNEL_ORDER: readonly ReadinessFix['channel'][] = [
   'host',
 ]
 
-export const CHANNEL_LABEL: Record<ReadinessFix['channel'], string> = {
-  console: 'In the console',
-  agent_config: 'Agent configuration',
-  sql: 'SQL',
-  postgres_config: 'PostgreSQL configuration',
-  host: 'On the host',
-}
+export const CHANNEL_LABEL_KEY = {
+  console: 'readiness.channel.console',
+  agent_config: 'readiness.channel.agent_config',
+  sql: 'readiness.channel.sql',
+  postgres_config: 'readiness.channel.postgres_config',
+  host: 'readiness.channel.host',
+} as const satisfies Record<ReadinessFix['channel'], MessageKey>
 
 /** The fixes grouped by channel, in the fixed channel order; empty channels are left out. */
 export function groupByChannel(
@@ -43,8 +45,8 @@ export function groupByChannel(
 
 /** The badge text of a level: "Full" or "Partial · N warning(s)". */
 export function readinessBadgeText(level: 'full' | 'partial', warnings: number): string {
-  if (level === 'full') return 'Full'
-  return `Partial · ${warnings} warning${warnings === 1 ? '' : 's'}`
+  if (level === 'full') return translate('readiness.badge.full')
+  return translate('readiness.badge.partial', { warnings })
 }
 
 /** The accessible name of the badge. */
@@ -53,9 +55,23 @@ export function readinessBadgeLabel(
   warnings: number,
   infos: number,
 ): string {
-  if (level === 'full') return 'Monitoring: full'
-  const notes = infos > 0 ? `, ${infos} note${infos === 1 ? '' : 's'}` : ''
-  return `Monitoring: partial, ${warnings} warning${warnings === 1 ? '' : 's'}${notes}`
+  if (level === 'full') return translate('readiness.badge.labelFull')
+  return infos > 0
+    ? translate('readiness.badge.labelPartialNotes', { warnings, notes: infos })
+    : translate('readiness.badge.labelPartial', { warnings })
+}
+
+/** The instance tab that lists the readiness warnings and their fixes. */
+export function readinessFixPath(instanceId: string): string {
+  return `/instances/${encodeURIComponent(instanceId)}?section=readiness`
+}
+
+export interface ClusterReadiness {
+  level: 'full' | 'partial'
+  warnings: number
+  infos: number
+  /** The instance with the most warnings, where the badge leads; null when none has one. */
+  fixInstanceId?: string | null
 }
 
 /**
@@ -67,11 +83,20 @@ export function readinessBadgeLabel(
 export function clusterReadiness(
   instanceIds: readonly string[],
   summary: readonly SummaryInstance[] | undefined,
-): { level: 'full' | 'partial'; warnings: number; infos: number } | null {
+): ClusterReadiness | null {
   if (summary === undefined) return null
   const rows = summary.filter((row) => instanceIds.includes(row.instance_id))
   if (rows.length === 0) return null
   const warnings = rows.reduce((sum, row) => sum + row.warnings, 0)
   const infos = rows.reduce((sum, row) => sum + row.infos, 0)
-  return { level: warnings > 0 ? 'partial' : 'full', warnings, infos }
+  const worst = rows.reduce<SummaryInstance | null>(
+    (best, row) => (row.warnings > (best?.warnings ?? 0) ? row : best),
+    null,
+  )
+  return {
+    level: warnings > 0 ? 'partial' : 'full',
+    warnings,
+    infos,
+    fixInstanceId: worst?.instance_id ?? null,
+  }
 }

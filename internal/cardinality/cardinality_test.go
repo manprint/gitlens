@@ -320,3 +320,15 @@ func keysOf(cands []cardinality.Candidate) []string {
 	}
 	return out
 }
+
+// TestSelector_RetainedListsKeysWithinHysteresis: Retained names exactly the
+// keys a Select at that cycle may keep as history, without changing state.
+func TestSelector_RetainedListsKeysWithinHysteresis(t *testing.T) {
+	s := cardinality.NewSelector(cardinality.Options{TopN: 1, Hysteresis: 2})
+	s.Select(1, []cardinality.Candidate{{Key: "a", Primary: 9, Secondary: 9}})
+	s.Select(2, []cardinality.Candidate{{Key: "b", Primary: 9, Secondary: 9}, {Key: "a", Primary: 1, Secondary: 1}})
+	require.Equal(t, []string{"a", "b"}, s.Retained(3))
+	require.Equal(t, []string{"b"}, s.Retained(4))
+	require.Empty(t, s.Retained(5))
+	require.Equal(t, []string{"a", "b"}, s.Retained(3), "Retained must not change state")
+}

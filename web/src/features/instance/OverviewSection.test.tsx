@@ -61,7 +61,7 @@ describe('OverviewSection', () => {
     chartMock.options = []
   })
 
-  it('UI-INST-024 renders a reset annotation while preserving the chart gap', async () => {
+  it('UI-INST-024 keeps the chart gap with no marker and names it in the range line', async () => {
     server.use(metricsHandler(resetSeries))
 
     renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
@@ -69,23 +69,28 @@ describe('OverviewSection', () => {
     })
     await settle()
 
-    const option = chartMock.options.find((candidate) => {
-      const series = (candidate as { series?: { markLine?: unknown }[] }).series
-      return series?.some((item) => item.markLine !== undefined)
-    }) as {
-      series: {
-        connectNulls: boolean
-        data: [string, number | null][]
-        markPoint?: unknown
-        markLine?: { data: { xAxis: string }[] }
-      }[]
+    const lines = chartMock.options.flatMap(
+      (candidate) =>
+        (
+          candidate as {
+            series?: {
+              connectNulls: boolean
+              data: [string, number | null][]
+              markPoint?: unknown
+              markLine?: unknown
+            }[]
+          }
+        ).series ?? [],
+    )
+    expect(lines.length).toBeGreaterThan(0)
+    for (const series of lines) {
+      expect(series.connectNulls).toBe(false)
+      expect(series.markPoint).toBeUndefined()
+      expect(series.markLine).toBeUndefined()
     }
-    const series = option.series.find((item) => item.markLine !== undefined)
-
-    expect(series?.connectNulls).toBe(false)
-    expect(series?.data[1]?.[1]).toBeNull()
-    expect(series?.markPoint).toBeUndefined()
-    expect(series?.markLine?.data).toEqual([{ xAxis: series?.data[1]?.[0] }])
+    expect(lines.some((series) => series.data[1]?.[1] === null)).toBe(true)
+    const card = screen.getByRole('region', { name: /^Transactions per second/ })
+    expect(within(card).getByText(/· 1 gap or counter reset$/)).toBeVisible()
   })
 
   it('UI-INST-025 renders every tile as not measured when its value is null', async () => {
@@ -195,7 +200,7 @@ describe('OverviewSection', () => {
       const name = new RegExp(`^${title}( ?\\(|$)`)
       const card = screen.getByRole('region', { name })
       expect(within(card).getByRole('heading', { level: 3, name })).toBeVisible()
-      expect(within(card).getByText(new RegExp(`UTC · step ${step}$`))).toBeVisible()
+      expect(within(card).getByText(new RegExp(`UTC · step ${step}( · .+)?$`))).toBeVisible()
       expect(within(card).getByRole('img', { name: new RegExp(title) })).toBeVisible()
     }
   })
@@ -355,7 +360,7 @@ describe('OverviewSection', () => {
     expect(checkpointRequests).toHaveLength(polls + 1)
   })
 
-  it('OVC-006 separates the tiles from the first chart group with a rule and spacing', async () => {
+  it('OVC-006 puts the tiles, the chart nav and every chart group in cards of their own', async () => {
     server.use(metricsHandler(resetSeries))
     renderWithProviders(<OverviewSection database="app" instanceId={INSTANCE_ID} />, {
       route: `/instances/${INSTANCE_ID}?db=app&range=1h`,
@@ -363,20 +368,21 @@ describe('OverviewSection', () => {
     await settle()
 
     const charts = screen.getByTestId('overview-charts')
-    const tile = screen.getByRole('article', { name: 'Connections in use' })
-    expect(charts).toHaveClass('mt-12')
-    expect(within(charts).getByRole('separator')).toHaveClass('mb-6')
-    expect(charts).not.toContainElement(tile)
-    expect(within(charts).getByRole('region', { name: 'Workload' })).toHaveClass(
-      'mt-6',
-      'scroll-mt-32',
-    )
-    expect(within(charts).getByRole('region', { name: 'Memory & I/O' })).toHaveClass(
-      'mt-10',
-      'scroll-mt-32',
-    )
+    const tiles = screen.getByRole('region', { name: 'Instance overview' })
+    expect(tiles).toContainElement(screen.getByRole('article', { name: 'Connections in use' }))
+    expect(tiles).not.toContainElement(charts)
+    expect(charts).toHaveClass('space-y-8')
+    expect(within(charts).queryByRole('separator')).toBeNull()
+    for (const name of ['Workload', 'Memory & I/O']) {
+      const group = within(charts).getByRole('region', { name })
+      expect(group).toHaveClass('rounded-xl', 'border', 'scroll-mt-32')
+      expect(group).toHaveAttribute('data-card')
+    }
     expect(within(charts).getByTestId('workload-grid')).toHaveClass('gap-6')
-    expect(within(charts).getByRole('navigation', { name: 'Chart groups' })).toBeVisible()
+    const nav = within(charts).getByRole('navigation', { name: 'Chart groups' })
+    expect(nav).toBeVisible()
+    expect(nav).toHaveClass('rounded-xl', 'border')
+    expect(nav).not.toHaveClass('-mx-5')
   })
 
   it('OVC-009 the whole Overview has no axe violations', async () => {

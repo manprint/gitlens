@@ -1,13 +1,17 @@
+import { displayTimeZone, fromZonedInput, toZonedInput } from '@/lib/timezone'
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { useInstanceSettings } from '@/api/queries'
 import type { Schemas } from '@/api/types'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState, Unknown } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { usePreferences } from '@/hooks/usePreferences'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT, type Translate } from '@/i18n/react'
 import { formatTimestamp } from '@/lib/format'
 import { parseRange } from '@/lib/timerange'
 
@@ -30,22 +34,19 @@ interface SettingsSectionProps {
   instanceId: string
 }
 
+/** The wall clock in the console's zone; the URL keeps UTC. */
 function toLocalDateTime(value: string): string {
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return ''
-  return date.toISOString().slice(0, 16)
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? toZonedInput(ms, displayTimeZone()) : ''
 }
 
 function DisplayValue({ setting }: { setting: Schemas['Setting'] }) {
+  const t = useT()
   const displayValue = settingDisplayValue(setting)
   if (displayValue === null) return <Unknown />
 
   if (isRedactedArchiveCommand(setting)) {
-    return (
-      <span title="Arguments are withheld because they may contain credentials.">
-        {displayValue}
-      </span>
-    )
+    return <span title={t('instance.settings.argsWithheld')}>{displayValue}</span>
   }
 
   return displayValue
@@ -59,7 +60,13 @@ const DURABILITY_HELP: Record<(typeof DURABILITY_SETTING_NAMES)[number], ColumnH
   synchronous_commit: 'instance.durability-synchronous-commit',
 }
 
+const SEVERITY_KEYS: Record<'critical' | 'warning', MessageKey> = {
+  critical: 'instance.settings.severity.critical',
+  warning: 'instance.settings.severity.warning',
+}
+
 function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
+  const t = useT()
   const byName = useMemo(
     () => new Map(settings.map((setting) => [setting.name, setting])),
     [settings],
@@ -68,7 +75,9 @@ function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
   // From 1600 px the summary is one line in the panel heading (D26).
   return (
     <div>
-      <h3 className="font-medium min-[1600px]:sr-only">Durability summary</h3>
+      <h3 className="font-medium min-[1600px]:sr-only">
+        {t('instance.settings.durabilitySummary')}
+      </h3>
       <dl className="mt-3 grid gap-3 min-[1600px]:mt-0 min-[1600px]:flex min-[1600px]:gap-x-3 sm:grid-cols-2 lg:grid-cols-5">
         {DURABILITY_SETTING_NAMES.map((name) => {
           const setting = byName.get(name)
@@ -87,9 +96,11 @@ function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
                 {severity ? (
                   <Badge
                     variant={severity === 'critical' ? 'destructive' : 'secondary'}
-                    aria-label={`Durability severity: ${severity}`}
+                    aria-label={t('instance.settings.severityAria', {
+                      severity: t(SEVERITY_KEYS[severity]),
+                    })}
                   >
-                    {severity}
+                    {t(SEVERITY_KEYS[severity])}
                   </Badge>
                 ) : null}
               </dd>
@@ -103,116 +114,127 @@ function DurabilitySummary({ settings }: { settings: Schemas['Setting'][] }) {
 
 type Setting = Schemas['Setting']
 
-const SETTING_TOOLBAR: TableToolbarSpec<Setting> = {
-  searchLabel: 'Search settings',
-  searchFields: [
-    (setting) => setting.name,
-    (setting) => setting.value,
-    (setting) => setting.unit,
-    (setting) => setting.source,
-    (setting) => setting.context,
-  ],
-  filters: [
+function settingToolbar(t: Translate): TableToolbarSpec<Setting> {
+  return {
+    searchLabel: t('instance.settings.search'),
+    searchFields: [
+      (setting) => setting.name,
+      (setting) => setting.value,
+      (setting) => setting.unit,
+      (setting) => setting.source,
+      (setting) => setting.context,
+    ],
+    filters: [
+      {
+        id: 'source',
+        label: t('instance.settings.col.source'),
+        kind: 'select',
+        accessor: (setting) => setting.source || null,
+      },
+      {
+        id: 'state',
+        label: t('instance.settings.col.state'),
+        kind: 'select',
+        options: [
+          { value: 'pending', label: t('instance.settings.state.pending') },
+          { value: 'in-force', label: t('instance.settings.state.inForce') },
+        ],
+        accessor: (setting) => (isPendingRestart(setting) ? 'pending' : 'in-force'),
+      },
+    ],
+  }
+}
+
+function settingColumns(t: Translate): readonly SimpleColumn<Setting>[] {
+  return [
+    {
+      id: 'name',
+      header: t('instance.settings.col.name'),
+      rowHeader: true,
+      sortValue: (setting) => setting.name,
+      cell: (setting) => setting.name,
+      width: '18rem',
+      truncate: (setting) => setting.name,
+    },
+    {
+      id: 'value',
+      header: t('instance.settings.col.value'),
+      cell: (setting) => <DisplayValue setting={setting} />,
+      truncate: (setting) => settingDisplayValue(setting) ?? '',
+    },
+    {
+      id: 'unit',
+      header: t('instance.settings.col.unit'),
+      width: '5rem',
+      cell: (setting) =>
+        setting.unit || <Unknown reason={t('instance.settings.unitNotReported')} />,
+    },
     {
       id: 'source',
-      label: 'Source',
-      kind: 'select',
-      accessor: (setting) => setting.source || null,
+      header: t('instance.settings.col.source'),
+      help: 'instance.setting-source',
+      sortValue: (setting) => setting.source || null,
+      cell: (setting) =>
+        setting.source || <Unknown reason={t('instance.settings.sourceNotReported')} />,
+      width: '9rem',
+      truncate: (setting) => setting.source,
+    },
+    {
+      id: 'context',
+      header: t('instance.settings.col.context'),
+      help: 'instance.setting-context',
+      sortValue: (setting) => setting.context || null,
+      cell: (setting) =>
+        setting.context || <Unknown reason={t('instance.settings.contextNotReported')} />,
+      width: '9rem',
+      truncate: (setting) => setting.context,
+    },
+    {
+      id: 'changed',
+      header: t('instance.settings.col.changedAt'),
+      help: 'instance.setting-changed',
+      sortValue: (setting) => Date.parse(setting.changed_at),
+      cell: (setting) => formatTimestamp(setting.changed_at),
+      width: '13rem',
     },
     {
       id: 'state',
-      label: 'State',
-      kind: 'select',
-      options: [
-        { value: 'pending', label: 'Pending restart' },
-        { value: 'in-force', label: 'In force' },
-      ],
-      accessor: (setting) => (isPendingRestart(setting) ? 'pending' : 'in-force'),
+      header: t('instance.settings.col.state'),
+      help: 'instance.setting-state',
+      width: '9rem',
+      cell: (setting) => {
+        const pending = isPendingRestart(setting)
+        return (
+          <Badge variant={pending ? 'destructive' : 'secondary'}>
+            {pending ? t('instance.settings.state.pending') : t('instance.settings.state.inForce')}
+          </Badge>
+        )
+      },
     },
-  ],
+  ]
 }
 
-const SETTING_COLUMNS: readonly SimpleColumn<Setting>[] = [
-  {
-    id: 'name',
-    header: 'Name',
-    rowHeader: true,
-    sortValue: (setting) => setting.name,
-    cell: (setting) => setting.name,
-    width: '18rem',
-    truncate: (setting) => setting.name,
-  },
-  {
-    id: 'value',
-    header: 'Value',
-    cell: (setting) => <DisplayValue setting={setting} />,
-    truncate: (setting) => settingDisplayValue(setting) ?? '',
-  },
-  {
-    id: 'unit',
-    header: 'Unit',
-    width: '5rem',
-    cell: (setting) => setting.unit || <Unknown reason="Unit was not reported." />,
-  },
-  {
-    id: 'source',
-    header: 'Source',
-    help: 'instance.setting-source',
-    sortValue: (setting) => setting.source || null,
-    cell: (setting) => setting.source || <Unknown reason="Source was not reported." />,
-    width: '9rem',
-    truncate: (setting) => setting.source,
-  },
-  {
-    id: 'context',
-    header: 'Context',
-    help: 'instance.setting-context',
-    sortValue: (setting) => setting.context || null,
-    cell: (setting) => setting.context || <Unknown reason="Context was not reported." />,
-    width: '9rem',
-    truncate: (setting) => setting.context,
-  },
-  {
-    id: 'changed',
-    header: 'Changed at',
-    help: 'instance.setting-changed',
-    sortValue: (setting) => Date.parse(setting.changed_at),
-    cell: (setting) => formatTimestamp(setting.changed_at, 'UTC'),
-    width: '13rem',
-  },
-  {
-    id: 'state',
-    header: 'State',
-    help: 'instance.setting-state',
-    width: '9rem',
-    cell: (setting) => {
-      const pending = isPendingRestart(setting)
-      return (
-        <Badge variant={pending ? 'destructive' : 'secondary'}>
-          {pending ? 'Pending restart' : 'In force'}
-        </Badge>
-      )
-    },
-  },
-]
-
 function SettingTable({ settings }: { settings: Setting[] }) {
+  const t = useT()
+  const columns = useMemo(() => settingColumns(t), [t])
+  const toolbar = useMemo(() => settingToolbar(t), [t])
   return (
     <SimpleTable
-      ariaLabel="Observed PostgreSQL settings"
+      ariaLabel={t('instance.settings.observed')}
       captionId="instance.settings-changes"
-      columns={SETTING_COLUMNS}
+      columns={columns}
       emptyState={null}
       rowKey={(setting) => `${setting.name}-${setting.changed_at}`}
       rows={settings}
-      scope="settings"
+      scope={t('instance.settings.noun.settings')}
       tableId="pg-settings"
-      toolbar={SETTING_TOOLBAR}
+      toolbar={toolbar}
     />
   )
 }
 
 export function SettingsSection({ instanceId }: SettingsSectionProps) {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   // The header's range picker and this section read the same default (11.2).
   const { defaultTimeRange } = usePreferences()
@@ -235,7 +257,8 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
       if (!value) {
         next.delete('changed_since')
       } else {
-        next.set('changed_since', new Date(`${value}:00Z`).toISOString())
+        const since = fromZonedInput(value, displayTimeZone())
+        if (since) next.set('changed_since', since.toISOString())
       }
       return next
     })
@@ -252,30 +275,33 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
   return (
     <InstancePanel
       id="settings"
-      title="Settings and durability"
+      title={t('instance.settings.section')}
       captionId="instance.settings"
       actions={
-        query.data ? (
-          <>
-            <DurabilitySummary settings={query.data.settings} />
-            {/* From 1600 px the controls share the heading line; the input keeps its name. */}
-            <div className="flex flex-wrap items-end gap-4 min-[1600px]:flex-nowrap min-[1600px]:items-center min-[1600px]:gap-2">
-              <label className="grid gap-1 text-sm min-[1600px]:flex min-[1600px]:items-center">
-                <span>Changed since</span>
-                <Input
-                  className="w-auto min-[1600px]:h-8"
-                  aria-label="Changed since"
-                  type="datetime-local"
-                  value={toLocalDateTime(changedSince)}
-                  onChange={(event) => updateChangedSince(event.target.value)}
-                />
-              </label>
-              <Button size="sm" variant="outline" type="button" onClick={resetChangedSince}>
-                Use selected range
-              </Button>
-            </div>
-          </>
-        ) : undefined
+        <>
+          {query.data ? (
+            <>
+              <DurabilitySummary settings={query.data.settings} />
+              {/* From 1600 px the controls share the heading line; the input keeps its name. */}
+              <div className="flex flex-wrap items-end gap-4 min-[1600px]:flex-nowrap min-[1600px]:items-center min-[1600px]:gap-2">
+                <label className="grid gap-1 text-sm min-[1600px]:flex min-[1600px]:items-center">
+                  <span>{t('instance.settings.changedSince')}</span>
+                  <Input
+                    className="w-auto min-[1600px]:h-8"
+                    aria-label={t('instance.settings.changedSince')}
+                    type="datetime-local"
+                    value={toLocalDateTime(changedSince)}
+                    onChange={(event) => updateChangedSince(event.target.value)}
+                  />
+                </label>
+                <Button size="sm" variant="outline" type="button" onClick={resetChangedSince}>
+                  {t('instance.settings.useRange')}
+                </Button>
+              </div>
+            </>
+          ) : null}
+          <HelpLink anchor="instance-overview#settings" label={t('instance.settings.section')} />
+        </>
       }
     >
       {query.error && !query.data ? (
@@ -285,17 +311,17 @@ export function SettingsSection({ instanceId }: SettingsSectionProps) {
           onRetry={() => void query.refetch()}
         />
       ) : query.isPending || query.data === undefined ? (
-        <section aria-busy="true" aria-label="Loading settings" role="status">
-          Loading settings…
+        <section aria-busy="true" aria-label={t('instance.settings.loadingAria')} role="status">
+          {t('instance.settings.loading')}
         </section>
       ) : changedSettings.length === 0 ? (
         <CaptionedBlock
-          ariaLabel="Observed PostgreSQL settings"
+          ariaLabel={t('instance.settings.observed')}
           captionId="instance.settings-changes"
         >
           <EmptyState
-            title="No setting changes"
-            description="No setting changed since the date in Changed since."
+            title={t('instance.settings.noChanges')}
+            description={t('instance.settings.noChangesDescription')}
           />
         </CaptionedBlock>
       ) : (

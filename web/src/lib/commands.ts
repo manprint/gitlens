@@ -1,5 +1,6 @@
 import type { ApiFailure } from '@/api/client'
 import type { components } from '@/api/generated'
+import { translate } from '@/i18n/store'
 
 export type ServerCommandState = components['schemas']['CommandResponse']['state']
 export type CommandState = ServerCommandState | 'succeeded' | 'rejected'
@@ -26,26 +27,30 @@ function assertNever(value: never): never {
  */
 export function commandQueueFullMessage(failure: ApiFailure): string | null {
   if (failure.kind !== 'server' || failure.status !== 429) return null
-  return `Command queue full: ${failure.detail}`
+  return translate('shell.command.queueFull', { detail: failure.detail })
 }
 
 export function describeCommandState(state: CommandState, error?: string | null): string {
   switch (state) {
     case 'pending':
-      return 'Command is queued and waiting for an agent.'
+      return translate('shell.command.pending')
     case 'claimed':
-      return 'Command was claimed by an agent and is running.'
+      return translate('shell.command.claimed')
     case 'done':
     case 'succeeded':
-      return 'Command succeeded and its result is ready.'
+      return translate('shell.command.succeeded')
     case 'failed':
-      return error ? `Command failed: ${error}` : 'Command failed without an agent result.'
+      return error
+        ? translate('shell.command.failed', { error })
+        : translate('shell.command.failedNoResult')
     case 'expired':
       return error
-        ? `Command expired: ${error}`
-        : 'Command expired: its TTL ended before a result was recorded.'
+        ? translate('shell.command.expired', { error })
+        : translate('shell.command.expiredTtl')
     case 'rejected':
-      return error ? `Command rejected by the agent: ${error}` : 'Command rejected by the agent.'
+      return error
+        ? translate('shell.command.rejected', { error })
+        : translate('shell.command.rejectedNoReason')
     default:
       return assertNever(state)
   }

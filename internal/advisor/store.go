@@ -52,7 +52,13 @@ func (s *PgStore) UpsertFinding(ctx context.Context, f Finding, now time.Time) e
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `INSERT INTO findings (finding_id,rule_id,severity,state,scope,cluster_id,instance_id,datname,object_name,title,detail,remediation,evidence,degraded_reason,first_seen,last_seen,resolved_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,NULL) ON CONFLICT (tenant_id,finding_id) DO UPDATE SET rule_id=EXCLUDED.rule_id,severity=EXCLUDED.severity,scope=EXCLUDED.scope,cluster_id=EXCLUDED.cluster_id,instance_id=EXCLUDED.instance_id,datname=EXCLUDED.datname,object_name=EXCLUDED.object_name,title=EXCLUDED.title,detail=EXCLUDED.detail,remediation=EXCLUDED.remediation,evidence=EXCLUDED.evidence,degraded_reason=EXCLUDED.degraded_reason,last_seen=EXCLUDED.last_seen,resolved_at=NULL,state=CASE WHEN findings.muted_until IS NOT NULL AND findings.muted_until > EXCLUDED.last_seen THEN 'muted' ELSE EXCLUDED.state END`, f.ID(), f.RuleID, f.Severity, f.State, f.Scope, f.ClusterID, f.InstanceID, f.Datname, f.ObjectName, f.Title, f.Detail, f.Remediation, evidence, nullIfEmpty(f.DegradedReason), now)
+	var message []byte
+	if f.Message != nil {
+		if message, err = json.Marshal(f.Message); err != nil {
+			return err
+		}
+	}
+	_, err = s.db.Exec(ctx, `INSERT INTO findings (finding_id,rule_id,severity,state,scope,cluster_id,instance_id,datname,object_name,title,detail,remediation,evidence,degraded_reason,first_seen,last_seen,resolved_at,message) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,NULL,$16) ON CONFLICT (tenant_id,finding_id) DO UPDATE SET rule_id=EXCLUDED.rule_id,severity=EXCLUDED.severity,scope=EXCLUDED.scope,cluster_id=EXCLUDED.cluster_id,instance_id=EXCLUDED.instance_id,datname=EXCLUDED.datname,object_name=EXCLUDED.object_name,title=EXCLUDED.title,detail=EXCLUDED.detail,remediation=EXCLUDED.remediation,evidence=EXCLUDED.evidence,message=EXCLUDED.message,degraded_reason=EXCLUDED.degraded_reason,last_seen=EXCLUDED.last_seen,resolved_at=NULL,state=CASE WHEN findings.muted_until IS NOT NULL AND findings.muted_until > EXCLUDED.last_seen THEN 'muted' ELSE EXCLUDED.state END`, f.ID(), f.RuleID, f.Severity, f.State, f.Scope, f.ClusterID, f.InstanceID, f.Datname, f.ObjectName, f.Title, f.Detail, f.Remediation, evidence, nullIfEmpty(f.DegradedReason), now, message)
 	return err
 }
 

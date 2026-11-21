@@ -1,6 +1,7 @@
 import { cloneElement, type ReactElement } from 'react'
 
 import type { PermTier } from '@/api/types'
+import { useT } from '@/i18n/react'
 
 interface ControlProps {
   'aria-disabled'?: boolean | 'true' | 'false'
@@ -15,7 +16,8 @@ interface NotPermittedProps {
 }
 
 export function NotPermitted({ required, current, children }: NotPermittedProps) {
-  const reason = `Requires ${required} permission; current tier is ${current}.`
+  const t = useT()
+  const reason = t('shell.state.notPermitted', { required, current })
   const control = children
     ? cloneElement(children, {
         'aria-disabled': true,

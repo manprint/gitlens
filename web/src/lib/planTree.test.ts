@@ -1,0 +1,335 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  bufferBytes,
+  changeRatio,
+  diffPlans,
+  findExplainRoot,
+  formatFactor,
+  nodeTitle,
+  parsePlan,
+  placeholderCount,
+  planText,
+  type ParsedPlan,
+} from './planTree'
+
+const ANALYZED = [
+  {
+    'Planning Time': 0.5,
+    'Execution Time': 101,
+    Plan: {
+      'Node Type': 'Hash Join',
+      'Join Type': 'Inner',
+      'Total Cost': 200,
+      'Plan Rows': 10,
+      'Actual Rows': 5000,
+      'Actual Loops': 1,
+      'Actual Total Time': 100,
+      'Hash Cond': '(o.customer_id = c.id)',
+      Plans: [
+        {
+          'Node Type': 'Seq Scan',
+          'Relation Name': 'orders',
+          Alias: 'o',
+          'Total Cost': 150,
+          'Plan Rows': 50000,
+          'Actual Rows': 1000,
+          'Actual Loops': 1,
+          'Actual Total Time': 70,
+          Filter: '(status = 1)',
+          'Rows Removed by Filter': 99000,
+        },
+        {
+          'Node Type': 'Hash',
+          'Total Cost': 30,
+          'Plan Rows': 100,
+          'Actual Rows': 100,
+          'Actual Loops': 1,
+          'Actual Total Time': 5,
+          'Hash Buckets': 1024,
+          'Hash Batches': 4,
+          'Peak Memory Usage': 64,
+          Plans: [
+            {
+              'Node Type': 'Index Scan',
+              'Relation Name': 'customers',
+              Alias: 'c',
+              'Index Name': 'customers_pkey',
+              'Total Cost': 25,
+              'Plan Rows': 100,
+              'Actual Rows': 100,
+              'Actual Loops': 1,
+              'Actual Total Time': 4,
+              'Index Cond': '(id > 0)',
+            },
+          ],
+        },
+      ],
+    },
+  },
+]
+
+function parsed(value: unknown, valuesFrom: Parameters<typeof parsePlan>[1] = null): ParsedPlan {
+  const plan = parsePlan(value, valuesFrom)
+  if (!plan) throw new Error('no plan')
+  return plan
+}
+
+describe('findExplainRoot', () => {
+  it('finds the plan in a command result, a stored array and a bare node', () => {
+    const node = { 'Node Type': 'Result' }
+    expect(findExplainRoot([{ Plan: node }])).toEqual({ Plan: node })
+    expect(findExplainRoot({ plan: [{ Plan: node }], values_from: 'generic' })).toEqual({
+      Plan: node,
+    })
+    expect(findExplainRoot({ result: { plan: [{ Plan: node }] } })).toEqual({ Plan: node })
+    expect(findExplainRoot(node)).toEqual({ Plan: node })
+  })
+
+  it('returns null for anything without a plan', () => {
+    expect(findExplainRoot(null)).toBeNull()
+    expect(findExplainRoot('EXPLAIN')).toBeNull()
+    expect(findExplainRoot({ rows: [] })).toBeNull()
+    expect(parsePlan({ rows: [] })).toBeNull()
+  })
+})
+
+describe('nodeTitle', () => {
+  it.each([
+    [{ 'Node Type': 'Hash Join', 'Join Type': 'Left' }, 'Hash Left Join'],
+    [{ 'Node Type': 'Hash Join', 'Join Type': 'Inner' }, 'Hash Join'],
+    [{ 'Node Type': 'Nested Loop', 'Join Type': 'Anti' }, 'Nested Loop Anti Join'],
+    [{ 'Node Type': 'Aggregate', Strategy: 'Hashed' }, 'HashAggregate'],
+    [
+      { 'Node Type': 'Aggregate', Strategy: 'Sorted', 'Partial Mode': 'Partial' },
+      'Partial GroupAggregate',
+    ],
+    [{ 'Node Type': 'Seq Scan', 'Parallel Aware': true }, 'Parallel Seq Scan'],
+    [{ 'Node Type': 'Index Scan', 'Scan Direction': 'Backward' }, 'Index Scan Backward'],
+    [{ 'Node Type': 'ModifyTable', Operation: 'Insert' }, 'Insert'],
+    [{}, 'Plan node'],
+  ])('names %o as psql does', (node, title) => {
+    expect(nodeTitle(node)).toBe(title)
+  })
+})
+
+describe('parsePlan', () => {
+  it('builds the tree with totals over loops and the time each operation adds', () => {
+    const plan = parsed(ANALYZED)
+
+    expect(plan.analyzed).toBe(true)
+    expect(plan.executionMs).toBe(101)
+    expect(plan.planningMs).toBe(0.5)
+    expect(plan.rows).toBe(5000)
+    expect(plan.nodes.map((node) => [node.id, node.depth, node.title, node.object])).toEqual([
+      ['0', 0, 'Hash Join', null],
+      ['0.0', 1, 'Seq Scan', 'orders o'],
+      ['0.1', 1, 'Hash', null],
+      ['0.1.0', 2, 'Index Scan', 'customers c using customers_pkey'],
+    ])
+    const [join, scan, hash, index] = plan.nodes
+    expect(join!.exclusiveMs).toBe(25)
+    expect(scan!.exclusiveMs).toBe(70)
+    expect(hash!.exclusiveMs).toBe(1)
+    expect(index!.exclusiveMs).toBe(4)
+    expect(scan!.timeShare).toBeCloseTo(70 / 101)
+    expect(join!.exclusiveCost).toBe(20)
+    expect(hash!.exclusiveCost).toBe(5)
+    expect(join!.estimateFactor).toBe(500)
+    expect(scan!.estimateFactor).toBeCloseTo(0.02)
+    expect(scan!.rowsRemoved).toBe(99000)
+    expect(join!.conditions).toEqual([{ label: 'Hash Cond', text: '(o.customer_id = c.id)' }])
+    expect(hash!.details.find((detail) => detail.label === 'Hash')?.value).toContain('4 batches')
+  })
+
+  it('points at the slowest operation, the worst estimates, the discarded rows and the hash batches', () => {
+    const titles = parsed(ANALYZED).insights.map((insight) => [
+      insight.severity,
+      insight.nodeId,
+      insight.title,
+    ])
+
+    expect(titles).toEqual([
+      ['high', '0.0', 'Seq Scan on orders o takes 69% of the execution time'],
+      ['high', '0', 'Row estimate off ×500 at Hash Join'],
+      ['medium', '0.0', 'Row estimate off ×50 at Seq Scan on orders o'],
+      ['medium', '0.0', 'Seq Scan on orders o discards 99% of the rows it reads'],
+      ['medium', '0.1', 'Hash split into 4 batches'],
+    ])
+  })
+
+  it('keeps wall time under Gather by dividing by the processes that ran in parallel', () => {
+    const plan = parsed({
+      Plan: {
+        'Node Type': 'Gather',
+        'Workers Planned': 2,
+        'Workers Launched': 2,
+        'Total Cost': 10,
+        'Plan Rows': 3,
+        'Actual Rows': 3,
+        'Actual Loops': 1,
+        'Actual Total Time': 12,
+        Plans: [
+          {
+            'Node Type': 'Seq Scan',
+            'Parallel Aware': true,
+            'Relation Name': 't',
+            'Total Cost': 8,
+            'Plan Rows': 1,
+            'Actual Rows': 1,
+            'Actual Loops': 3,
+            'Actual Total Time': 10,
+          },
+        ],
+      },
+    })
+    const [gather, scan] = plan.nodes
+
+    expect(scan!.title).toBe('Parallel Seq Scan')
+    expect(scan!.inclusiveMs).toBe(10)
+    expect(scan!.actualRows).toBe(3)
+    expect(gather!.exclusiveMs).toBe(2)
+    expect(gather!.details).toContainEqual({
+      key: 'workers',
+      label: 'Workers',
+      value: '2 launched of 2 planned',
+    })
+  })
+
+  it('reports operations never executed and leaves their factor empty', () => {
+    const plan = parsed({
+      Plan: {
+        'Node Type': 'Nested Loop',
+        'Total Cost': 5,
+        'Plan Rows': 1,
+        'Actual Rows': 0,
+        'Actual Loops': 1,
+        'Actual Total Time': 0.1,
+        Plans: [
+          {
+            'Node Type': 'Seq Scan',
+            'Relation Name': 'a',
+            'Total Cost': 1,
+            'Plan Rows': 1,
+            'Actual Rows': 0,
+            'Actual Loops': 1,
+            'Actual Total Time': 0.05,
+          },
+          {
+            'Node Type': 'Seq Scan',
+            'Relation Name': 'b',
+            'Total Cost': 1,
+            'Plan Rows': 1,
+            'Actual Rows': 0,
+            'Actual Loops': 0,
+            'Actual Total Time': 0,
+          },
+        ],
+      },
+    })
+
+    expect(plan.nodes[2]!.neverExecuted).toBe(true)
+    expect(plan.nodes[2]!.estimateFactor).toBeNull()
+    expect(plan.insights.map((insight) => insight.title)).toContain(
+      '1 operation was never executed',
+    )
+  })
+
+  it('says a plan-only result holds estimates and a generic plan has no values', () => {
+    const plan = parsed(
+      {
+        Plan: { 'Node Type': 'Seq Scan', 'Relation Name': 't', 'Total Cost': 10, 'Plan Rows': 100 },
+      },
+      'generic',
+    )
+
+    expect(plan.analyzed).toBe(false)
+    expect(plan.rows).toBe(100)
+    expect(plan.nodes[0]!.costShare).toBe(1)
+    expect(plan.insights.map((insight) => insight.title)).toEqual([
+      'Plan only: costs are estimates, not times',
+      'Generic plan, for any value of the parameters',
+    ])
+  })
+})
+
+describe('planText', () => {
+  it('prints the plan as psql does, with conditions and timings', () => {
+    const text = planText(parsed(ANALYZED)).split('\n')
+
+    expect(text[0]).toMatch(
+      /^Hash Join {2}\(cost=\?\.\.200\.00 rows=10 width=\?\) \(actual time=\?\.\.100\.000 rows=5000 loops=1\)$/,
+    )
+    expect(text[1]).toBe('  Hash Cond: (o.customer_id = c.id)')
+    expect(text[2]).toMatch(/^ {2}-> {2}Seq Scan on orders o {2}\(cost=/)
+    expect(text).toContain('        Filter: (status = 1)')
+    expect(text).toContain('        Rows removed by Filter: 99,000')
+    expect(text.find((line) => line.includes('Index Scan'))).toMatch(
+      /^ {8}-> {2}Index Scan on customers c using customers_pkey/,
+    )
+    expect(text.at(-2)).toBe('Planning Time: 0.500 ms')
+    expect(text.at(-1)).toBe('Execution Time: 101.000 ms')
+  })
+})
+
+describe('diffPlans', () => {
+  const left = parsed({
+    Plan: {
+      'Node Type': 'Sort',
+      'Total Cost': 20,
+      'Sort Key': ['id'],
+      Plans: [
+        { 'Node Type': 'Seq Scan', 'Relation Name': 't', 'Total Cost': 10, Filter: '(a = $1)' },
+      ],
+    },
+  })
+
+  it('marks every operation the same when the shape is the same', () => {
+    expect(diffPlans(left, left).map((row) => row.change)).toEqual(['same', 'same'])
+  })
+
+  it('aligns by place in the tree and marks changed, added and removed operations', () => {
+    const right = parsed({
+      Plan: {
+        'Node Type': 'Sort',
+        'Total Cost': 30,
+        'Sort Key': ['id'],
+        Plans: [
+          {
+            'Node Type': 'Index Scan',
+            'Relation Name': 't',
+            'Index Name': 't_a',
+            'Total Cost': 5,
+            'Index Cond': '(a = $1)',
+          },
+          { 'Node Type': 'Seq Scan', 'Relation Name': 'u', 'Total Cost': 1 },
+        ],
+      },
+    })
+
+    expect(diffPlans(left, right).map((row) => [row.id, row.depth, row.change])).toEqual([
+      ['0', 0, 'same'],
+      ['0.0', 1, 'changed'],
+      ['0.1', 1, 'added'],
+    ])
+    expect(diffPlans(right, left).at(-1)!.change).toBe('removed')
+  })
+})
+
+describe('small helpers', () => {
+  it('counts placeholders as the highest $n', () => {
+    expect(placeholderCount('SELECT * FROM t WHERE a = $1 AND b = $12 AND c = $3')).toBe(12)
+    expect(placeholderCount('SELECT 1')).toBe(0)
+  })
+
+  it('formats factors, ratios and buffer sizes', () => {
+    expect(formatFactor(500)).toBe('×500')
+    expect(formatFactor(25)).toBe('×25')
+    expect(formatFactor(0.5)).toBe('×2.0')
+    expect(changeRatio(10, 12)).toBeCloseTo(1.2)
+    expect(changeRatio(0, 12)).toBeNull()
+    expect(changeRatio(null, 12)).toBeNull()
+    expect(bufferBytes(null)).toBe('—')
+    expect(bufferBytes(128)).toMatch(/^1(\.0)? MiB$|^1(\.0)? MB$/)
+  })
+})

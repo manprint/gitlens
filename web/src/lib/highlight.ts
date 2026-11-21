@@ -1,3 +1,5 @@
+import { translate } from '@/i18n/store'
+
 /**
  * The full search of the console (D20): marks where a search term occurs in a
  * text, and the words the result lines use. Pure: the pages render the
@@ -61,6 +63,6 @@ export function searchTermOf(q: string | null | undefined): string {
  */
 export function matchCountNote(count: number, hasMore: boolean): string {
   return hasMore
-    ? `More than ${count} matches — narrow the search.`
-    : `${count} ${count === 1 ? 'match' : 'matches'}.`
+    ? translate('shell.search.moreMatches', { count })
+    : translate('shell.search.matches', { count })
 }

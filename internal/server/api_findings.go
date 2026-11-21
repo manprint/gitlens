@@ -40,6 +40,10 @@ type findingJSON struct {
 	ResolvedAt     *time.Time      `json:"resolved_at,omitempty"`
 	MutedUntil     *time.Time      `json:"muted_until,omitempty"`
 	MuteReason     *string         `json:"mute_reason,omitempty"`
+	QueryText      *string         `json:"query_text,omitempty"`
+	// Message is the catalog key and arguments of the texts above (plan 006
+	// F5); absent for findings written before it and rules not in the catalog.
+	Message json.RawMessage `json:"message,omitempty"`
 }
 
 func (a *API) registerFindingsRoutes(r chi.Router) {
@@ -82,15 +86,33 @@ func findingPathID(r *http.Request, action string) string {
 	return id
 }
 
-const findingSelect = `finding_id,rule_id,severity,state,scope,cluster_id,instance_id,datname,object_name,title,detail,remediation,evidence,degraded_reason,first_seen,last_seen,resolved_at,muted_until,mute_reason`
+// The last column is the statement a query finding (object_name queryid:<n>)
+// is about, its latest text in query_texts: the console shows the query, not
+// a bare queryid. NULL for other findings and once the text was purged. The
+// nested CASE keeps a malformed object_name from failing the bigint cast.
+const findingSelect = `finding_id,rule_id,severity,state,scope,cluster_id,instance_id,datname,object_name,title,detail,remediation,evidence,degraded_reason,first_seen,last_seen,resolved_at,muted_until,mute_reason,message,
+	CASE WHEN findings.object_name ~ '^queryid:-?[0-9]{1,20}$' THEN
+	  CASE WHEN substr(findings.object_name, 9)::numeric BETWEEN -9223372036854775808 AND 9223372036854775807 THEN
+	    (SELECT qt.query_text FROM query_texts qt
+	      WHERE qt.tenant_id = findings.tenant_id AND qt.cluster_id = findings.cluster_id
+	        AND qt.datname = findings.datname AND qt.queryid = substr(findings.object_name, 9)::bigint
+	      ORDER BY qt.last_seen DESC LIMIT 1)
+	  END
+	END`
 
 type findingScanner interface{ Scan(...any) error }
 
-func scanFinding(row findingScanner) (findingJSON, error) {
+// scanFinding reads one row; with a locale (requestLocale) the title, detail
+// and remediation are rendered in it from the finding's message.
+func scanFinding(row findingScanner, locale string) (findingJSON, error) {
 	var f findingJSON
-	var evidence []byte
+	var evidence, message []byte
 	var cluster *int64
-	err := row.Scan(&f.FindingID, &f.RuleID, &f.Severity, &f.State, &f.Scope, &cluster, &f.InstanceID, &f.Datname, &f.ObjectName, &f.Title, &f.Detail, &f.Remediation, &evidence, &f.DegradedReason, &f.FirstSeen, &f.LastSeen, &f.ResolvedAt, &f.MutedUntil, &f.MuteReason)
+	err := row.Scan(&f.FindingID, &f.RuleID, &f.Severity, &f.State, &f.Scope, &cluster, &f.InstanceID, &f.Datname, &f.ObjectName, &f.Title, &f.Detail, &f.Remediation, &evidence, &f.DegradedReason, &f.FirstSeen, &f.LastSeen, &f.ResolvedAt, &f.MutedUntil, &f.MuteReason, &message, &f.QueryText)
+	if len(message) > 0 {
+		f.Message = json.RawMessage(message)
+		localizeFinding(&f, locale)
+	}
 	// A decimal string, unsigned (ClusterId in the spec). It was a JSON
 	// number: a 19-digit system identifier lost its last digits in the
 	// browser and never matched its cluster.
@@ -182,7 +204,7 @@ func (a *API) listFindings(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []findingJSON{}
 	for rows.Next() {
-		f, err := scanFinding(rows)
+		f, err := scanFinding(rows, requestLocale(r))
 		if err != nil {
 			writeError(w, 500, "finding scan failed", err.Error())
 			return
@@ -202,7 +224,7 @@ func (a *API) getFinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := findingPathID(r, "")
-	f, err := scanFinding(a.pool.QueryRow(r.Context(), "SELECT "+findingSelect+" FROM findings WHERE tenant_id='default' AND finding_id=$1", id))
+	f, err := scanFinding(a.pool.QueryRow(r.Context(), "SELECT "+findingSelect+" FROM findings WHERE tenant_id='default' AND finding_id=$1", id), requestLocale(r))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "finding not found", id)
 		return

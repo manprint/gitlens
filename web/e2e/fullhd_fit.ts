@@ -88,7 +88,7 @@ export async function measurePage(
     const main = document.querySelector('main')
     const dataTable = [...document.querySelectorAll('main table')].find(
       (table) =>
-        !(table.getAttribute('aria-label') ?? '').endsWith(' data') &&
+        !table.hasAttribute('data-chart-data') &&
         table.closest('[data-topology-edge-table]') === null,
     )
     const firstRow = dataTable?.querySelector(':scope > tbody > tr') ?? null
@@ -110,8 +110,7 @@ export async function measurePage(
       row: height(firstRow),
       rows: dataTable?.querySelectorAll(':scope > tbody > tr').length ?? 0,
       pager: height(
-        dataTable?.closest('[data-table-card]')?.querySelector('nav[aria-label$="pagination"]') ??
-          null,
+        dataTable?.closest('[data-table-card]')?.querySelector('nav[data-table-pager]') ?? null,
       ),
       aboveTable:
         main && dataTable
@@ -122,7 +121,7 @@ export async function measurePage(
         : 0,
       scrollingTableBoxes: boxes.filter((box) => box.scrollHeight > box.clientHeight + 1).length,
       pagerBottom: (() => {
-        const nav = document.querySelector('[data-table-card] nav[aria-label$="pagination"]')
+        const nav = document.querySelector('[data-table-card] nav[data-table-pager]')
         return nav ? Math.round(nav.getBoundingClientRect().bottom) : null
       })(),
     }
@@ -234,19 +233,30 @@ export async function headerLineProblems(page: Page): Promise<string[]> {
         })
       })
     })
-    // The page header: its eyebrow, title and actions never overlap, wrapped or not.
+    // The page header: its eyebrow, title, title hint and actions never overlap, wrapped or not.
     const pageHeader = document.querySelector('header:has(#page-title)')
     const pageTitle = document.getElementById('page-title')
     if (pageHeader && pageTitle && visible(pageHeader)) {
       const eyebrow = pageTitle.previousElementSibling
+      const hint = pageTitle.nextElementSibling
       const actions = pageHeader.lastElementChild
-      const parts = [eyebrow, pageTitle, actions].filter(
+      const parts = [eyebrow, pageTitle, hint, actions].filter(
         (part): part is Element =>
           part !== null &&
           (part === pageTitle || !part.contains(pageTitle)) &&
           part !== pageHeader.firstElementChild &&
           visible(part),
       )
+      const headerBox = pageHeader.getBoundingClientRect()
+      const titleBox = pageTitle.getBoundingClientRect()
+      if (
+        titleBox.right > headerBox.right + 1 ||
+        (pageTitle.scrollWidth > pageTitle.clientWidth + 1 && !pageTitle.hasAttribute('title'))
+      ) {
+        problems.push(
+          `h1 clipped: page header: ${label(pageTitle)} (${span(titleBox)}) does not fit x ${Math.round(headerBox.left)}..${Math.round(headerBox.right)}`,
+        )
+      }
       for (let i = 0; i < parts.length; i++) {
         for (let j = i + 1; j < parts.length; j++) {
           const px = overlap(parts[i]!.getBoundingClientRect(), parts[j]!.getBoundingClientRect())

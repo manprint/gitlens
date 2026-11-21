@@ -1,3 +1,4 @@
+import { activeIntl } from '@/i18n/store'
 import { localizedNumber, UNKNOWN } from './shared'
 
 /**
@@ -6,7 +7,7 @@ import { localizedNumber, UNKNOWN } from './shared'
  * pg_stat_statements, so sub-millisecond values keep two decimals in ms, and
  * longer values move to seconds, minutes and hours.
  */
-export function formatMilliseconds(ms: number | null | undefined, locale = 'en-US'): string {
+export function formatMilliseconds(ms: number | null | undefined, locale = activeIntl()): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return UNKNOWN
 
   const sign = ms < 0 ? '-' : ''

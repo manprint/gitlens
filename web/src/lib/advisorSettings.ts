@@ -8,6 +8,9 @@
 
 import type { ApiFailure } from '@/api/client'
 import type { Schemas } from '@/api/types'
+import { REFERENCE_LOCALE } from '@/i18n/locales'
+import type { MessageKey } from '@/i18n/messages/en'
+import { translate } from '@/i18n/store'
 
 export type AdvisorRule = Schemas['AdvisorRule']
 export type AdvisorWindow = Schemas['AdvisorWindow']
@@ -19,17 +22,23 @@ export function ruleCategory(id: string): string {
   return dot > 0 ? id.slice(0, dot) : id
 }
 
-/** What each window looks back over, in the words of the checks that use it. */
-export const WINDOW_LABELS: Record<AdvisorWindowKey, string> = {
-  'window.unused_index': 'Unused-index history',
-  'window.backup_history': 'Backup history',
+const WINDOW_LABEL_KEYS = {
+  'window.unused_index': 'settings.lib.advisor.window.label.unusedIndex',
+  'window.backup_history': 'settings.lib.advisor.window.label.backupHistory',
+} as const satisfies Record<AdvisorWindowKey, MessageKey>
+
+const WINDOW_HELP_KEYS = {
+  'window.unused_index': 'settings.lib.advisor.window.help.unusedIndex',
+  'window.backup_history': 'settings.lib.advisor.window.help.backupHistory',
+} as const satisfies Record<AdvisorWindowKey, MessageKey>
+
+/** What the window looks back over, in the words of the checks that use it. */
+export function windowLabel(key: AdvisorWindowKey): string {
+  return translate(WINDOW_LABEL_KEYS[key])
 }
 
-export const WINDOW_HELP: Record<AdvisorWindowKey, string> = {
-  'window.unused_index':
-    'How long an index must go without a scan, in the instance history or in the statistics, before the unused-index check reports it.',
-  'window.backup_history':
-    'How long an instance must have been monitored before the backup checks read "no base backup seen" as a finding rather than as not enough history.',
+export function windowHelp(key: AdvisorWindowKey): string {
+  return translate(WINDOW_HELP_KEYS[key])
 }
 
 export type WindowUnit = 'hours' | 'days'
@@ -54,13 +63,21 @@ export function windowDraft(seconds: number): { value: string; unit: WindowUnit 
   }
 }
 
-/** "7 days", "36 hours", "1 hour": a window in the unit that reads it exactly. */
-export function formatWindow(seconds: number): string {
+/** A window in the unit that reads it exactly: "7 days", "36 hours", "1 hour". */
+export function windowText(seconds: number, locale?: string): string {
   const draft = windowDraft(seconds)
   const n = Number(draft.value)
-  if (draft.unit === 'days') return `${n} ${n === 1 ? 'day' : 'days'}`
-  if (seconds % WINDOW_UNIT_SECONDS.hours !== 0) return `${seconds} seconds`
-  return `${n} ${n === 1 ? 'hour' : 'hours'}`
+  if (draft.unit === 'days')
+    return translate('settings.lib.advisor.window.days', { days: n }, locale)
+  if (seconds % WINDOW_UNIT_SECONDS.hours !== 0) {
+    return translate('settings.lib.advisor.window.seconds', { seconds }, locale)
+  }
+  return translate('settings.lib.advisor.window.hours', { hours: n }, locale)
+}
+
+/** The English form of a window, for the index explanation that is not translated yet. */
+export function formatWindow(seconds: number): string {
+  return windowText(seconds, REFERENCE_LOCALE)
 }
 
 export type WindowValidation = { ok: true; seconds: number } | { ok: false; error: string }
@@ -72,12 +89,19 @@ export function validateWindow(
   window: Pick<AdvisorWindow, 'min_seconds' | 'max_seconds'>,
 ): WindowValidation {
   const value = text.trim()
-  const range = `between ${formatWindow(window.min_seconds)} and ${formatWindow(window.max_seconds)}`
-  if (value === '') return { ok: false, error: `Enter a window ${range}.` }
-  if (!/^\d+$/.test(value)) return { ok: false, error: `Enter a whole number of ${unit}.` }
+  const outOfRange = {
+    min: windowText(window.min_seconds),
+    max: windowText(window.max_seconds),
+  }
+  if (value === '') {
+    return { ok: false, error: translate('settings.lib.advisor.window.outOfRange', outOfRange) }
+  }
+  if (!/^\d+$/.test(value)) {
+    return { ok: false, error: translate('settings.lib.advisor.window.wholeNumber', { unit }) }
+  }
   const seconds = Number(value) * WINDOW_UNIT_SECONDS[unit]
   if (seconds < window.min_seconds || seconds > window.max_seconds) {
-    return { ok: false, error: `Enter a window ${range}.` }
+    return { ok: false, error: translate('settings.lib.advisor.window.outOfRange', outOfRange) }
   }
   return { ok: true, seconds }
 }
@@ -95,22 +119,30 @@ function isApiFailure(error: unknown): error is ApiFailure {
 
 /** The inline message of a failed write; the stored value is unchanged (I-11). */
 export function advisorErrorMessage(error: unknown, subject: string): string {
-  if (!isApiFailure(error)) return `${subject} was not changed. Try again.`
+  if (!isApiFailure(error)) return translate('settings.lib.advisor.error.generic', { subject })
   switch (error.kind) {
     case 'server':
-      if (error.status === 503) return `${subject} was not changed: the store is unavailable.`
-      return `${subject} was not changed: ${error.detail ? `${error.error}: ${error.detail}` : error.error}`
+      if (error.status === 503) {
+        return translate('settings.lib.advisor.error.unavailable', { subject })
+      }
+      return translate('settings.lib.advisor.error.failed', {
+        subject,
+        reason: error.detail ? `${error.error}: ${error.detail}` : error.error,
+      })
     case 'unprocessable':
-      return `${subject} was not changed: ${error.detail ? `${error.error}: ${error.detail}` : error.error}`
+      return translate('settings.lib.advisor.error.failed', {
+        subject,
+        reason: error.detail ? `${error.error}: ${error.detail}` : error.error,
+      })
     case 'not_found':
-      return `${subject} was not changed: the server does not know it. Reload the page.`
+      return translate('settings.lib.advisor.error.notFound', { subject })
     case 'unauthorized':
-      return 'Your session has expired. Sign in again to change advisor settings.'
+      return translate('settings.lib.advisor.error.unauthorized')
     case 'forbidden':
-      return `${subject} was not changed: the server refused the change.`
+      return translate('settings.lib.advisor.error.refused', { subject })
     case 'network':
     case 'malformed':
     case 'client':
-      return `${subject} was not changed: ${error.message}`
+      return translate('settings.lib.advisor.error.failed', { subject, reason: error.message })
   }
 }

@@ -1,9 +1,9 @@
-import { render, screen, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
 import { withTruncatedConnections } from '@/test/fixtures/getLocks'
-import { renderWithProviders } from '@/test/render'
+import { renderInRouter as render, renderWithProviders } from '@/test/render'
 import { NOW } from '@/test/time'
 
 import { ActivitySection, type ActivityResponseLike } from './ActivitySection'

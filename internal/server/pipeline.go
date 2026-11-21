@@ -352,6 +352,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		stmtMap := make(map[statementKey]*store.StatementRow)
 		replMap := make(map[replicationKey]*store.ReplicationRow)
 		var instEvents []store.EventRow
+		incidentsQueued := map[string]bool{}
 		var instFacts []store.ObjectFactRow
 		var clearCheckSkips []string
 		partialState := make(map[partialKey]partialObservation)
@@ -529,6 +530,22 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				}
 				if f.Kind == "plan" {
 					// phase 8: plans are routed to their dedicated history table.
+					continue
+				}
+				// A capture of the agent's watcher is an event, not an object fact.
+				if f.Kind == incidentFactKind {
+					ev, ok := incidentEvent(f, r.TS, tenantID, cidDB, instUUID)
+					if !ok {
+						IncIngestRejected("invalid_fact")
+						continue
+					}
+					dup, dupErr := incidentRecorded(ctx, tx, ev, incidentsQueued)
+					if dupErr != nil {
+						return nil, dupErr
+					}
+					if !dup {
+						instEvents = append(instEvents, ev)
+					}
 					continue
 				}
 				if f.Kind == "xmin_horizon" {

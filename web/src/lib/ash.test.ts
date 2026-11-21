@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   avgActiveSessions,
   foldOther,
-  isUnderSampled,
   orderGroups,
   toStackedSeries,
   topQueries,
@@ -109,9 +108,7 @@ describe('ASH derivation helpers', () => {
     expect(avgActiveSessions(10, 0)).toBeNull()
   })
 
-  it('UI-ASH-007 marks fewer than 60 samples as under-sampled', () => {
-    expect(isUnderSampled([{ samples: 59 }])).toBe(true)
-    expect(isUnderSampled([{ samples: 60 }])).toBe(false)
+  it('UI-ASH-007 sums the backend samples of a range', () => {
     expect(totalSamples([{ samples: 20 }, { samples: 40 }])).toBe(60)
   })
 

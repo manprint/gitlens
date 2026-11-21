@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import { type ActivityMetrics } from './activity'
 import {
-  XMIN_NONE_TEXT,
-  XMIN_PENDING_TEXT,
+  xminNoneText,
+  xminPendingText,
   xminHorizonState,
   xminIdentityText,
   type XminHorizon,
@@ -40,8 +40,8 @@ describe('xminHorizonState', () => {
   })
 
   it('UI-XMIN-004 keeps the exact pending wording of the spec', () => {
-    expect(XMIN_PENDING_TEXT).toBe('xmin holder unknown: no activity snapshot')
-    expect(XMIN_NONE_TEXT).toContain('holds an xmin in the latest activity sample')
+    expect(xminPendingText()).toBe('xmin holder unknown: no activity snapshot')
+    expect(xminNoneText()).toContain('holds an xmin in the latest activity sample')
   })
 })
 

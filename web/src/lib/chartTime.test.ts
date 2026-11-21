@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { refreshLocale, setServerLanguage } from '@/i18n/store'
 
 import {
   countGaps,
-  countResets,
   formatAxisTime,
   formatRangeLabel,
   formatStepLabel,
@@ -47,12 +48,6 @@ describe('chart time labels', () => {
     expect(formatStepLabel(86_400)).toBe('1d')
   })
 
-  it('CTIME-007 counts only null buckets with values on both sides', () => {
-    expect(countResets([null, 1, null, null, 2, null])).toBe(2)
-    expect(countResets([null, null, 3])).toBe(0)
-    expect(countResets([])).toBe(0)
-  })
-
   it('CTIME-009 counts a run of interior null buckets as one gap', () => {
     expect(countGaps([null, 1, null, null, 2, null, 3, null])).toBe(2)
     expect(countGaps([1, ...Array<null>(49).fill(null), 2])).toBe(1)
@@ -65,5 +60,20 @@ describe('chart time labels', () => {
     const to = new Date('2026-10-29T10:41:00Z')
     expect(formatRangeLabel(from, to, 0)).toBe('Oct 29 09:41 → 10:41 UTC')
     expect(formatRangeLabel(from, to, -5)).toBe('Oct 29 09:41 → 10:41 UTC')
+  })
+})
+
+describe('range label in the console language (review 2026-11-21)', () => {
+  afterEach(async () => {
+    await setServerLanguage(undefined)
+    await refreshLocale()
+  })
+
+  it('CHT-LOCALE-001 writes the day before the month in Italian', async () => {
+    await setServerLanguage('it')
+    const from = new Date('2026-10-29T09:41:00Z')
+    const to = new Date('2026-10-30T10:41:00Z')
+    expect(formatRangeLabel(from, to, 60, 'UTC')).toBe('29 ott 09:41 → 30 ott 10:41 UTC · passo 1m')
+    expect(formatAxisTime(from.getTime(), 3 * 86_400_000, 'UTC')).toBe('29 ott 09:41')
   })
 })

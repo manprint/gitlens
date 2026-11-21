@@ -7,6 +7,7 @@ import { useFindings } from '@/api/queries'
 import type { Cluster } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { StandbyStatsNote } from '@/components/StandbyStatsNote'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Button } from '@/components/ui/button'
@@ -22,30 +23,35 @@ import { IndexesPanel } from './IndexesPanel'
 import { noIndexStatsText } from './emptyText'
 import { IndexTaxPanel } from './IndexTaxPanel'
 import { SearchEverythingBox, SearchEverythingResults } from './SearchEverything'
-import { SuggestionsPanel } from './SuggestionsPanel'
+import { MissingIndexesPanel } from './MissingIndexesPanel'
 import { INDEX_TABLE_IDS, INDEX_VIEW_PARAM } from './indexViews'
+import { useT } from '@/i18n/react'
 
 /** The most indexes the API returns for one server. */
 export const INDEX_LIMIT = 500
 
 export const TABS = [
-  { value: 'indexes', label: 'Indexes' },
-  { value: 'cleanup', label: 'Cleanup' },
-  { value: 'dead-rows', label: 'Dead rows' },
-  { value: 'suggestions', label: 'Suggestions' },
-  { value: 'tax', label: 'Index tax' },
+  { value: 'indexes', labelKey: 'indexes.page.tabIndexes' },
+  { value: 'missing', labelKey: 'indexes.page.tabMissing' },
+  { value: 'cleanup', labelKey: 'indexes.page.tabCleanup' },
+  { value: 'dead-rows', labelKey: 'indexes.page.tabDeadRows' },
+  { value: 'tax', labelKey: 'indexes.page.tabTax' },
 ] as const
 
 type TabValue = (typeof TABS)[number]['value']
 
 const DEFAULT_TAB: TabValue = 'indexes'
 
+/** Old tab names still opened by saved links. */
+const TAB_ALIASES: Readonly<Record<string, TabValue>> = { suggestions: 'missing' }
+
 function readTab(value: string | null): TabValue {
-  return TABS.find((tab) => tab.value === value)?.value ?? DEFAULT_TAB
+  const name = value === null ? null : (TAB_ALIASES[value] ?? value)
+  return TABS.find((tab) => tab.value === name)?.value ?? DEFAULT_TAB
 }
 
 /** Every table of the page: a database change sends each back to its first page (D23). */
-const TABLE_IDS = [...INDEX_TABLE_IDS, 'cleanup', 'dead-rows', 'suggestions', 'tax']
+const TABLE_IDS = [...INDEX_TABLE_IDS, 'cleanup', 'dead-rows', 'missing', 'tax']
 
 interface InstanceOption {
   id: string
@@ -84,13 +90,16 @@ function instanceRole(clusters: readonly Cluster[], instanceId: string): string 
  * 1600 px (D26), so each tab's table has the height of the screen.
  */
 function IndexPageHeader({ actions }: { actions?: ReactNode }) {
+  const t = useT()
+
   return (
     <PageHeader
-      eyebrow="Index management"
+      help={<HelpLink anchor="indexes" label={t('indexes.page.helpLabel')} />}
+      eyebrow={t('indexes.page.eyebrow')}
       icon={ListTree}
       subtitleHint="indexes.page"
-      subtitle="Every index the agent reports for a server: how many there are, which columns they cover, how big they are and how they are used, with the advisor's findings on unused, duplicate, redundant and invalid indexes and on foreign keys that lack one."
-      title="Index analysis"
+      subtitle={t('indexes.page.subtitle')}
+      title={t('indexes.page.title')}
       wrapActionsBelowFullHd
       {...(actions === undefined ? {} : { actions })}
     />
@@ -105,9 +114,19 @@ interface AnalysisProps {
   siblings: readonly SiblingServer[]
   /** The chosen server's role: a standby says its statistics are its own (V-10). */
   role: string | null | undefined
+  /** The chosen server's name, for generated scripts. */
+  serverLabel: string
 }
 
-function InstanceIndexes({ serverControl, instanceId, siblings, role }: AnalysisProps) {
+function InstanceIndexes({
+  serverControl,
+  instanceId,
+  siblings,
+  role,
+  serverLabel,
+}: AnalysisProps) {
+  const t = useT()
+
   const [searchParams, setSearchParams] = useSearchParams()
   const database = searchParams.get('db') ?? ''
   const tab = readTab(searchParams.get('tab'))
@@ -157,8 +176,9 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
         foreignKeys: foreignKeyGaps(findings).filter(
           (gap) => database === '' || gap.datname === database,
         ).length,
+        t,
       }),
-    [allRows.length, database, findings],
+    [allRows.length, database, findings, t],
   )
 
   function setParam(key: 'db', value: string) {
@@ -183,8 +203,8 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
   // The Indexes and Cleanup tabs wait for the indexes; the Dead rows tab loads its own tables.
   const indexesState =
     indexesQuery.isPending && response === undefined ? (
-      <div aria-busy="true" aria-label="Loading indexes" role="status">
-        Loading indexes…
+      <div aria-busy="true" aria-label={t('indexes.page.loadingIndexes')} role="status">
+        {t('indexes.page.loadingIndexesEllipsis')}
       </div>
     ) : indexesQuery.error && response === undefined ? (
       <ErrorState
@@ -200,10 +220,10 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
       data-testid="index-page-controls"
     >
       <SearchEverythingBox instanceId={instanceId} />
-      <TabsList aria-label="Index management sections" variant="line">
+      <TabsList aria-label={t('indexes.page.sectionsAria')} variant="line">
         {TABS.map((option) => (
           <TabsTrigger key={option.value} value={option.value}>
-            {option.label}
+            {t(option.labelKey)}
           </TabsTrigger>
         ))}
       </TabsList>
@@ -213,7 +233,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
           className="text-muted-foreground text-xs font-medium min-[1600px]:sr-only"
           htmlFor="index-db"
         >
-          Database
+          {t('indexes.page.database')}
         </label>
         <div className="relative">
           <Database
@@ -226,7 +246,7 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
             onChange={(event) => setParam('db', event.target.value)}
             value={database}
           >
-            <option value="">All databases</option>
+            <option value="">{t('indexes.page.allDatabases')}</option>
             {databases.map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -255,12 +275,13 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
           role="status"
         >
           <span className="min-w-0">
-            {missing.tab === 'dead-rows' ? 'The table' : 'The index'}{' '}
-            <code className="font-mono text-xs">{missing.key}</code> is not in the current list:
-            Index analysis shows only what the agent reported in its latest collection.
+            {missing.tab === 'dead-rows'
+              ? t('indexes.page.missingTable')
+              : t('indexes.page.missingIndex')}{' '}
+            <code className="font-mono text-xs">{missing.key}</code> {t('indexes.page.notInList')}
           </span>
           <Button onClick={() => setMissing(null)} size="xs" type="button" variant="ghost">
-            Dismiss
+            {t('indexes.page.dismiss')}
           </Button>
         </div>
       ) : null}
@@ -301,8 +322,14 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
           onFocusDone={focusDone}
         />
       </TabsContent>
-      <TabsContent value="suggestions">
-        <SuggestionsPanel database={database} instanceId={instanceId} />
+      <TabsContent value="missing">
+        <MissingIndexesPanel
+          database={database}
+          findings={findings}
+          findingsPending={findingsQuery.isPending}
+          instanceId={instanceId}
+          serverLabel={serverLabel}
+        />
       </TabsContent>
       <TabsContent value="tax">
         {indexesState ?? (
@@ -320,6 +347,8 @@ function InstanceIndexes({ serverControl, instanceId, siblings, role }: Analysis
 }
 
 export function IndexAnalysisPage() {
+  const t = useT()
+
   const [searchParams, setSearchParams] = useSearchParams()
   const clustersQuery = useClusters()
   const options = useMemo(() => instanceOptions(clustersQuery.data ?? []), [clustersQuery.data])
@@ -348,7 +377,7 @@ export function IndexAnalysisPage() {
               className="text-muted-foreground text-xs font-medium min-[1600px]:sr-only"
               htmlFor="index-instance"
             >
-              Server
+              {t('indexes.page.server')}
             </label>
             <div className="relative">
               <Server
@@ -364,7 +393,7 @@ export function IndexAnalysisPage() {
                 {options.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
-                    {option.up ? '' : ' (down)'}
+                    {option.up ? '' : t('indexes.page.down')}
                   </option>
                 ))}
               </NativeSelect>
@@ -373,6 +402,7 @@ export function IndexAnalysisPage() {
         }
         siblings={siblingServers(clustersQuery.data, instanceId)}
         role={instanceRole(clustersQuery.data, instanceId)}
+        serverLabel={options.find((option) => option.id === instanceId)?.label ?? instanceId}
       />
     )
   }
@@ -387,13 +417,13 @@ export function IndexAnalysisPage() {
           onRetry={() => void clustersQuery.refetch()}
         />
       ) : clustersQuery.isPending ? (
-        <div aria-busy="true" aria-label="Loading servers" role="status">
-          Loading servers…
+        <div aria-busy="true" aria-label={t('indexes.page.loadingServers')} role="status">
+          {t('indexes.page.loadingServersEllipsis')}
         </div>
       ) : (
         <EmptyState
-          description="Set up the pglens agent on a PostgreSQL host to start collecting index statistics."
-          title="No monitored servers yet"
+          description={t('indexes.page.setUpAgent')}
+          title={t('indexes.page.noServers')}
         />
       )}
     </div>

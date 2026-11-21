@@ -6,8 +6,10 @@ import {
   type DataTableProps,
   type DataTableToolbar,
 } from '@/components/layout/DataTable'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
+import { useT, type Translate } from '@/i18n/react'
 import { formatBytes } from '@/lib/format/bytes'
 import { formatDuration } from '@/lib/format/duration'
 import type { SlotRow } from '@/lib/replication'
@@ -17,7 +19,6 @@ import { EmptyCaptioned } from './EmptyCaptioned'
 export type { SlotRow } from '@/lib/replication'
 
 export const DEFAULT_RETAINED_BYTES_THRESHOLD = 1024 ** 3
-const RETENTION_WARNING = "A disconnected standby retains WAL and can fill the primary's disk."
 
 export interface SlotsSectionProps {
   slots?: readonly SlotRow[]
@@ -39,24 +40,44 @@ function walStatusLabel(slot: SlotRow): string {
   return 'Unknown'
 }
 
-const SLOT_STATES = ['Active', 'Inactive', 'Unknown'].map((label) => ({
-  value: label.toLowerCase(),
-  label,
-}))
+function activeText(active: boolean | null, t: Translate): string {
+  if (active === true) return t('cluster.slots.stateActive')
+  if (active === false) return t('cluster.slots.stateInactive')
+  return t('cluster.common.unknown')
+}
 
-const SLOTS_TOOLBAR: DataTableToolbar<SlotRow> = {
-  searchFields: [(slot) => slot.name, (slot) => slot.owningInstance],
-  filters: [
-    { id: 'type', label: 'Type', kind: 'select', accessor: (slot) => slot.slotType ?? 'Unknown' },
-    {
-      id: 'active',
-      label: 'Active state',
-      kind: 'select',
-      options: SLOT_STATES,
-      accessor: (slot) => activeLabel(slot.active).toLowerCase(),
-    },
-    { id: 'wal', label: 'WAL status', kind: 'select', accessor: walStatusLabel },
-  ],
+function walStatusText(slot: SlotRow, t: Translate): string {
+  if (slot.walStatus) return slot.walStatus
+  if (slot.active === false) return t('cluster.slots.walRetaining')
+  if (slot.active === true) return t('cluster.slots.walStreaming')
+  return t('cluster.common.unknown')
+}
+
+// Accessors and option values stay English: they are the filter keys, the labels are translated.
+function slotsToolbar(t: Translate): DataTableToolbar<SlotRow> {
+  return {
+    searchFields: [(slot) => slot.name, (slot) => slot.owningInstance],
+    filters: [
+      {
+        id: 'type',
+        label: t('cluster.slots.filterType'),
+        kind: 'select',
+        accessor: (slot) => slot.slotType ?? 'Unknown',
+      },
+      {
+        id: 'active',
+        label: t('cluster.slots.filterActive'),
+        kind: 'select',
+        options: [
+          { value: 'active', label: t('cluster.slots.stateActive') },
+          { value: 'inactive', label: t('cluster.slots.stateInactive') },
+          { value: 'unknown', label: t('cluster.common.unknown') },
+        ],
+        accessor: (slot) => activeLabel(slot.active).toLowerCase(),
+      },
+      { id: 'wal', label: t('cluster.slots.filterWal'), kind: 'select', accessor: walStatusLabel },
+    ],
+  }
 }
 
 function sortSlots(slots: readonly SlotRow[]): SlotRow[] {
@@ -67,29 +88,29 @@ function sortSlots(slots: readonly SlotRow[]): SlotRow[] {
   })
 }
 
-function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
+function slotColumns(threshold: number, t: Translate): DataTableProps<SlotRow>['columns'] {
   return [
-    { accessorKey: 'name', header: 'Slot name' },
-    { accessorKey: 'owningInstance', header: 'Owning instance' },
+    { accessorKey: 'name', header: t('cluster.slots.colName') },
+    { accessorKey: 'owningInstance', header: t('cluster.slots.colInstance') },
     {
       accessorKey: 'slotType',
-      header: 'Type',
-      cell: ({ getValue }) => getValue<string | null>() ?? 'Unknown',
+      header: t('cluster.slots.filterType'),
+      cell: ({ getValue }) => getValue<string | null>() ?? t('cluster.common.unknown'),
     },
     {
       accessorKey: 'active',
-      header: 'Active state',
-      cell: ({ getValue }) => activeLabel(getValue<boolean | null>()),
+      header: t('cluster.slots.filterActive'),
+      cell: ({ getValue }) => activeText(getValue<boolean | null>(), t),
     },
     {
       id: 'walStatus',
       accessorKey: 'walStatus',
-      header: 'WAL status',
-      cell: ({ row }) => walStatusLabel(row.original),
+      header: t('cluster.slots.filterWal'),
+      cell: ({ row }) => walStatusText(row.original, t),
     },
     {
       accessorKey: 'retainedBytes',
-      header: 'Retained bytes',
+      header: t('cluster.slots.colRetained'),
       meta: { help: 'slots.retained-bytes' },
       cell: ({ getValue }) => {
         const retainedBytes = getValue<number | null>()
@@ -98,17 +119,17 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
           <span
             className={warning ? 'bg-warning/20 font-semibold' : undefined}
             data-retention-warning={warning ? 'true' : undefined}
-            title={warning ? RETENTION_WARNING : undefined}
+            title={warning ? t('cluster.slots.retentionWarning') : undefined}
           >
             {formatBytes(retainedBytes)}
-            {warning ? ` — ${RETENTION_WARNING}` : null}
+            {warning ? ` — ${t('cluster.slots.retentionWarning')}` : null}
           </span>
         )
       },
     },
     {
       accessorKey: 'safeWalSizeBytes',
-      header: 'WAL before invalidation',
+      header: t('cluster.slots.colSafeWal'),
       meta: { help: 'slots.wal-before-invalidation' },
       // null means max_slot_wal_keep_size is unlimited (the slot is never
       // invalidated, and can retain WAL until the disk is full), or that the
@@ -116,12 +137,14 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
       cell: ({ row, getValue }) => {
         const safe = getValue<number | null>()
         if (safe !== null) return formatBytes(safe)
-        return row.original.walStatus === 'lost' ? 'None: required WAL already lost' : 'Unlimited'
+        return row.original.walStatus === 'lost'
+          ? t('cluster.slots.safeWalLost')
+          : t('cluster.slots.unlimited')
       },
     },
     {
       accessorKey: 'inactiveAgeSeconds',
-      header: 'Age inactive',
+      header: t('cluster.slots.colAge'),
       meta: { help: 'slots.age-inactive' },
       cell: ({ row, getValue }) =>
         row.original.active === true ? '—' : formatDuration(getValue<number | null>()),
@@ -129,44 +152,48 @@ function slotColumns(threshold: number): DataTableProps<SlotRow>['columns'] {
   ]
 }
 
-const NO_SLOTS = (
-  <EmptyState
-    title="No replication slots"
-    description="No replication slot was reported for this cluster in the last 5 minutes."
-  />
-)
-
 export function SlotsSection({
   slots = [],
   failure,
   onRetry,
   retainedBytesThreshold = DEFAULT_RETAINED_BYTES_THRESHOLD,
 }: SlotsSectionProps) {
+  const t = useT()
   const sortedSlots = useMemo(() => sortSlots(slots), [slots])
-  const columns = useMemo(() => slotColumns(retainedBytesThreshold), [retainedBytesThreshold])
+  const columns = useMemo(() => slotColumns(retainedBytesThreshold, t), [retainedBytesThreshold, t])
+  const toolbar = useMemo(() => slotsToolbar(t), [t])
+  const noSlots = (
+    <EmptyState
+      title={t('cluster.slots.noneTitle')}
+      description={t('cluster.slots.noneDescription')}
+    />
+  )
 
   return (
     <section aria-labelledby="replication-slots-heading">
-      <h2 id="replication-slots-heading">Replication slots</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id="replication-slots-heading">{t('cluster.slots.heading')}</h2>
+        <HelpLink anchor="cluster#slots" label={t('cluster.slots.helpLabel')} />
+      </div>
       {failure ? (
         <ErrorState
-          endpoint="replication slots"
+          endpoint={t('cluster.endpoint.slots')}
           failure={failure}
           onRetry={onRetry ?? (() => undefined)}
         />
       ) : sortedSlots.length === 0 ? (
-        <EmptyCaptioned ariaLabel="Replication slots" captionId="cluster.slots-table">
-          <div role="status">{NO_SLOTS}</div>
+        <EmptyCaptioned ariaLabel={t('cluster.slots.heading')} captionId="cluster.slots-table">
+          <div role="status">{noSlots}</div>
         </EmptyCaptioned>
       ) : (
         <DataTable
-          ariaLabel="Replication slots"
+          ariaLabel={t('cluster.slots.heading')}
           captionId="cluster.slots-table"
           tableId="replication-slots"
-          toolbar={SLOTS_TOOLBAR}
+          toolbar={toolbar}
           columns={columns}
           data={sortedSlots}
-          emptyState={NO_SLOTS}
+          emptyState={noSlots}
         />
       )}
     </section>

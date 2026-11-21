@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { expectNoA11yViolations } from '@/test/a11y'
-import { renderWithProviders } from '@/test/render'
+import { renderInRouter as render, renderWithProviders } from '@/test/render'
 import { NOW } from '@/test/time'
 
 import { BlockingTree, type LocksResponseLike } from './BlockingTree'

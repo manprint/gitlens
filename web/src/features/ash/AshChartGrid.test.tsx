@@ -27,7 +27,7 @@ vi.mock('echarts-for-react/esm/core', () => ({
   },
 }))
 
-import { ASH_CHART_GROUP, AshChartGrid } from './AshChartGrid'
+import { AshChartGrid } from './AshChartGrid'
 
 const points = (...values: (number | null)[]) =>
   values.map((value, index) => ({ ts: `2026-10-29T10:0${index}:00Z`, value }))
@@ -44,7 +44,6 @@ const range = { from: new Date('2026-10-29T10:00:00Z'), to: new Date('2026-10-29
 function renderGrid(input = series) {
   return renderWithProviders(
     <AshChartGrid
-      cpuCount={4}
       foldedCount={0}
       groupBy="wait_event_type"
       groups={groupSeries(input, 'wait_event_type')}
@@ -83,16 +82,16 @@ describe('AshChartGrid', () => {
     ).toHaveTextContent('Lock — Waiting for a heavyweight lock held by another transaction')
     const options = chartCalls().map(([props]) => props.option)
     expect(options.map(seriesNames)).toEqual([['CPU'], ['Lock', 'LWLock'], ['Client']])
-    expect(JSON.stringify(options[0]?.series)).toContain('CPU count (4)')
-    expect(JSON.stringify(options[1]?.series)).not.toContain('CPU count')
+    expect(JSON.stringify(options.map(({ series }) => series))).not.toContain('markLine')
   })
 
-  it('ASHGRID-002 joins every chart to one connected group', () => {
+  it('ASHGRID-002 keeps every chart independent on one shared time axis', () => {
     renderGrid()
 
     expect(chartCalls()).toHaveLength(3)
-    expect(chartCalls().every(([, instance]) => instance.group === ASH_CHART_GROUP)).toBe(true)
-    expect(mocks.connect).toHaveBeenCalledWith(ASH_CHART_GROUP)
+    // No chart joins a group: a hover or a zoom stays in its own chart.
+    expect(chartCalls().every(([, instance]) => instance.group === '')).toBe(true)
+    expect(mocks.connect).not.toHaveBeenCalled()
     const xAxes = chartCalls().map(([props]) => props.option.xAxis)
     // The theme resolver copies the option, so the axes are equal, not identical.
     expect(new Set(xAxes.map((axis) => JSON.stringify(axis))).size).toBe(1)

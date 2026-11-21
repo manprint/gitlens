@@ -30,7 +30,7 @@ const ashMaxKeys = 100
 // wiring. Returns a stop func (always non-nil, even when ASH is disabled —
 // then a no-op) and whether ASH is enabled for this target, which the
 // caller reports on wire.Instance.ASHEnabled every push (SYS-ASH-002).
-func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg agent.CheckConfig, clk clock.Clock, mu *sync.Mutex, pending map[string][]wire.Result) (stop func(), enabled bool) {
+func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg, watchCfg agent.CheckConfig, clk clock.Clock, mu *sync.Mutex, pending map[string][]wire.Result) (stop func(), enabled bool) {
 	if cfg.Enabled != nil && !*cfg.Enabled {
 		return func() {}, false
 	}
@@ -58,6 +58,8 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg ag
 		}
 		ticks.tick(success, err)
 	})
+
+	startWatch(ctx, sampler, conn, mgr, targetName, watchCfg, clk, mu, pending)
 
 	if err := sampler.Start(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: ash: start sampler for %s: %v (ASH disabled for this target)\n", targetName, err)

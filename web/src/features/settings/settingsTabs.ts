@@ -5,15 +5,18 @@
  * SETI-001 guards. Data only: the Full HD route inventory imports it.
  */
 
+import type { MessageKey } from '@/i18n/messages/en'
+
+/** `label` names the tab in tests and route lists; the page shows `labelKey`. */
 export const SETTINGS_TABS = [
-  { id: 'inventory', label: 'Inventory' },
-  { id: 'preferences', label: 'Preferences' },
-  { id: 'retention', label: 'Data retention' },
-  { id: 'advisor', label: 'Advisor rules' },
-  { id: 'notifications', label: 'Notifications' },
-  { id: 'names', label: 'Names' },
-  { id: 'audit', label: 'Audit & server' },
-] as const
+  { id: 'inventory', label: 'Inventory', labelKey: 'settings.tabs.inventory' },
+  { id: 'preferences', label: 'Preferences', labelKey: 'settings.tabs.preferences' },
+  { id: 'retention', label: 'Data retention', labelKey: 'settings.tabs.retention' },
+  { id: 'advisor', label: 'Advisor rules', labelKey: 'settings.tabs.advisor' },
+  { id: 'notifications', label: 'Notifications', labelKey: 'settings.tabs.notifications' },
+  { id: 'names', label: 'Names', labelKey: 'settings.tabs.names' },
+  { id: 'audit', label: 'Audit & server', labelKey: 'settings.tabs.audit' },
+] as const satisfies readonly { id: string; label: string; labelKey: MessageKey }[]
 
 export type SettingsTabId = (typeof SETTINGS_TABS)[number]['id']
 
@@ -33,11 +36,11 @@ export function readSettingsTab(value: string | null): SettingsTabId {
  * default and is never written to the URL (the instance-tab pattern, 15.3).
  */
 export const INVENTORY_VIEWS = [
-  { id: 'instances', label: 'Instances' },
-  { id: 'tiers', label: 'Permission tiers' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'databases', label: 'Databases by instance' },
-] as const
+  { id: 'instances', label: 'Instances', labelKey: 'settings.views.instances' },
+  { id: 'tiers', label: 'Permission tiers', labelKey: 'settings.views.tiers' },
+  { id: 'agents', label: 'Agents', labelKey: 'settings.views.agents' },
+  { id: 'databases', label: 'Databases by instance', labelKey: 'settings.views.databases' },
+] as const satisfies readonly { id: string; label: string; labelKey: MessageKey }[]
 
 export type InventoryViewId = (typeof INVENTORY_VIEWS)[number]['id']
 
@@ -47,9 +50,9 @@ export type InventoryViewId = (typeof INVENTORY_VIEWS)[number]['id']
  * the default and is never written to the URL.
  */
 export const AUDIT_VIEWS = [
-  { id: 'commands', label: 'Command audit' },
-  { id: 'server', label: 'Server info' },
-] as const
+  { id: 'commands', label: 'Command audit', labelKey: 'settings.views.commands' },
+  { id: 'server', label: 'Server info', labelKey: 'settings.views.server' },
+] as const satisfies readonly { id: string; label: string; labelKey: MessageKey }[]
 
 export type AuditViewId = (typeof AUDIT_VIEWS)[number]['id']
 
@@ -59,8 +62,8 @@ export type AuditViewId = (typeof AUDIT_VIEWS)[number]['id']
  * Rules is the default and is never written to the URL.
  */
 export const ADVISOR_VIEWS = [
-  { id: 'rules', label: 'Rules' },
-  { id: 'windows', label: 'Observation windows' },
-] as const
+  { id: 'rules', label: 'Rules', labelKey: 'settings.views.rules' },
+  { id: 'windows', label: 'Observation windows', labelKey: 'settings.views.windows' },
+] as const satisfies readonly { id: string; label: string; labelKey: MessageKey }[]
 
 export type AdvisorViewId = (typeof ADVISOR_VIEWS)[number]['id']

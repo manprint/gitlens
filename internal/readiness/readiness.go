@@ -90,6 +90,8 @@ type Input struct {
 	// NotificationChannels is the configured channel count.
 	NotificationChannels int
 	Now                  time.Time
+	// Locale is the language of the report's texts ("" is English).
+	Locale string
 }
 
 // Fix is one way to close a gap.
@@ -147,7 +149,7 @@ func Evaluate(in Input) Report {
 		item := rule.Build(in)
 		item.ID, item.Severity = rule.ID, rule.Severity
 		if in.Instance.IsStandby {
-			item.Fixes = standbySteps(item.Fixes)
+			item.Fixes = standbySteps(item.Fixes, in.say("standby_step", nil))
 		}
 		report.Items = append(report.Items, item)
 		if rule.Severity == SeverityWarning {
@@ -169,13 +171,11 @@ func Evaluate(in Input) Report {
 	return report
 }
 
-// standbyStep opens the steps of an SQL fix that a standby cannot take.
-const standbyStep = "This server is a standby: run the statements on its primary, they reach the standby by replication."
-
-// standbySteps returns fixes with standbyStep in front of every SQL fix that
+// standbySteps returns fixes with standbyStep (catalog key
+// readiness.standby_step) in front of every SQL fix that
 // changes the shared catalogue (a grant, an extension). ALTER SYSTEM changes
 // one server's own file and stays as it is. fixes is not modified.
-func standbySteps(fixes []Fix) []Fix {
+func standbySteps(fixes []Fix, standbyStep string) []Fix {
 	out := make([]Fix, len(fixes))
 	for i, f := range fixes {
 		if f.Channel == ChannelSQL && !strings.Contains(f.Snippet, "ALTER SYSTEM") {

@@ -1,3 +1,6 @@
+import type { Translate } from '@/i18n/react'
+import { translate } from '@/i18n/store'
+
 /**
  * Why an index list is empty. The API lists the indexes the agent reported in
  * the last 15 minutes, so an empty list for the whole server means no index
@@ -10,15 +13,22 @@ export function noIndexStatsText({
   database,
   reported,
   foreignKeys,
+  t = translate,
 }: {
   database: string
   reported: number
   foreignKeys: number
+  /** The page's `useT()`, so the text follows the console language. */
+  t?: Translate
 }): string {
   if (reported > 0 && database !== '') {
-    return `The database ${database} has no index in the latest collection.`
+    return t('indexes.empty.databaseNoIndex', { database })
   }
-  return `No index usage statistics arrived from the agent in the last 15 minutes, so this list is empty.${foreignKeys > 0 ? ' Foreign keys without an index (Foreign keys view) come from table definitions and already have results.' : ''}`
+  const empty = t('indexes.empty.noStats')
+  return foreignKeys > 0 ? `${empty} ${t('indexes.empty.foreignKeys')}` : empty
 }
 
-export const NO_INDEX_STATS = noIndexStatsText({ database: '', reported: 0, foreignKeys: 0 })
+/** The empty text of an index list with no statistics at all, in the active language. */
+export function noIndexStats(): string {
+  return noIndexStatsText({ database: '', reported: 0, foreignKeys: 0 })
+}

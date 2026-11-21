@@ -80,9 +80,9 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/notification-channels", http.NoBody))
 	require.JSONEq(t, `[
-		{"kind":"slack","configured":false,"source":"env","host":null},
-		{"kind":"webhook","configured":true,"source":"env","host":"127.0.0.1"},
-		{"kind":"google_chat","configured":false,"source":"env","host":null}
+		{"kind":"slack","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"webhook","configured":true,"source":"env","host":"127.0.0.1","language":null},
+		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 }
 

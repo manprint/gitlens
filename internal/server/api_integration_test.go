@@ -201,6 +201,27 @@ func TestAPI_Events_WithDB_FilterAndLimit(t *testing.T) {
 		require.NotNil(t, e.ClusterID)
 		require.Equal(t, pgtype.ClusterID(999).String(), *e.ClusterID)
 	}
+	// filter by instance_id and by several types
+	iid := uuid.New()
+	_, err := pool.Exec(contextBackground(), `INSERT INTO events (tenant_id, ts, type, cluster_id, instance_id, payload) VALUES ('default',$1,'test_f',$2,$3,'{}'), ('default',$1,'test_g',$2,$3,'{}')`, now, cid, iid)
+	require.NoError(t, err)
+	for _, c := range []struct {
+		query string
+		n     int
+	}{
+		{"type=test_e,test_f", 6},
+		{"type=test_e,,test_f,", 6},
+		{"instance_id=" + iid.String(), 2},
+		{"instance_id=" + iid.String() + "&type=test_e,test_f", 1},
+		{"instance_id=" + uuid.NewString(), 0},
+	} {
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/events?"+c.query, http.NoBody)
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, c.query)
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &events))
+		require.Len(t, events, c.n, c.query)
+	}
 }
 
 func TestAPI_Instance_WithDB(t *testing.T) {

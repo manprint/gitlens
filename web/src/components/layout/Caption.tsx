@@ -1,4 +1,4 @@
-import { CAPTIONS, type CaptionId } from '@/lib/captions'
+import { captionOf, type CaptionId } from '@/lib/captions'
 import { cn } from '@/lib/utils'
 
 /**
@@ -18,7 +18,7 @@ export function Caption({
   oneLine?: boolean
   marked?: boolean
 }) {
-  const { what } = CAPTIONS[id]
+  const { what } = captionOf(id)
   return (
     <p
       {...(marked ? { 'data-caption-id': id } : {})}

@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { useCreateCommand } from '@/api/commands'
 import type { PermTier } from '@/api/types'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { CommandSubmitError, NotPermitted } from '@/components/state'
 import {
@@ -13,7 +14,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useT } from '@/i18n/react'
 import { describeCommandState } from '@/lib/commands'
+import { isTruncatedQuery } from '@/lib/format'
+import { parsePlan, placeholderCount, type PlanValuesFrom } from '@/lib/planTree'
+
+import { PlanView } from './PlanView'
+import { useQueryStatement } from './useQueryStatement'
 
 type QueryID = number | string
 
@@ -22,114 +29,76 @@ export interface ExplainPanelProps {
   datname?: string
   instanceId?: string
   currentTier?: PermTier
-  normalized?: boolean
+  /** The normalised statement text, to offer one input per $n. */
+  statementText?: string | null
 }
 
-type PlanRecord = Record<string, unknown>
-
-function isRecord(value: unknown): value is PlanRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+interface ParamState {
+  value: string
+  isNull: boolean
 }
 
-function findPlanNode(value: unknown): PlanRecord | null {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const plan = findPlanNode(item)
-      if (plan) return plan
-    }
-    return null
-  }
-  if (!isRecord(value)) return null
-  if (typeof value['Node Type'] === 'string') return value
-  for (const child of Object.values(value)) {
-    const plan = findPlanNode(child)
-    if (plan) return plan
-  }
-  return null
+const VALUES_FROM = new Set<string>(['values', 'recent_execution', 'generic'])
+
+function resultValuesFrom(result: unknown): PlanValuesFrom | null {
+  if (typeof result !== 'object' || result === null) return null
+  const value = (result as Record<string, unknown>).values_from
+  return typeof value === 'string' && VALUES_FROM.has(value) ? (value as PlanValuesFrom) : null
 }
 
-function displayNumber(value: unknown): string | null {
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : null
-}
-
-function PlanNode({ node, depth = 0 }: { node: PlanRecord; depth?: number }) {
-  const nodeType = typeof node['Node Type'] === 'string' ? node['Node Type'] : 'Plan node'
-  const estimatedRows = displayNumber(node['Plan Rows'])
-  const actualRows = displayNumber(node['Actual Rows'])
-  const totalCost = displayNumber(node['Total Cost'])
-  const children = Array.isArray(node.Plans)
-    ? node.Plans.filter((child): child is PlanRecord => isRecord(child))
-    : []
-
+/**
+ * Inputs for the $1…$n of a normalised statement. All empty sends no values:
+ * plan-only then plans generically and ANALYZE takes a recent execution's.
+ */
+function ParameterInputs({
+  count,
+  params,
+  onChange,
+}: {
+  count: number
+  params: ParamState[]
+  onChange: (index: number, next: ParamState) => void
+}) {
+  const t = useT()
   return (
-    <li>
-      <details open={depth === 0}>
-        <summary>
-          <span>{nodeType}</span>
-          {totalCost !== null && (
-            <span className="text-muted-foreground ml-2">cost {totalCost}</span>
-          )}
-        </summary>
-        <dl className="mt-2 grid gap-1 pl-4 text-sm sm:grid-cols-3">
-          {estimatedRows !== null && (
-            <div>
-              <dt className="text-muted-foreground">Estimated rows</dt>
-              <dd className="tabular-nums">{estimatedRows}</dd>
+    <fieldset className="space-y-3 rounded-lg border p-4" data-caption-id="queries.explain-params">
+      <legend className="px-1 text-sm font-semibold">{t('queries.explain.paramsLegend')}</legend>
+      <p className="text-muted-foreground text-sm">{t('queries.explain.paramsHelp', { count })}</p>
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {params.map((param, index) => {
+          const id = `explain-param-${index + 1}`
+          return (
+            <div key={id} className="flex items-center gap-2">
+              <label htmlFor={id} className="w-8 shrink-0 font-mono text-sm">
+                ${index + 1}
+              </label>
+              <input
+                id={id}
+                type="text"
+                value={param.value}
+                disabled={param.isNull}
+                placeholder={
+                  param.isNull
+                    ? t('queries.explain.nullPlaceholder')
+                    : t('queries.explain.paramPlaceholder')
+                }
+                className="bg-background focus-visible:ring-ring h-8 min-w-0 flex-1 rounded-md border px-2 font-mono text-sm focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+                onChange={(event) => onChange(index, { ...param, value: event.target.value })}
+              />
+              <label className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
+                <input
+                  type="checkbox"
+                  checked={param.isNull}
+                  aria-label={t('queries.explain.paramIsNull', { index: index + 1 })}
+                  onChange={(event) => onChange(index, { ...param, isNull: event.target.checked })}
+                />
+                NULL
+              </label>
             </div>
-          )}
-          {actualRows !== null && (
-            <div>
-              <dt className="text-muted-foreground">Actual rows</dt>
-              <dd className="tabular-nums">{actualRows}</dd>
-            </div>
-          )}
-          {totalCost !== null && (
-            <div>
-              <dt className="text-muted-foreground">Total cost</dt>
-              <dd className="tabular-nums">{totalCost}</dd>
-            </div>
-          )}
-        </dl>
-        {children.length > 0 && (
-          <ul className="mt-3 space-y-2 border-l pl-4">
-            {children.map((child, index) => (
-              <PlanNode key={`${nodeType}-${index}`} node={child} depth={depth + 1} />
-            ))}
-          </ul>
-        )}
-      </details>
-    </li>
-  )
-}
-
-function PlanResult({ result }: { result: unknown }) {
-  const plan = findPlanNode(result)
-  return (
-    <section aria-labelledby="explain-result-title" className="space-y-3">
-      <h3 id="explain-result-title" className="font-medium">
-        Query plan
-      </h3>
-      {plan ? (
-        <ul aria-label="Query plan tree" className="bg-muted/30 rounded-lg border p-4">
-          <PlanNode node={plan} />
-        </ul>
-      ) : (
-        <p className="text-muted-foreground text-sm">
-          The agent returned no structured plan nodes.
-        </p>
-      )}
-      <details>
-        <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm font-medium">
-          Raw JSON
-        </summary>
-        <pre
-          className="bg-muted/30 mt-2 max-h-96 overflow-auto rounded-lg border p-3 font-mono text-xs"
-          tabIndex={0}
-        >
-          {JSON.stringify(result, null, 2)}
-        </pre>
-      </details>
-    </section>
+          )
+        })}
+      </div>
+    </fieldset>
   )
 }
 
@@ -145,9 +114,19 @@ export function ExplainPanel({
   datname,
   instanceId,
   currentTier = 'T0',
-  normalized = false,
+  statementText = null,
 }: ExplainPanelProps) {
+  const t = useT()
   const [confirmationOpen, setConfirmationOpen] = useState(false)
+  const count =
+    statementText && !isTruncatedQuery(statementText) ? placeholderCount(statementText) : 0
+  const [params, setParams] = useState<ParamState[]>([])
+  const shown = Array.from(
+    { length: count },
+    (_, index) => params[index] ?? { value: '', isNull: false },
+  )
+  const given = shown.filter((param) => param.isNull || param.value !== '').length
+  const partial = given > 0 && given < count
   const cancelRef = useRef<HTMLButtonElement>(null)
   const createCommand = useCreateCommand(instanceId)
   const queryID = queryIDText(queryid)
@@ -159,6 +138,9 @@ export function ExplainPanel({
       args: {
         analyze,
         ...(datname === undefined ? {} : { datname }),
+        ...(given === count && count > 0
+          ? { params: shown.map((param) => (param.isNull ? null : param.value)) }
+          : {}),
         queryid: queryID,
       },
       kind: 'explain',
@@ -173,29 +155,34 @@ export function ExplainPanel({
   const status = command
     ? describeCommandState(command.state, command.error)
     : createCommand.isPending
-      ? 'Command pending: waiting for the agent.'
+      ? t('queries.explain.commandPending')
       : null
   const result =
     command?.state === 'done' || command?.state === 'succeeded' ? command.result : undefined
+  const valuesFrom = resultValuesFrom(result)
+  const plan = useMemo(
+    () => (result === undefined ? null : parsePlan(result, valuesFrom)),
+    [result, valuesFrom],
+  )
   const planOnlyButton = (
     <Button
       type="button"
-      aria-label="Run plan only"
+      aria-label={t('queries.explain.runPlanOnly')}
       onClick={() => submit(false)}
-      disabled={!canPlan || queryID === null || createCommand.isPending || commandOpen}
+      disabled={!canPlan || queryID === null || partial || createCommand.isPending || commandOpen}
     >
-      Plan only
+      {t('queries.explain.planOnly')}
     </Button>
   )
   const analyzeButton = (
     <Button
       type="button"
       variant="outline"
-      aria-label="Plan with ANALYZE"
+      aria-label={t('queries.explain.planAnalyze')}
       onClick={() => setConfirmationOpen(true)}
-      disabled={queryID === null || createCommand.isPending || commandOpen}
+      disabled={queryID === null || partial || createCommand.isPending || commandOpen}
     >
-      Plan with ANALYZE
+      {t('queries.explain.planAnalyze')}
     </Button>
   )
 
@@ -209,14 +196,15 @@ export function ExplainPanel({
       <header>
         <div className="flex items-center gap-1">
           <h2 id="explain-panel-title" className="text-base font-semibold">
-            Execution plan
+            {t('queries.explain.title')}
           </h2>
-          <InfoHint id="queries.explain-panel" label="Execution plan" />
+          <InfoHint id="queries.explain-panel" label={t('queries.explain.title')} />
+          <HelpLink anchor="query-performance#execution-plan" label={t('queries.explain.title')} />
         </div>
         <p className="text-muted-foreground mt-1 text-sm">
-          Request an execution plan for query {String(queryid)}
-          {datname ? ` in ${datname}` : ''}. The agent runs EXPLAIN on the monitored database and
-          stores the result in the plan history below.
+          {t('queries.explain.intro', {
+            scope: datname ? t('queries.explain.inDatabase', { datname }) : '',
+          })}
         </p>
       </header>
 
@@ -237,10 +225,18 @@ export function ExplainPanel({
         )}
       </div>
 
-      {normalized && (
-        <p role="note" className="text-muted-foreground text-sm">
-          This statement is normalised with placeholders; the plan may be unrepresentative for
-          parameter-sensitive values.
+      {count > 0 && (
+        <ParameterInputs
+          count={count}
+          params={shown}
+          onChange={(index, next) =>
+            setParams(shown.map((param, at) => (at === index ? next : param)))
+          }
+        />
+      )}
+      {partial && (
+        <p role="alert" className="text-destructive text-sm">
+          {t('queries.explain.enterValues', { count })}
         </p>
       )}
 
@@ -252,7 +248,12 @@ export function ExplainPanel({
           onDismiss={() => createCommand.reset()}
         />
       )}
-      {result !== undefined && <PlanResult result={result} />}
+      {result !== undefined &&
+        (plan ? (
+          <PlanView plan={plan} valuesFrom={valuesFrom} />
+        ) : (
+          <p className="text-muted-foreground text-sm">{t('queries.explain.noPlan')}</p>
+        ))}
 
       <Dialog open={confirmationOpen} onOpenChange={setConfirmationOpen}>
         <DialogContent
@@ -262,12 +263,8 @@ export function ExplainPanel({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Run EXPLAIN ANALYZE?</DialogTitle>
-            <DialogDescription>
-              This executes the statement inside a transaction that is rolled back afterwards. It
-              still consumes database resources and can take locks. Continue only if that impact is
-              acceptable.
-            </DialogDescription>
+            <DialogTitle>{t('queries.explain.analyzeTitle')}</DialogTitle>
+            <DialogDescription>{t('queries.explain.analyzeText')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button
@@ -276,7 +273,7 @@ export function ExplainPanel({
               variant="outline"
               onClick={() => setConfirmationOpen(false)}
             >
-              Cancel
+              {t('queries.explain.cancel')}
             </Button>
             <Button
               type="button"
@@ -285,13 +282,21 @@ export function ExplainPanel({
                 submit(true)
               }}
             >
-              Run EXPLAIN ANALYZE
+              {t('queries.explain.analyzeRun')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>
   )
+}
+
+/** The panel of a query detail page, fed with the statement text it needs for parameters. */
+export function QueryExplainPanel(
+  props: Omit<ExplainPanelProps, 'statementText' | 'queryid'> & { queryid: string },
+) {
+  const { statement } = useQueryStatement(props.instanceId, props.queryid, props.datname)
+  return <ExplainPanel {...props} statementText={statement?.query_text ?? null} />
 }
 
 export default ExplainPanel

@@ -1,0 +1,8 @@
+{
+  "advisor.security.monitoring_role_can_write.title": "The monitoring role could write to the database",
+  "advisor.security.monitoring_role_can_write.detail": "pglens connects as {role}, which {problems}. pglens only reads, but anyone holding its credentials could change data.",
+  "advisor.security.monitoring_role_can_write.remediation": "Run deploy/sql/monitoring_user.sql again as an administrator: it refuses the role and lists the statement that removes each problem.",
+  "advisor.security.monitoring_role_read_only_off.title": "The monitoring role does not default to read-only transactions",
+  "advisor.security.monitoring_role_read_only_off.detail": "default_transaction_read_only is {value} for {role} in this database. pglens sets it in every session it opens; the role default is the second safeguard.",
+  "advisor.security.monitoring_role_read_only_off.remediation": "Run deploy/sql/monitoring_user.sql again: it sets the role default and removes database-specific overrides."
+}

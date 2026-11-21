@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from 'react'
 
 import type { CaptionId } from '@/lib/captions'
+import { cn } from '@/lib/utils'
 
 import { Caption } from './Caption'
 import { InfoHint } from './InfoHint'
@@ -14,9 +15,19 @@ interface SectionProps {
   actions?: ReactNode
   /** The section's caption (D30): replaces `description`, with an ⓘ for the details. */
   captionId?: CaptionId
+  /** Extra classes of the card, e.g. a larger scroll margin under a sticky bar. */
+  className?: string
 }
 
-export function Section({ title, description, children, id, actions, captionId }: SectionProps) {
+export function Section({
+  title,
+  description,
+  children,
+  id,
+  actions,
+  captionId,
+  className,
+}: SectionProps) {
   const generatedId = useId().replaceAll(':', '')
   const titleId = `${id ?? generatedId}-title`
 
@@ -24,7 +35,7 @@ export function Section({ title, description, children, id, actions, captionId }
     <section
       aria-labelledby={titleId}
       data-card=""
-      className="bg-card shadow-card scroll-mt-20 rounded-xl border"
+      className={cn('bg-card shadow-card scroll-mt-20 rounded-xl border', className)}
       {...(id === undefined ? {} : { id })}
       {...(captionId === undefined ? {} : { 'data-caption-id': captionId })}
     >

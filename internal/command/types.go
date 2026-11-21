@@ -43,7 +43,18 @@ type Args struct {
 	// is optional; when it is set, the agent signals only a session that
 	// started at this time, and refuses any other session that holds the PID.
 	BackendStart *time.Time `json:"backend_start,omitempty"`
+	// Params are the values of an explained statement's $1, $2, ... in
+	// order, as text the server reads with each parameter's type; null is SQL
+	// NULL. They are bound, never spliced into the statement.
+	Params []*string `json:"params,omitempty"`
 }
+
+// Limits on Params: PostgreSQL statements rarely take more, and the values
+// travel in the command row.
+const (
+	MaxParams          = 100
+	MaxParamValueBytes = 8 << 10
+)
 
 // UnmarshalJSON accepts both legacy JSON numbers and string query IDs. The
 // string form is required by browser clients so int64 identifiers do not lose
@@ -57,6 +68,7 @@ func (a *Args) UnmarshalJSON(data []byte) error {
 		Schema       string          `json:"schema,omitempty"`
 		Relation     string          `json:"relation,omitempty"`
 		BackendStart *time.Time      `json:"backend_start,omitempty"`
+		Params       []*string       `json:"params,omitempty"`
 	}
 
 	var wire wireArgs
@@ -73,6 +85,7 @@ func (a *Args) UnmarshalJSON(data []byte) error {
 		Schema:       wire.Schema,
 		Relation:     wire.Relation,
 		BackendStart: wire.BackendStart,
+		Params:       wire.Params,
 	}
 	if len(wire.QueryID) == 0 || bytes.Equal(wire.QueryID, []byte("null")) {
 		return nil
@@ -125,6 +138,9 @@ func (a Args) Validate(k Kind) error {
 		if a.BackendStart != nil {
 			return fmt.Errorf("explain rejects backend_start")
 		}
+		if err := validateParams(a.Params); err != nil {
+			return err
+		}
 	case KindCancel, KindTerminate:
 		if a.PID == nil {
 			return fmt.Errorf("%s requires pid", k)
@@ -135,15 +151,33 @@ func (a Args) Validate(k Kind) error {
 		if a.Analyze {
 			return fmt.Errorf("%s rejects analyze", k)
 		}
-		if a.Datname != "" || a.Schema != "" || a.Relation != "" {
+		if a.Datname != "" || a.Schema != "" || a.Relation != "" || a.Params != nil {
 			return fmt.Errorf("%s rejects unrelated arguments", k)
 		}
 	case KindPgstattuple:
 		if a.Schema == "" || a.Relation == "" {
 			return fmt.Errorf("pgstattuple requires schema and relation")
 		}
-		if a.QueryID != nil || a.PID != nil || a.Analyze || a.BackendStart != nil {
+		if a.QueryID != nil || a.PID != nil || a.Analyze || a.BackendStart != nil || a.Params != nil {
 			return fmt.Errorf("pgstattuple rejects unrelated arguments")
+		}
+	}
+	return nil
+}
+
+func validateParams(params []*string) error {
+	if len(params) > MaxParams {
+		return fmt.Errorf("explain takes at most %d parameter values", MaxParams)
+	}
+	for i, value := range params {
+		if value == nil {
+			continue
+		}
+		if len(*value) > MaxParamValueBytes {
+			return fmt.Errorf("parameter $%d is longer than %d bytes", i+1, MaxParamValueBytes)
+		}
+		if strings.ContainsRune(*value, 0) {
+			return fmt.Errorf("parameter $%d contains a NUL byte", i+1)
 		}
 	}
 	return nil

@@ -11,7 +11,7 @@
 
 - **L3 — E2E system tests** (`make test-e2e` for smoke subset, `make test-e2e-full` for complete suite). Real multi-container topologies (standalone, primary-standby, with optional Toxiproxy for fault injection and workload generator). Uses the test harness in `test/harness/` to orchestrate stacks, assert on invariants, and inject network faults. No retries; a flaky E2E is a real race in the product. Artifacts on failure.
   - Belongs here: end-to-end flows with real concurrency, failure modes, timing, global invariants.
-  - **ASH scenarios** (`SYS-LOAD-003`, `SYS-LOAD-005`, `SYS-ASH-001`, `SYS-ASH-002` in `test/scenario/ash.go`): test statistical correctness, conservation of sample counts, significance warnings at <60 samples, and cardinality capping at 100 distinct wait keys per window. These scenarios are part of the smoke set.
+  - **ASH scenarios** (`SYS-LOAD-003`, `SYS-LOAD-005`, `SYS-ASH-001`, `SYS-ASH-002` in `test/scenario/ash.go`): test statistical correctness, conservation of sample counts, significance warnings at <60 sampling ticks, and cardinality capping at 100 distinct wait keys per window. These scenarios are part of the smoke set.
   - Smoke subset: ~10 minutes. Full suite: ~60 minutes.
   - Requires: Docker, ports 8080 (server), 5432+ (PostgreSQL), 8474 (Toxiproxy).
 

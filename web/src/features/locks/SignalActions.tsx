@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useT, type Translate } from '@/i18n/react'
 import { describeCommandState, isTerminalCommandState } from '@/lib/commands'
 import type { LockNode } from '@/lib/locks'
 
@@ -81,23 +82,25 @@ function isClientBackend(node: LockNode): boolean {
   return typeof backendType !== 'string' || backendType === 'client backend'
 }
 
-function actionButton(kind: SignalKind, onClick: () => void, disabled = false) {
+function actionButton(t: Translate, kind: SignalKind, onClick: () => void, disabled = false) {
   return (
     <Button
       size="sm"
       variant="outline"
       type="button"
 
-      aria-label={kind === 'cancel' ? 'Cancel query' : 'Terminate backend'}
+      aria-label={t(
+        kind === 'cancel' ? 'locks.signal.cancelQuery' : 'locks.signal.terminateBackend',
+      )}
       disabled={disabled}
       onClick={onClick}
     >
-      {kind === 'cancel' ? 'Cancel query' : 'Terminate backend'}
+      {t(kind === 'cancel' ? 'locks.signal.cancelQuery' : 'locks.signal.terminateBackend')}
     </Button>
   )
 }
 
-function commandStatus(handle: CommandHandle) {
+function commandStatus(t: Translate, handle: CommandHandle) {
   const command = handle.command.data
   if (!command) return null
   const terminal = isTerminalCommandState(command.state)
@@ -110,7 +113,7 @@ function commandStatus(handle: CommandHandle) {
           {' '}
           {/* The audit is a section of Settings; its API endpoint returns raw JSON. */}
           <Link className="text-primary underline underline-offset-2" to="/settings?tab=audit">
-            View command audit
+            {t('locks.signal.viewAudit')}
           </Link>
         </>
       ) : null}
@@ -124,6 +127,7 @@ export function SignalActions({
   currentTier,
   sampleStale = false,
 }: SignalActionsProps) {
+  const t = useT()
   const cancelCommand = useCreateCommand(instanceId)
   const terminateCommand = useCreateCommand(instanceId)
   // The confirmation keeps the session it was opened for. A lock sample can
@@ -152,7 +156,7 @@ export function SignalActions({
   if (unavailable) {
     return (
       <p role="status" className="mt-3 text-sm">
-        Signal actions unavailable: PID {pidLabel} is not a client backend.
+        {t('locks.signal.unavailable', { pid: pidLabel })}
       </p>
     )
   }
@@ -169,13 +173,18 @@ export function SignalActions({
   }
 
   const buttons = (
-    <div className="mt-3 flex flex-wrap gap-2" aria-label={`Signal actions for PID ${pidLabel}`}>
+    <div
+      className="mt-3 flex flex-wrap gap-2"
+      aria-label={t('locks.signal.groupLabel', { pid: pidLabel })}
+    >
       {actionButton(
+        t,
         'cancel',
         () => setPending({ kind: 'cancel', target: node }),
         belowT2 || pid === null || sampleStale,
       )}
       {actionButton(
+        t,
         'terminate',
         () => setPending({ kind: 'terminate', target: node }),
         belowT2 || pid === null || sampleStale,
@@ -187,44 +196,45 @@ export function SignalActions({
     <div>
       {belowT2 ? (
         <NotPermitted required="T2" current={currentTier}>
-          {actionButton('cancel', () => setPending({ kind: 'cancel', target: node }), true)}
+          {actionButton(t, 'cancel', () => setPending({ kind: 'cancel', target: node }), true)}
         </NotPermitted>
       ) : (
         <>
           {buttons}
           {/* The locks response does not carry the target's allow_signal setting, so
               the agent's refusal arrives as the command result, not as a disabled button. */}
-          <p className="text-muted-foreground mt-1 text-xs">
-            Signals remain subject to allow_signal on the target.
-          </p>
+          <p className="text-muted-foreground mt-1 text-xs">{t('locks.signal.allowSignal')}</p>
           {sampleStale ? (
-            <p className="text-muted-foreground mt-1 text-xs">
-              Signal actions are disabled until a fresh lock sample arrives.
-            </p>
+            <p className="text-muted-foreground mt-1 text-xs">{t('locks.signal.staleDisabled')}</p>
           ) : null}
         </>
       )}
       {belowT2 ? (
         <>
           <p className="text-muted-foreground mt-1 text-xs">
-            Cancelling or ending sessions needs permission tier T2. Grant it with{' '}
-            <code>monitoring_user.sql -v tier1=1 -v tier2=1</code>.
+            {t('locks.signal.tierNeeded')} <code>monitoring_user.sql -v tier1=1 -v tier2=1</code>
+            {t('locks.signal.tierCommandEnd')}
           </p>
-          {actionButton('terminate', () => setPending({ kind: 'terminate', target: node }), true)}
+          {actionButton(
+            t,
+            'terminate',
+            () => setPending({ kind: 'terminate', target: node }),
+            true,
+          )}
         </>
       ) : null}
-      {commandStatus(cancelCommand)}
-      {commandStatus(terminateCommand)}
+      {commandStatus(t, cancelCommand)}
+      {commandStatus(t, terminateCommand)}
       {cancelCommand.error ? (
         <CommandSubmitError
-          endpoint="cancel command"
+          endpoint={t('locks.signal.endpointCancel')}
           failure={cancelCommand.error.failure}
           onDismiss={() => cancelCommand.reset()}
         />
       ) : null}
       {terminateCommand.error ? (
         <CommandSubmitError
-          endpoint="terminate command"
+          endpoint={t('locks.signal.endpointTerminate')}
           failure={terminateCommand.error.failure}
           onDismiss={() => terminateCommand.reset()}
         />
@@ -239,14 +249,21 @@ export function SignalActions({
         >
           <DialogHeader>
             <DialogTitle>
-              {openKind === 'terminate' ? 'Terminate backend?' : 'Cancel query?'}
+              {openKind === 'terminate'
+                ? t('locks.signal.terminateTitle')
+                : t('locks.signal.cancelTitle')}
             </DialogTitle>
             <DialogDescription>
-              PID {confirmed.pidLabel}; database {confirmed.database}; user {confirmed.user};
-              application {confirmed.application}; query: {confirmed.query}.
+              {t('locks.signal.summary', {
+                pid: confirmed.pidLabel,
+                database: confirmed.database,
+                user: confirmed.user,
+                application: confirmed.application,
+                query: confirmed.query,
+              })}{' '}
               {openKind === 'terminate'
-                ? " The client's connection will be closed and its open transaction will be rolled back."
-                : ' This asks PostgreSQL to cancel the current query.'}
+                ? t('locks.signal.terminateConsequence')
+                : t('locks.signal.cancelConsequence')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -258,7 +275,7 @@ export function SignalActions({
 
               onClick={() => setPending(null)}
             >
-              Keep running
+              {t('locks.signal.keepRunning')}
             </Button>
             <Button
               type="button"
@@ -266,12 +283,22 @@ export function SignalActions({
               disabled={sampleStale}
               onClick={submit}
             >
-              {openKind === 'terminate' ? 'Terminate backend' : 'Cancel query'}
+              {openKind === 'terminate'
+                ? t('locks.signal.terminateBackend')
+                : t('locks.signal.cancelQuery')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {selectedHandle?.isPending ? <p role="status">Submitting {openKind} command…</p> : null}
+      {selectedHandle?.isPending ? (
+        <p role="status">
+          {t('locks.signal.submitting', {
+            kind: t(
+              openKind === 'terminate' ? 'locks.signal.kindTerminate' : 'locks.signal.kindCancel',
+            ),
+          })}
+        </p>
+      ) : null}
     </div>
   )
 }

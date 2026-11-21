@@ -2,11 +2,15 @@ import { act, fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw/http'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { Cluster } from '@/api/types'
+
 import { AppShell } from './AppShell'
 import { Header } from './Header'
+import { SidebarContent } from './Sidebar'
 import { base as clusters } from '@/test/fixtures/getClusters'
 import { base as coverage } from '@/test/fixtures/getCoverage'
 import { base as readiness } from '@/test/fixtures/getReadiness'
+import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { expectNoA11yViolations } from '@/test/a11y'
@@ -37,6 +41,27 @@ describe('application shell', () => {
     expect(within(breadcrumbs).getByText('ASH')).toHaveAttribute('aria-current', 'page')
   })
 
+  it('UI-SHELL-024 carries the chosen database to the other views of the server', () => {
+    renderWithProviders(<SidebarContent clusters={clusters as unknown as Cluster[]} />, {
+      route: `/instances/${INSTANCE_ID}/ash?db=app`,
+    })
+
+    const nav = screen.getByRole('navigation', { name: 'Primary navigation' })
+    const base = `/instances/${INSTANCE_ID}`
+    expect(within(nav).getByRole('link', { name: 'Query performance' })).toHaveAttribute(
+      'href',
+      `${base}/queries?db=app`,
+    )
+    expect(within(nav).getByRole('link', { name: 'Instance overview' })).toHaveAttribute(
+      'href',
+      `${base}?db=app`,
+    )
+    expect(within(nav).getByRole('link', { name: 'Wait events' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
   it('UI-SHELL-012 reports an unreachable connection and the last success age', () => {
     renderWithProviders(
       <Header connection={{ lastPollFailed: true, lastSuccessAt: Date.now() - 120_000 }} />,
@@ -62,9 +87,15 @@ describe('application shell', () => {
     renderWithProviders(<AppShell />, { route: '/' })
 
     await vi.waitFor(() =>
-      expect(screen.getByRole('status', { name: /Data freshness: Updated/ })).toBeInTheDocument(),
+      expect(screen.getByTestId('connection-indicator')).toHaveTextContent('Last success'),
     )
     expect(screen.getByRole('status', { name: 'Connection: reachable' })).toBeInTheDocument()
+    // The page header carries the one freshness badge; the shell header has none.
+    expect(
+      within(screen.getByTestId('header-controls')).queryByRole('status', {
+        name: /Data freshness/,
+      }),
+    ).not.toBeInTheDocument()
   })
 
   it('WU-20 says the session may still be active when sign-out fails', async () => {

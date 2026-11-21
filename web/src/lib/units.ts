@@ -1,3 +1,5 @@
+import { domainText } from '@/i18n/store'
+
 /**
  * The closed list of units a summary card may show (D31): a tile's figure is
  * one number in one of these units, never free text.
@@ -43,8 +45,13 @@ export type TileUnit = (typeof TILE_UNITS)[number]
  * this is the unit itself; it is the one place to change a unit's display.
  */
 export function formatUnit(unit: TileUnit, value?: unknown): string {
-  if (value === 1 || value === '1') return SINGULAR_UNIT[unit] ?? unit
-  return unit
+  if (value === 1 || value === '1') {
+    return domainText(
+      SINGULAR_UNIT[unit] ?? unit,
+      (domain) => domain.unitsOne[unit] ?? domain.units[unit],
+    )
+  }
+  return domainText(unit, (domain) => domain.units[unit])
 }
 
 /** The unit of a countable noun when the figure is exactly 1 (`1 index`, not `1 indexes`). */

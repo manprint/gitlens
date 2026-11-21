@@ -1,6 +1,7 @@
 package command
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -161,3 +162,32 @@ func TestAllowed_AcceptsOpenGatesAndRejectsUnknownKind(t *testing.T) {
 func int64Ptr(v int64) *int64 { return &v }
 
 func intPtr(v int) *int { return &v }
+
+func strPtr(s string) *string { return &s }
+
+func TestValidate_ExplainParams(t *testing.T) {
+	require.NoError(t, (Args{QueryID: int64Ptr(1), Params: []*string{strPtr("42"), nil}}).Validate(KindExplain))
+	tooMany := make([]*string, MaxParams+1)
+	require.ErrorContains(t, (Args{QueryID: int64Ptr(1), Params: tooMany}).Validate(KindExplain), "at most")
+	long := strings.Repeat("x", MaxParamValueBytes+1)
+	require.ErrorContains(t, (Args{QueryID: int64Ptr(1), Params: []*string{strPtr("1"), &long}}).Validate(KindExplain), "parameter $2")
+	require.ErrorContains(t, (Args{QueryID: int64Ptr(1), Params: []*string{strPtr("a\x00b")}}).Validate(KindExplain), "NUL")
+}
+
+func TestValidate_ParamsOnlyForExplain(t *testing.T) {
+	pid := 42
+	require.Error(t, (Args{PID: &pid, Params: []*string{strPtr("1")}}).Validate(KindCancel))
+	require.Error(t, (Args{Schema: "public", Relation: "t", Params: []*string{strPtr("1")}}).Validate(KindPgstattuple))
+}
+
+func TestArgs_ParamsRoundTrip(t *testing.T) {
+	in := Args{QueryID: int64Ptr(7), Params: []*string{strPtr("x"), nil}}
+	raw, err := json.Marshal(in)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"params":["x",null]`)
+	var out Args
+	require.NoError(t, json.Unmarshal(raw, &out))
+	require.Len(t, out.Params, 2)
+	require.Equal(t, "x", *out.Params[0])
+	require.Nil(t, out.Params[1])
+}

@@ -71,6 +71,14 @@ components:
         expires_at:
           type: string
           format: date-time
+        time_zone:
+          type: string
+          description: IANA time zone the console shows times in by default (PGLENS_TZ, UTC when unset). The operator can pick another in Settings › Preferences.
+          example: Europe/Rome
+        language:
+          type: string
+          description: Default console language (PGLENS_LANG, en when unset).
+          example: it
     ClusterId:
       type: string
       pattern: '^[0-9]+$'
@@ -160,8 +168,11 @@ components:
             instance_unreachable, instance_reachable, no_primary_in_cluster,
             slot_inactive, slot_lost, cluster_id_changed, cluster_identity_conflict,
             duplicate_instance_suspected, cardinality_truncated and
-            counter_reset_detected. The set is open, so a client must show a
-            type it does not know.
+            counter_reset_detected; the agent's watcher adds lock_wait_captured,
+            deadlock_captured, long_query_captured, idle_in_transaction_captured
+            and long_transaction_captured, whose payload is the capture (table,
+            ctid, lock mode, sessions and their statements). The set is open, so
+            a client must show a type it does not know.
         cluster_id: { type: [string, 'null'] }
         instance_id: { type: [string, 'null'], format: uuid }
         payload: { type: object, additionalProperties: true }
@@ -1408,6 +1419,24 @@ components:
         resolved_at: { $ref: '#/components/schemas/Timestamp' }
         muted_until: { $ref: '#/components/schemas/Timestamp' }
         mute_reason: { type: string }
+        query_text:
+          type: string
+          description: >-
+            The statement a query finding (object_name queryid:<id>) is about:
+            its latest text kept in query_texts. Absent for other findings and
+            once the text has been purged.
+        message:
+          type: object
+          description: >-
+            The catalog key and arguments title, detail and remediation come
+            from (advisor.<key>.title|detail|remediation). With a request
+            header X-Pglens-Lang naming a language with a catalog (it), the
+            three texts are rendered in it; without the header they are
+            English. Absent for findings written before the catalog had them.
+          required: [key]
+          properties:
+            key: { type: string }
+            args: { type: object, additionalProperties: true }
     AdvisorRule:
       type: object
       required: [id, severity, scope, needs, min_tier, enabled, overridden]
@@ -1619,7 +1648,7 @@ components:
         JSON webhook, or a Google Chat space webhook.
     NotificationChannel:
       type: object
-      required: [kind, configured, source, host]
+      required: [kind, configured, source, host, language]
       properties:
         kind: { $ref: '#/components/schemas/NotificationChannelKind' }
         configured:
@@ -1640,6 +1669,22 @@ components:
             The host name of the webhook address, null when the channel is not
             configured or its address names no host. The address itself is
             never returned.
+        language:
+          type: [string, 'null']
+          description: >-
+            The language of the channel's messages (setNotificationLanguage),
+            one of the console languages; null when the channel uses the server
+            default (PGLENS_LANG).
+    NotificationLanguageUpdate:
+      type: object
+      additionalProperties: false
+      required: [language]
+      properties:
+        language:
+          type: [string, 'null']
+          description: >-
+            A console language code (en, it); null goes back to the server
+            default.
     NotificationChannelUpdate:
       type: object
       additionalProperties: false
@@ -1687,9 +1732,22 @@ components:
         schema: { type: string }
         relation: { type: string }
         backend_start: { $ref: '#/components/schemas/Timestamp' }
+        params:
+          type: array
+          maxItems: 100
+          items:
+            type: [string, 'null']
+            maxLength: 8192
+          description: >-
+            explain only: the values of the statement's $1, $2, ... in order, as
+            text PostgreSQL reads with each parameter's type; null is SQL NULL.
+            The agent binds them and never splices them into the statement.
+            Without them, a statement with placeholders is analyzed with the
+            values of a recent execution pg_stat_activity shows, and planned
+            plan-only with GENERIC_PLAN on PostgreSQL 16+.
       description: >-
-        Per-kind arguments: explain requires queryid and may include datname or
-        analyze; cancel and terminate require pid and may include backend_start;
+        Per-kind arguments: explain requires queryid and may include datname,
+        analyze or params; cancel and terminate require pid and may include backend_start;
         pgstattuple requires schema and relation and may include datname.
         backend_start is the start time of the session the caller saw at pid.
         Send it back exactly as the API reported it. When it is given and the
@@ -2478,7 +2536,9 @@ paths:
         Evaluated from the facts and series of the last 24 hours and cached for
         30 seconds per instance. The level is partial when at least one item is
         a warning; infos are features that are off, often by design, and never
-        change it.
+        change it. Titles, summaries, impacts, evidence and fix steps read in
+        the language of the request header X-Pglens-Lang (English without it);
+        ids, channels and snippets do not change with the language.
       parameters:
         - { name: id, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
       responses:
@@ -3478,7 +3538,12 @@ paths:
         than the 90-day retention are not kept, so a range is bounded by it.
       parameters:
         - { name: cluster_id, in: query, required: false, schema: { $ref: '#/components/schemas/ClusterId' } }
-        - { name: type, in: query, required: false, schema: { type: string } }
+        - { name: instance_id, in: query, required: false, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+          description: One event type, or several separated by commas.
         - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
         - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
         - name: limit
@@ -4120,9 +4185,9 @@ paths:
               examples:
                 default:
                   value:
-                    - { kind: slack, configured: false, source: env, host: null }
-                    - { kind: webhook, configured: false, source: env, host: null }
-                    - { kind: google_chat, configured: true, source: env, host: chat.googleapis.com }
+                    - { kind: slack, configured: false, source: env, host: null, language: null }
+                    - { kind: webhook, configured: false, source: env, host: null, language: null }
+                    - { kind: google_chat, configured: true, source: env, host: chat.googleapis.com, language: null }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/v1/notification-channels/{kind}:
@@ -4157,7 +4222,7 @@ paths:
               schema: { $ref: '#/components/schemas/NotificationChannel' }
               examples:
                 default:
-                  value: { kind: google_chat, configured: true, source: ui, host: chat.googleapis.com }
+                  value: { kind: google_chat, configured: true, source: ui, host: chat.googleapis.com, language: null }
         '400':
           description: >-
             The address is missing, longer than 2048 characters, does not
@@ -4205,9 +4270,9 @@ paths:
               schema: { $ref: '#/components/schemas/NotificationChannel' }
               examples:
                 environment:
-                  value: { kind: google_chat, configured: true, source: env, host: chat.googleapis.com }
+                  value: { kind: google_chat, configured: true, source: env, host: chat.googleapis.com, language: null }
                 none:
-                  value: { kind: slack, configured: false, source: env, host: null }
+                  value: { kind: slack, configured: false, source: env, host: null, language: null }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: The kind is not slack, webhook or google_chat.
@@ -4217,6 +4282,66 @@ paths:
               examples:
                 default:
                   value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+        '503':
+          description: The store is unavailable; nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/notification-channels/{kind}/language:
+    put:
+      tags: [settings]
+      operationId: setNotificationLanguage
+      summary: Set the language of a notification channel's messages.
+      description: >-
+        Stores the language in the pglens database; the next alert of the
+        channel is written in it (the detail: what the alert means, the data,
+        the read-only SQL and what to do). null goes back to the server default
+        (PGLENS_LANG). The webhook address is left alone. Only this server
+        process switches at once; another replica on the same database uses it
+        from its next start.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { $ref: '#/components/schemas/NotificationChannelKind' }, description: The channel whose language to set. }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationLanguageUpdate' }
+            examples:
+              italian:
+                value: { language: it }
+              default:
+                value: { language: null }
+      responses:
+        '200':
+          description: The channel's status with its language.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationChannel' }
+              examples:
+                default:
+                  value: { kind: google_chat, configured: true, source: env, host: chat.googleapis.com, language: it }
+        '400':
+          description: >-
+            The language is not null nor a console language, or the body has
+            another field. Nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: invalid language, detail: language is null (server default) or one of the console languages }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The kind is not slack, webhook or google_chat.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503':
           description: The store is unavailable; nothing was changed.
           content:
@@ -4641,7 +4766,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SessionStatus' }
-              example: { authenticated: true, expires_at: '2026-08-31T13:00:00Z' }
+              example: { authenticated: true, expires_at: '2026-08-31T13:00:00Z', time_zone: Europe/Rome, language: it }
         '401':
           description: No valid browser session is active.
           content:
@@ -4649,9 +4774,9 @@ paths:
               schema: { $ref: '#/components/schemas/SessionStatus' }
               examples:
                 configured:
-                  value: { authenticated: false, configured: true }
+                  value: { authenticated: false, configured: true, time_zone: UTC, language: en }
                 notConfigured:
-                  value: { authenticated: false, configured: false }
+                  value: { authenticated: false, configured: false, time_zone: UTC, language: en }
 
     delete:
       tags: [session]

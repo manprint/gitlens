@@ -170,7 +170,7 @@ func runAgentCommand(args []string) {
 		// here is a concurrent map write, which the Go runtime turns into an
 		// unrecoverable crash of the agent — reachable on any multi-target
 		// config, invisible on the single-target ones every fixture uses.
-		ashStop, enabled := startASH(ctx, managers[i], tc.Name, cfg.Checks["ash"], clk, &mu, pending)
+		ashStop, enabled := startASH(ctx, managers[i], tc.Name, cfg.Checks["ash"], cfg.Checks["watch"], clk, &mu, pending)
 		ashStops = append(ashStops, ashStop)
 		ashEnabled[tc.Name] = enabled
 	}

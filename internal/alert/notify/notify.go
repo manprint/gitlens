@@ -17,6 +17,7 @@ type Message struct {
 	Value    float64           `json:"value"`
 	At       time.Time         `json:"at"`
 	Labels   map[string]string `json:"labels,omitempty"`
+	Detail   *Detail           `json:"detail,omitempty"`
 }
 
 type Channel interface {

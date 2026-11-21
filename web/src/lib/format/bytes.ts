@@ -1,3 +1,4 @@
+import { activeIntl } from '@/i18n/store'
 import { localizedNumber, UNKNOWN } from './shared'
 
 const UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB'] as const
@@ -8,7 +9,7 @@ function printedValue(value: number, unitIndex: number): number {
   return Math.round(value * scale) / scale
 }
 
-export function formatBytes(n: number | null, locale = 'en-US'): string {
+export function formatBytes(n: number | null, locale = activeIntl()): string {
   if (n === null || !Number.isFinite(n)) return UNKNOWN
   if (n === 0) return '0 B'
 

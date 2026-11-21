@@ -5,8 +5,8 @@
  */
 
 export const ALERTS_SECTIONS = [
-  { id: 'alerts', label: 'Alerts' },
-  { id: 'delivery', label: 'Notification delivery' },
+  { id: 'alerts', labelKey: 'alerts.section.alerts' },
+  { id: 'delivery', labelKey: 'alerts.section.delivery' },
 ] as const
 
 export type AlertsSectionId = (typeof ALERTS_SECTIONS)[number]['id']
@@ -14,8 +14,8 @@ export type AlertsSectionId = (typeof ALERTS_SECTIONS)[number]['id']
 export const DEFAULT_ALERTS_SECTION: AlertsSectionId = 'alerts'
 
 export const EVENTS_SECTIONS = [
-  { id: 'events', label: 'Events' },
-  { id: 'alerts', label: 'Alert status' },
+  { id: 'events', labelKey: 'alerts.section.events' },
+  { id: 'alerts', labelKey: 'alerts.section.alertStatus' },
 ] as const
 
 export type EventsSectionId = (typeof EVENTS_SECTIONS)[number]['id']

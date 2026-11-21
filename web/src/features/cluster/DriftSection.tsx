@@ -6,9 +6,11 @@ import {
   type DataTableProps,
   type DataTableToolbar,
 } from '@/components/layout/DataTable'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { EmptyState } from '@/components/state/EmptyState'
 import { ErrorState } from '@/components/state/ErrorState'
 import type { components } from '@/api/generated'
+import { useT, type Translate } from '@/i18n/react'
 import { replicationInstanceLabel, type ReplicationInstance } from '@/lib/replication'
 
 import { EmptyCaptioned } from './EmptyCaptioned'
@@ -82,19 +84,22 @@ const DRIFT_TOOLBAR: DataTableToolbar<DriftTableRow> = { searchFields: [(row) =>
 function driftColumns(
   ids: readonly string[],
   instances: readonly ReplicationInstance[],
+  t: Translate,
 ): DataTableProps<DriftTableRow>['columns'] {
   return [
-    { accessorKey: 'name', header: 'Setting' },
+    { accessorKey: 'name', header: t('cluster.drift.colSetting') },
     ...ids.map((instanceId) => ({
       id: `instance-${instanceId}`,
       accessorFn: (row: DriftTableRow) => row.values[instanceId],
       header: replicationInstanceLabel(instances, instanceId),
       cell: ({ row }: { row: { original: DriftTableRow } }) => {
         const differing = row.original.differingInstances.has(instanceId)
-        const value = row.original.values[instanceId] ?? 'Unknown'
+        const value = row.original.values[instanceId] ?? t('cluster.common.unknown')
         return (
           <span
-            aria-label={differing ? `${instanceId} differs from the reference` : undefined}
+            aria-label={
+              differing ? t('cluster.drift.differs', { instance: instanceId }) : undefined
+            }
             className={differing ? 'bg-warning/20 font-semibold' : undefined}
             data-drift-different={differing ? 'true' : undefined}
           >
@@ -114,40 +119,44 @@ export function DriftSection({
   failure,
   onRetry,
 }: DriftSectionProps) {
+  const t = useT()
   const ids = useMemo(() => instanceIds(entries), [entries])
   const rows = useMemo(() => entries.map(makeRow), [entries])
-  const columns = useMemo(() => driftColumns(ids, instances), [ids, instances])
+  const columns = useMemo(() => driftColumns(ids, instances, t), [ids, instances, t])
   // The server lists only the settings that differ between two or more instances that
   // reported in the last hour, so an empty list also covers a cluster of one instance.
   const alone = instances.length === 1
   const noDrift = alone ? (
     <EmptyState
-      title="Nothing to compare yet"
-      description="Only one instance of this cluster is monitored, so there is nothing to compare yet."
+      title={t('cluster.drift.noneAloneTitle')}
+      description={t('cluster.drift.noneAloneDescription')}
     />
   ) : (
     <EmptyState
-      title="No drift detected"
-      description="No setting differs between the instances of this cluster that reported in the last hour."
+      title={t('cluster.drift.noneTitle')}
+      description={t('cluster.drift.noneDescription')}
     />
   )
 
   return (
     <section aria-labelledby="settings-drift-heading">
-      <h2 id="settings-drift-heading">Configuration drift</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id="settings-drift-heading">{t('cluster.tabs.drift')}</h2>
+        <HelpLink anchor="cluster#drift" label={t('cluster.tabs.drift')} />
+      </div>
       {failure ? (
         <ErrorState
-          endpoint="cluster settings drift"
+          endpoint={t('cluster.endpoint.drift')}
           failure={failure}
           onRetry={onRetry ?? (() => undefined)}
         />
       ) : rows.length === 0 ? (
-        <EmptyCaptioned ariaLabel="Configuration drift" captionId="cluster.drift-table">
+        <EmptyCaptioned ariaLabel={t('cluster.tabs.drift')} captionId="cluster.drift-table">
           <div role="status">{noDrift}</div>
         </EmptyCaptioned>
       ) : (
         <DataTable
-          ariaLabel="Configuration drift"
+          ariaLabel={t('cluster.tabs.drift')}
           captionId="cluster.drift-table"
           tableId="configuration-drift"
           toolbar={DRIFT_TOOLBAR}

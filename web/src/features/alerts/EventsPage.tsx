@@ -5,11 +5,14 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAlerts, useCachedClusters, useEvents, useSilences } from '@/api/queries'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { InfoHint } from '@/components/layout/InfoHint'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { AlertListTruncated, EmptyState, ErrorState } from '@/components/state'
 import { Input } from '@/components/ui/input'
 import { usePreferences } from '@/hooks/usePreferences'
+import { useT, type Translate } from '@/i18n/react'
+import { formatCount } from '@/lib/format'
 import { summariseAlerts, type Alert } from '@/lib/alerts'
 import { sortEventsNewestFirst, type ClusterEvent } from '@/lib/events'
 import { nameLookup } from '@/lib/names'
@@ -24,6 +27,7 @@ import {
   readEventsSection,
   withSection,
 } from './alertingSections'
+import { severityText, stateText } from './AlertRow'
 import { eventColumns } from './eventColumns'
 
 const DEFAULT_EVENT_LIMIT = 100
@@ -65,16 +69,16 @@ function latestEvaluation(alerts: readonly Alert[]): string | null {
   return latest?.timestamp ?? null
 }
 
-function suppressionLabel(alert: Alert, suppressionUnknown: boolean): string {
-  if (suppressionUnknown) return 'Unknown'
-  return alert.suppressed ? 'Suppressed' : 'Not suppressed'
+function suppressionLabel(alert: Alert, suppressionUnknown: boolean, t: Translate): string {
+  if (suppressionUnknown) return t('shell.topology.unknown')
+  return alert.suppressed ? t('alerts.status.suppressed') : t('alerts.filter.notSuppressed')
 }
 
-function alertStatusColumns(suppressionUnknown: boolean): SimpleColumn<Alert>[] {
+function alertStatusColumns(suppressionUnknown: boolean, t: Translate): SimpleColumn<Alert>[] {
   return [
     {
       id: 'alert',
-      header: 'Alert',
+      header: t('alerts.column.alert'),
       rowHeader: true,
       className: 'font-mono text-xs',
       sortValue: (alert) => alert.alert_key,
@@ -83,24 +87,24 @@ function alertStatusColumns(suppressionUnknown: boolean): SimpleColumn<Alert>[] 
     },
     {
       id: 'severity',
-      header: 'Severity',
+      header: t('alerts.column.severity'),
       width: '8rem',
       sortValue: (alert) => alert.severity,
-      cell: (alert) => alert.severity,
+      cell: (alert) => severityText(alert.severity, t),
     },
     {
       id: 'state',
-      header: 'State',
+      header: t('alerts.column.state'),
       width: '8rem',
       sortValue: (alert) => alert.state,
-      cell: (alert) => alert.state,
+      cell: (alert) => stateText(alert.state, t),
     },
     {
       id: 'suppression',
-      header: 'Suppression',
+      header: t('alerts.filter.suppression'),
       help: 'alerts.suppression',
       width: '10rem',
-      cell: (alert) => suppressionLabel(alert, suppressionUnknown),
+      cell: (alert) => suppressionLabel(alert, suppressionUnknown, t),
     },
   ]
 }
@@ -108,22 +112,26 @@ function alertStatusColumns(suppressionUnknown: boolean): SimpleColumn<Alert>[] 
 // Suppressed alerts count under Suppressed, as on the alerts page, so the two
 // pages never report different firing totals for the same alerts.
 function FiringStatus({ alerts }: { alerts: readonly Alert[] }) {
+  const t = useT()
   const { firing } = summariseAlerts(alerts)
   const firingCount = firing.critical + firing.warning + firing.info
   const evaluation = latestEvaluation(alerts)
 
   return firingCount === 0 ? (
     <p className="text-sm" role="status">
-      No alerts firing. Last evaluated: {evaluation ?? 'no alert evaluation has been recorded'}.
+      {t('alerts.status.noneFiring', {
+        evaluation: evaluation ?? t('alerts.status.noEvaluation'),
+      })}
     </p>
   ) : (
     <p className="text-destructive text-sm font-semibold" role="status">
-      Firing alerts: {firingCount}
+      {t('alerts.status.firingCount', { count: firingCount })}
     </p>
   )
 }
 
 export function EventsPage() {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
@@ -161,10 +169,13 @@ export function EventsPage() {
   // Cluster and instance names come from the list the shell polls (D14, D15).
   const cachedClusters = useCachedClusters()
   const eventTableColumns = useMemo(
-    () => eventColumns(nameLookup(cachedClusters)),
-    [cachedClusters],
+    () => eventColumns(nameLookup(cachedClusters), t),
+    [cachedClusters, t],
   )
-  const statusColumns = useMemo(() => alertStatusColumns(suppressionUnknown), [suppressionUnknown])
+  const statusColumns = useMemo(
+    () => alertStatusColumns(suppressionUnknown, t),
+    [suppressionUnknown, t],
+  )
   const section = readEventsSection(searchParams.get('section'))
 
   function showSection(next: string) {
@@ -188,7 +199,7 @@ export function EventsPage() {
   if (eventsQuery.error && !eventsQuery.data) {
     return (
       <ErrorState
-        endpoint="events"
+        endpoint={t('alerts.endpoint.events')}
         failure={eventsQuery.error}
         onRetry={() => void eventsQuery.refetch()}
       />
@@ -197,7 +208,7 @@ export function EventsPage() {
   if (alertsQuery.error && !alertsQuery.data) {
     return (
       <ErrorState
-        endpoint="alerts"
+        endpoint={t('alerts.endpoint.alerts')}
         failure={alertsQuery.error}
         onRetry={() => void alertsQuery.refetch()}
       />
@@ -205,8 +216,8 @@ export function EventsPage() {
   }
   if (eventsQuery.isPending || alertsQuery.isPending || silencesQuery.isPending) {
     return (
-      <section aria-busy="true" aria-label="Loading fleet events" role="status">
-        Loading fleet events…
+      <section aria-busy="true" aria-label={t('alerts.events.loadingLabel')} role="status">
+        {t('alerts.events.loading')}
       </section>
     )
   }
@@ -218,44 +229,44 @@ export function EventsPage() {
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="events" label={t('alerts.events.helpLabel')} />}
         icon={History}
-        eyebrow="Alerting"
-        title="Fleet event timeline"
-        subtitle="Everything that happened across the fleet in the selected time range: failovers, restarts, configuration changes and alert transitions."
+        eyebrow={t('alerts.page.eyebrow')}
+        title={t('alerts.events.title')}
+        subtitle={t('alerts.events.subtitle')}
         freshness={<FreshnessBadge dataUpdatedAt={eventsQuery.dataUpdatedAt} policy="activity" />}
       />
 
       {eventsQuery.error ? (
         <ErrorState
-          endpoint="events"
+          endpoint={t('alerts.endpoint.events')}
           failure={eventsQuery.error}
           onRetry={() => void eventsQuery.refetch()}
         />
       ) : null}
       {alertsQuery.error ? (
         <ErrorState
-          endpoint="alerts"
+          endpoint={t('alerts.endpoint.alerts')}
           failure={alertsQuery.error}
           onRetry={() => void alertsQuery.refetch()}
         />
       ) : null}
       {silencesQuery.error ? (
         <div className="border-warning/40 bg-warning/10 rounded-lg border p-3 text-sm" role="alert">
-          Suppression state: Unknown because silences could not be loaded. Alert data remains
-          visible; retry silences to restore suppression context.
+          {t('alerts.events.suppressionUnknown')}
           <button
             className="ml-2 underline"
             onClick={() => void silencesQuery.refetch()}
             type="button"
           >
-            Retry silences
+            {t('alerts.callout.retry')}
           </button>
         </div>
       ) : null}
 
       {eventLimitReached ? (
         <p className="border-warning/40 bg-warning/10 rounded-lg border p-3 text-sm" role="note">
-          The event list is capped at 1,000 results; older events may exist outside this view.
+          {t('alerts.events.capped', { limit: formatCount(1000) })}
         </p>
       ) : null}
 
@@ -266,10 +277,10 @@ export function EventsPage() {
           className="flex flex-col gap-4 min-[1600px]:flex-row min-[1600px]:items-center min-[1600px]:justify-between"
           data-testid="events-tab-row"
         >
-          <TabsList aria-label="Event sections">
+          <TabsList aria-label={t('alerts.events.sectionsLabel')}>
             {EVENTS_SECTIONS.map((entry) => (
               <TabsTrigger key={entry.id} value={entry.id}>
-                {entry.label}
+                {t(entry.labelKey)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -279,12 +290,12 @@ export function EventsPage() {
         <TabsContent value="events">
           <Section
             captionId="events.timeline"
-            title="Event timeline"
+            title={t('alerts.events.timelineTitle')}
             actions={
               <>
                 <span className="flex items-center gap-1">
                   <label className={filterLabel} htmlFor="events-cluster">
-                    <span className="font-medium">Cluster</span>
+                    <span className="font-medium">{t('alerts.column.cluster')}</span>
                     <Input
                       className={`w-44 ${filterControl}`}
                       id="events-cluster"
@@ -296,15 +307,15 @@ export function EventsPage() {
                           event.target.value,
                         )
                       }
-                      placeholder="All clusters"
+                      placeholder={t('alerts.events.allClusters')}
                       value={clusterId}
                     />
                   </label>
-                  <InfoHint id="events.filter-cluster" label="Cluster filter" />
+                  <InfoHint id="events.filter-cluster" label={t('alerts.filter.clusterHint')} />
                 </span>
                 <span className="flex items-center gap-1">
                   <label className={filterLabel} htmlFor="events-type">
-                    <span className="font-medium">Event type</span>
+                    <span className="font-medium">{t('alerts.events.typeLabel')}</span>
                     <NativeSelect
                       className={filterControl}
                       id="events-type"
@@ -318,7 +329,7 @@ export function EventsPage() {
                       }
                       value={selectedType}
                     >
-                      <option value="">All event types</option>
+                      <option value="">{t('alerts.events.allTypes')}</option>
                       {typeOptions.map((type) => (
                         <option key={type} value={type}>
                           {type}
@@ -326,11 +337,11 @@ export function EventsPage() {
                       ))}
                     </NativeSelect>
                   </label>
-                  <InfoHint id="events.filter-type" label="Event type filter" />
+                  <InfoHint id="events.filter-type" label={t('alerts.events.typeHint')} />
                 </span>
                 <span className="flex items-center gap-1">
                   <label className={filterLabel} htmlFor="events-limit">
-                    <span className="font-medium">Event limit</span>
+                    <span className="font-medium">{t('alerts.events.limitLabel')}</span>
                     <NativeSelect
                       className={filterControl}
                       id="events-limit"
@@ -344,24 +355,31 @@ export function EventsPage() {
                       }
                       value={String(eventLimit.effective)}
                     >
-                      <option value="100">100 events</option>
-                      <option value="500">500 events</option>
-                      <option value="1000">1,000 events</option>
+                      <option value="100">
+                        {t('alerts.events.limitOption', { count: formatCount(100) })}
+                      </option>
+                      <option value="500">
+                        {t('alerts.events.limitOption', { count: formatCount(500) })}
+                      </option>
+                      <option value="1000">
+                        {t('alerts.events.limitOption', { count: formatCount(1000) })}
+                      </option>
                     </NativeSelect>
                   </label>
-                  <InfoHint id="events.filter-limit" label="Event limit filter" />
+                  <InfoHint id="events.filter-limit" label={t('alerts.events.limitHint')} />
                 </span>
+                <HelpLink anchor="events#timeline" label={t('alerts.events.timelineTitle')} />
               </>
             }
           >
             <SimpleTable
-              ariaLabel="Fleet events"
+              ariaLabel={t('alerts.events.tableLabel')}
               captionId="events.table"
               columns={eventTableColumns}
               emptyState={
                 <EmptyState
-                  description="No events match the selected time range and filters."
-                  title="No events in this range"
+                  description={t('alerts.events.emptyDescription')}
+                  title={t('alerts.events.emptyTitle')}
                 />
               }
               rowKey={(event) => String(event.event_id)}
@@ -372,12 +390,20 @@ export function EventsPage() {
           </Section>
         </TabsContent>
         <TabsContent value="alerts">
-          <Section captionId="events.alert-status" title="Alert status">
+          <Section
+            actions={
+              <HelpLink anchor="events#alert-status" label={t('alerts.section.alertStatus')} />
+            }
+            captionId="events.alert-status"
+            title={t('alerts.section.alertStatus')}
+          >
             <SimpleTable
-              ariaLabel="Alert suppression status"
+              ariaLabel={t('alerts.events.alertStatusLabel')}
               captionId="events.alert-status-table"
               columns={statusColumns}
-              emptyState={<p className="text-muted-foreground text-sm">No alerts are loaded.</p>}
+              emptyState={
+                <p className="text-muted-foreground text-sm">{t('alerts.events.noAlerts')}</p>
+              }
               rowKey={(alert) => alert.alert_key}
               rows={alerts}
               scope="alerts"

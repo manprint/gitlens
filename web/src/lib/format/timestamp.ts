@@ -1,6 +1,13 @@
+import { displayTimeZone } from '../timezone'
+
 import { UNKNOWN } from './shared'
 
-export function formatTimestamp(iso: string, tz: string, locale = 'en-US'): string {
+/** `YYYY-MM-DD HH:mm:ss UTC+1`, by default in the console's zone (lib/timezone). */
+export function formatTimestamp(
+  iso: string,
+  tz: string = displayTimeZone(),
+  locale = 'en-US',
+): string {
   const date = new Date(iso)
   if (!Number.isFinite(date.getTime())) return UNKNOWN
 
@@ -30,4 +37,24 @@ export function formatTimestamp(iso: string, tz: string, locale = 'en-US'): stri
   // The parts already are the wall clock in tz. Rebuilding a Date from them
   // would read the clock back in the browser's own zone and shift it.
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} ${offset}`
+}
+
+/**
+ * Width of a table column that shows one formatTimestamp value on one line:
+ * `2026-11-20 21:32:59 UTC+10` at text-sm plus the cell padding.
+ */
+export const TIMESTAMP_COLUMN_WIDTH = '14.5rem'
+
+/** formatTimestamp without the date when `iso` falls on the same day as `now` in tz. */
+export function formatRecentTimestamp(
+  iso: string,
+  now: Date = new Date(),
+  tz: string = displayTimeZone(),
+  locale = 'en-US',
+): string {
+  const full = formatTimestamp(iso, tz, locale)
+  if (full === UNKNOWN) return full
+  return full.slice(0, 10) === formatTimestamp(now.toISOString(), tz, locale).slice(0, 10)
+    ? full.slice(11)
+    : full
 }

@@ -4,8 +4,9 @@ import AshPageComponent from '@/features/ash/AshPage'
 import InstancePage from '@/features/instance/InstancePage'
 import { useInstance } from '@/api/queries'
 import { ErrorState } from '@/components/state'
+import { useT } from '@/i18n/react'
 import { isMonitoredDatabase } from '@/lib/databases'
-import ExplainPanel from '@/features/queries/ExplainPanel'
+import { QueryExplainPanel } from '@/features/queries/ExplainPanel'
 import PlanHistory from '@/features/queries/PlanHistory'
 import { QueryOverview } from '@/features/queries/QueryOverview'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
@@ -18,6 +19,7 @@ import { EventsPage as EventsPageComponent } from '@/features/alerts/EventsPage'
 import { RulesPage as RulesPageComponent } from '@/features/alerts/RulesPage'
 import { SilencesPage as SilencesPageComponent } from '@/features/alerts/SilencesPage'
 import { SettingsPage as SettingsPageComponent } from '@/features/settings/SettingsPage'
+import HelpPageComponent from '@/features/help/HelpPage'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 interface PlaceholderPageProps {
@@ -25,12 +27,13 @@ interface PlaceholderPageProps {
 }
 
 function PlaceholderPage({ surface }: PlaceholderPageProps) {
+  const t = useT()
   return (
     <section aria-labelledby="page-title" className="space-y-3">
       <h1 className="text-foreground text-2xl font-semibold tracking-tight" id="page-title">
         {surface}
       </h1>
-      <p className="text-muted-foreground">{surface} is not implemented in this build.</p>
+      <p className="text-muted-foreground">{t('auth.route.notImplemented', { surface })}</p>
     </section>
   )
 }
@@ -67,12 +70,13 @@ export function QueryDetailPage() {
   const { instanceId, queryid } = useParams<{ instanceId: string; queryid: string }>()
   const [searchParams] = useSearchParams()
   const instanceQuery = useInstance(instanceId ?? '')
+  const t = useT()
   // Set by the list link to the statement's database. Without it EXPLAIN runs
   // in the agent's own DSN database and plan history lists every database.
   const requestedDatabase = searchParams.get('db')
 
   if (!instanceId || !queryid) {
-    return <PlaceholderPage surface="Query detail and plan history" />
+    return <PlaceholderPage surface={t('auth.route.queryDetail')} />
   }
 
   // The URL is editable, so the database is checked against the instance's
@@ -86,8 +90,8 @@ export function QueryDetailPage() {
           onRetry={() => void instanceQuery.refetch()}
         />
       ) : (
-        <section aria-busy="true" aria-label="Loading instance" role="status">
-          Loading instance…
+        <section aria-busy="true" aria-label={t('auth.route.loadingInstance')} role="status">
+          {t('auth.route.loadingInstanceDots')}
         </section>
       )
     }
@@ -97,8 +101,8 @@ export function QueryDetailPage() {
           role="alert"
           className="border-destructive/40 bg-destructive/10 rounded-xl border text-sm"
         >
-          <strong>Database not monitored.</strong> {requestedDatabase} is not monitored on this
-          instance, so this statement is not explained or planned here.
+          <strong>{t('auth.route.dbNotMonitored')}</strong>{' '}
+          {t('auth.route.dbNotMonitoredBody', { database: requestedDatabase })}
         </section>
       )
     }
@@ -112,7 +116,7 @@ export function QueryDetailPage() {
         instanceId={instanceId}
         queryid={queryid}
       />
-      <ExplainPanel
+      <QueryExplainPanel
         currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
         {...(datname === undefined ? {} : { datname })}
         instanceId={instanceId}
@@ -153,4 +157,8 @@ export function SilencesPage() {
 
 export function SettingsPage() {
   return <SettingsPageComponent />
+}
+
+export function HelpPage() {
+  return <HelpPageComponent />
 }

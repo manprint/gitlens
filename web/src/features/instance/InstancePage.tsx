@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
+import { useT } from '@/i18n/react'
 import { useClusterReplication, useInstance, useInstanceDatabases } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { ErrorState } from '@/components/state'
@@ -62,31 +63,34 @@ interface InstancePageProps {
 }
 
 function LoadingInstance() {
+  const t = useT()
   return (
-    <section aria-busy="true" aria-label="Loading instance detail" role="status">
-      Loading instance detail…
+    <section aria-busy="true" aria-label={t('instance.page.loadingAria')} role="status">
+      {t('instance.page.loading')}
     </section>
   )
 }
 
 function InstanceNotFound({ instanceId }: { instanceId: string }) {
+  const t = useT()
   return (
     <section aria-labelledby="instance-not-found-title" className="space-y-3">
       <h1
         className="text-foreground text-2xl font-semibold tracking-tight"
         id="instance-not-found-title"
       >
-        Instance not found
+        {t('instance.page.notFound')}
       </h1>
       <p className="text-muted-foreground">
-        No monitored instance matches <code>{instanceId}</code>.
+        {t('instance.page.notFoundBefore')} <code>{instanceId}</code>.
       </p>
-      <Link to="/">Back to fleet overview</Link>
+      <Link to="/">{t('instance.page.backFleet')}</Link>
     </section>
   )
 }
 
 export function InstancePage({ instanceId: instanceIdOverride }: InstancePageProps = {}) {
+  const t = useT()
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
@@ -166,8 +170,12 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
       }
       if (databasesQuery.isPending || databasesQuery.data === undefined) {
         return (
-          <section aria-busy="true" aria-label="Loading instance databases" role="status">
-            Loading instance databases…
+          <section
+            aria-busy="true"
+            aria-label={t('instance.page.loadingDatabasesAria')}
+            role="status"
+          >
+            {t('instance.page.loadingDatabases')}
           </section>
         )
       }
@@ -209,13 +217,13 @@ export function InstancePage({ instanceId: instanceIdOverride }: InstancePagePro
         replayLag={replayLagOf(replicationQuery, instanceId)}
         sectionTabs={
           <TabsList
-            aria-label="Instance sections"
+            aria-label={t('instance.page.sectionsLabel')}
             className="h-auto flex-wrap min-[1600px]:flex-nowrap min-[1600px]:max-[1919px]:[&_[role=tab]]:px-1.5 min-[1600px]:max-[1919px]:[&_[role=tab]]:text-[13px]"
             ref={tabList}
           >
             {INSTANCE_SECTIONS.map((entry) => (
               <TabsTrigger key={entry.id} value={entry.id}>
-                {entry.label}
+                {t(entry.labelKey)}
               </TabsTrigger>
             ))}
           </TabsList>

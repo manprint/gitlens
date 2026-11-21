@@ -9,8 +9,9 @@ import {
   formatMiB,
   isShortening,
   previewSummary,
-  RETENTION_FAMILY_LABELS,
+  RETENTION_FAMILY_KEYS,
   retentionErrorMessage,
+  retentionFamilyLabel,
   validateRetentionDays,
 } from './retention'
 
@@ -101,7 +102,8 @@ describe('retention rules', () => {
   })
 
   it('RET-UI-005 every family of the contract has a label, and the 409 body matches it', () => {
-    expect(Object.keys(RETENTION_FAMILY_LABELS)).toEqual([
+    expect(retentionFamilyLabel('metrics_ash')).toBe('Active session history')
+    expect(Object.keys(RETENTION_FAMILY_KEYS)).toEqual([
       'metrics',
       'metrics_statements',
       'metrics_ash',

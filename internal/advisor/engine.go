@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/manprint/pglens/internal/i18n"
 )
 
 const defaultAdvisorInterval = 15 * time.Minute
@@ -534,11 +535,11 @@ func (e *Engine) evaluateRule(r Rule, s *Snapshot) (out []Finding, panicked bool
 		if v := recover(); v != nil {
 			log.Printf("advisor rule %s panicked: %v", r.ID(), v)
 			panicked = true
-			out = []Finding{{RuleID: r.ID(), Severity: r.Severity(), State: StateDegraded, Scope: r.Scope(), Title: "Advisor rule failed", Detail: "rule evaluation panicked", DegradedReason: "rule evaluation failed"}}
+			out = []Finding{Finding{RuleID: r.ID(), Severity: r.Severity(), State: StateDegraded, Scope: r.Scope(), DegradedReason: "rule evaluation failed"}.say("engine.rule_failed", nil)}
 		}
 	}()
 	if s.PermTier < r.MinTier() {
-		return []Finding{{RuleID: r.ID(), Severity: r.Severity(), State: StateDegraded, Scope: r.Scope(), Title: "Permission tier unavailable", Detail: "advisor rule requires a higher permission tier", DegradedReason: "required permission tier " + r.MinTier().String()}}, false
+		return []Finding{Finding{RuleID: r.ID(), Severity: r.Severity(), State: StateDegraded, Scope: r.Scope(), DegradedReason: "required permission tier " + r.MinTier().String()}.say("engine.tier_unavailable", nil)}, false
 	}
 	for _, need := range r.Needs() {
 		if missingSnapshotInput(s, need) {
@@ -546,7 +547,7 @@ func (e *Engine) evaluateRule(r Rule, s *Snapshot) (out []Finding, panicked bool
 			if skipped, ok := s.SkippedChecks[need]; ok && strings.TrimSpace(skipped) != "" {
 				reason = skipped
 			}
-			return []Finding{{RuleID: r.ID(), Severity: r.Severity(), State: StateDegraded, Scope: r.Scope(), Title: "Advisor input unavailable", Detail: "required advisor input is unavailable: " + reason, DegradedReason: reason}}, false
+			return []Finding{Finding{RuleID: r.ID(), Severity: r.Severity(), State: StateDegraded, Scope: r.Scope(), DegradedReason: reason}.say("engine.input_unavailable", i18n.Args{"reason": reason})}, false
 		}
 	}
 	return r.Evaluate(s), false

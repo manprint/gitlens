@@ -8,13 +8,18 @@ import {
   InstanceStatusBanners,
   instanceStatusRoute,
 } from '@/features/instance/InstanceStatusBanners'
+import { useDisplayTimeZone } from '@/hooks/useDisplayTimeZone'
 import { useMinWidth } from '@/hooks/useMinWidth'
+import { useLocale, useT } from '@/i18n/react'
 import { Header } from './Header'
 import { Sidebar, SidebarContent } from './Sidebar'
 
 export function AppShell() {
   const mainRef = useRef<HTMLElement>(null)
+  const t = useT()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const zone = useDisplayTimeZone()
+  const locale = useLocale()
   // The header reports reachability and data age wherever the operator is. The
   // fleet, cluster, instance and settings pages already poll this query, so they
   // share it. On the other pages the shell adds its own poll of GET
@@ -63,7 +68,7 @@ export function AppShell() {
         href="#main"
         onClick={skipToContent}
       >
-        Skip to content
+        {t('shell.app.skip')}
       </a>
       <Sidebar clusters={clusters} />
       <Sheet onOpenChange={setDrawerOpen} open={drawerOpen}>
@@ -71,17 +76,14 @@ export function AppShell() {
           className="bg-sidebar text-sidebar-foreground w-72 border-none p-0"
           side="left"
         >
-          <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <SheetDescription className="sr-only">
-            Choose a server or a page to open.
-          </SheetDescription>
+          <SheetTitle className="sr-only">{t('shell.app.navigation')}</SheetTitle>
+          <SheetDescription className="sr-only">{t('shell.app.navigationHint')}</SheetDescription>
           <SidebarContent clusters={clusters} expanded onNavigate={() => setDrawerOpen(false)} />
         </SheetContent>
       </Sheet>
       <div className="min-h-screen md:pl-16 lg:pl-64">
         <Header
           connection={connection}
-          dataUpdatedAt={fleet.dataUpdatedAt}
           onOpenNavigation={() => setDrawerOpen(true)}
           statusSlot={statusInHeader && statusInstance !== null ? setHeaderSlot : undefined}
         />
@@ -94,13 +96,14 @@ export function AppShell() {
           tabIndex={-1}
         >
           {!statusInHeader && statusInstance !== null ? <div ref={setPageSlot} /> : null}
-          <Outlet />
+          {/* A page formats its times and numbers once per render; a new zone or language redraws it whole. */}
+          <Outlet key={`${zone}|${locale}`} />
         </main>
       </div>
       {statusInstance !== null
         ? createPortal(
             <InstanceStatusBanners
-              key={statusInstance}
+              key={`${statusInstance}|${zone}`}
               instanceId={statusInstance}
               placement={statusInHeader ? 'header' : 'page'}
             />,

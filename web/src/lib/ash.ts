@@ -245,11 +245,6 @@ export function totalSamples(buckets: readonly Pick<AshBucket, 'samples'>[]): nu
   return buckets.reduce((total, bucket) => total + bucket.samples, 0)
 }
 
-/** ASH conclusions are under-sampled until at least 60 samples exist. */
-export function isUnderSampled(buckets: readonly Pick<AshBucket, 'samples'>[]): boolean {
-  return totalSamples(buckets) < 60
-}
-
 /** Return null for an empty sampling window instead of manufacturing a value. */
 export function avgActiveSessions(samples: number, ticks: number): number | null {
   return ticks === 0 ? null : samples / ticks

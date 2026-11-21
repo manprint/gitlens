@@ -18,6 +18,7 @@ const summaryPath = process.argv[2]
 const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'))
 const directoryFloors = {
   'src/lib/': 95,
+  'src/i18n/': 95,
   'src/api/': 95,
   'src/components/state/': 100,
   'src/components/charts/': 90,

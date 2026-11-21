@@ -389,8 +389,8 @@ describe('IndexAnalysisPage', () => {
     await flushNetwork(30)
 
     const hint = screen.getByText('never scanned').getAttribute('title') ?? ''
-    expect(hint).toBe(
-      'No scan since the statistics were reset. The advisor never judges indexes of 10.0 MiB or less, so this is the raw counter, not a verdict.',
+    expect(hint).toMatch(
+      /^No scan since the statistics were reset\. The advisor never judges indexes of 10\.0 MiB or less, so this is the raw counter, not a verdict\. What to do: /,
     )
   })
 

@@ -11,10 +11,12 @@ import {
 } from '@/api/queries'
 import type { Cluster } from '@/api/types'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { useT } from '@/i18n/react'
 import { clusterLabel } from '@/lib/names'
 import { toSlotRows } from '@/lib/replication'
 import { queryWindowOf } from '@/lib/timerange'
@@ -39,32 +41,48 @@ interface ClusterPageProps {
 
 const EMPTY_CLUSTER_INSTANCES: Cluster['instances'] = []
 
+const HEALTH_KEY = {
+  critical: 'cluster.health.critical',
+  degraded: 'cluster.health.degraded',
+  ok: 'cluster.health.ok',
+} as const
+
 function ClusterNotFound({ clusterId }: { clusterId: string }) {
+  const t = useT()
   return (
     <section aria-labelledby="cluster-not-found-title" className="space-y-3">
       <h1
         className="text-foreground text-2xl font-semibold tracking-tight"
         id="cluster-not-found-title"
       >
-        Cluster not found
+        {t('cluster.notFound.title')}
       </h1>
       <p className="text-muted-foreground">
-        No monitored cluster matches <code>{clusterId}</code>.
+        {t('cluster.notFound.bodyBefore')}
+        <code>{clusterId}</code>
+        {t('cluster.notFound.bodyAfter')}
       </p>
-      <Link to="/">Back to fleet overview</Link>
+      <Link to="/">{t('cluster.notFound.back')}</Link>
     </section>
   )
 }
 
 function LoadingCluster() {
+  const t = useT()
   return (
-    <section aria-busy="true" aria-label="Loading cluster detail" role="status">
-      Loading cluster detail…
+    <section aria-busy="true" aria-label={t('cluster.loading.label')} role="status">
+      {t('cluster.loading.text')}
     </section>
   )
 }
 
+function ClusterSubtitle({ count, health }: { count: number; health: Cluster['health'] }) {
+  const t = useT()
+  return <>{t('cluster.page.subtitle', { count, health: t(HEALTH_KEY[health]) })}</>
+}
+
 export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps = {}) {
+  const t = useT()
   const { clusterId: routeClusterId } = useParams<{ clusterId: string }>()
   const clusterId = clusterIdOverride ?? routeClusterId ?? ''
   const location = useLocation()
@@ -127,7 +145,7 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
   if (clustersQuery.error && !clustersQuery.data) {
     return (
       <ErrorState
-        endpoint="clusters"
+        endpoint={t('cluster.endpoint.clusters')}
         failure={clustersQuery.error}
         onRetry={() => void clustersQuery.refetch()}
       />
@@ -137,7 +155,7 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
   if (topologyQuery.error && !topologyQuery.data) {
     return (
       <ErrorState
-        endpoint="cluster topology"
+        endpoint={t('cluster.endpoint.topology')}
         failure={topologyQuery.error}
         onRetry={() => void topologyQuery.refetch()}
       />
@@ -153,26 +171,24 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
     topology: () => (
       <>
         <TopologyGraph instances={instances} topology={topology} />
-        {topology.length === 0 ? (
-          <p role="status">No replication observed for this cluster.</p>
-        ) : null}
+        {topology.length === 0 ? <p role="status">{t('cluster.topology.none')}</p> : null}
       </>
     ),
     lag: () => (
       <section aria-labelledby="cluster-lag-heading">
         <h2 id="cluster-lag-heading" className="sr-only">
-          Replication lag charts
+          {t('cluster.lag.heading')}
         </h2>
         {replicationQuery.error ? (
           <ErrorState
-            endpoint="replication lag charts"
+            endpoint={t('cluster.endpoint.lagCharts')}
             failure={replicationQuery.error}
             onRetry={() => void replicationQuery.refetch()}
           />
         ) : replicationQuery.isPending ? (
           <EmptyState
-            title="Loading replication lag"
-            description="Reading the replication lag series for this range."
+            title={t('cluster.lag.loadingTitle')}
+            description={t('cluster.lag.loadingDescription')}
           />
         ) : (
           <LagSection edges={replicationQuery.data?.edges ?? []} instances={instances} />
@@ -184,8 +200,8 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
     slots: () =>
       slotsQuery.isPending ? (
         <EmptyState
-          title="Loading replication slots"
-          description="Reading the replication slots this cluster reports."
+          title={t('cluster.slots.loadingTitle')}
+          description={t('cluster.slots.loadingDescription')}
         />
       ) : (
         <SlotsSection
@@ -197,8 +213,8 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
     drift: () =>
       driftQuery.isPending ? (
         <EmptyState
-          title="Loading configuration drift"
-          description="Comparing observed settings across the cluster instances."
+          title={t('cluster.drift.loadingTitle')}
+          description={t('cluster.drift.loadingDescription')}
         />
       ) : (
         <DriftSection
@@ -214,35 +230,36 @@ export function ClusterPage({ clusterId: clusterIdOverride }: ClusterPageProps =
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="cluster" label={t('cluster.page.helpLabel')} />}
         icon={Network}
-        eyebrow="Cluster"
+        eyebrow={t('cluster.page.eyebrow')}
         title={title}
         truncateTitle
-        subtitle={`${cluster.instance_count} monitored instance${cluster.instance_count === 1 ? '' : 's'} · ${cluster.health}`}
+        subtitle={<ClusterSubtitle count={cluster.instance_count} health={cluster.health} />}
         freshness={<FreshnessBadge dataUpdatedAt={topologyQuery.dataUpdatedAt} policy="cluster" />}
       />
 
       {topologyQuery.error ? (
         <Callout role="status" variant="warning">
-          Cluster topology is showing the last successful snapshot while the latest refresh failed.
+          {t('cluster.page.topologyStale')}
         </Callout>
       ) : null}
 
       {/* One view per tab (15.3); every query above stays in the page, as before. */}
       <Tabs onValueChange={(value) => showSection(readClusterSection(value))} value={section}>
-        <TabsList aria-label="Cluster sections" className="h-auto flex-wrap">
+        <TabsList aria-label={t('cluster.page.sectionsLabel')} className="h-auto flex-wrap">
           {CLUSTER_SECTIONS.map((entry) => (
             <TabsTrigger key={entry.id} value={entry.id}>
-              {entry.label}
+              {t(entry.labelKey)}
             </TabsTrigger>
           ))}
         </TabsList>
         <p className="text-muted-foreground text-xs">
-          Cluster identity: <code>{cluster.cluster_id}</code>{' '}
+          {t('cluster.page.identityLabel')} <code>{cluster.cluster_id}</code>{' '}
           {cluster.id_source === 'system_identifier'
-            ? '(the PostgreSQL system identifier, which pglens uses to tell clusters apart)'
+            ? t('cluster.page.idSystem')
             : cluster.id_source === 'manual'
-              ? '(derived from a cluster name supplied by the user, not from the PostgreSQL system identifier)'
+              ? t('cluster.page.idManual')
               : null}
         </p>
         {CLUSTER_SECTIONS.map((entry) => (

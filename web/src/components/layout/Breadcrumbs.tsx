@@ -3,21 +3,25 @@ import { ChevronRight } from 'lucide-react'
 import { useMemo } from 'react'
 
 import { useCachedClusters } from '@/api/queries'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT, type Translate } from '@/i18n/react'
+import { helpTopicTitle } from '@/lib/help/catalog'
 import { clusterLabel, instanceLabel, nameLookup, type NameLookup } from '@/lib/names'
 
-const segmentLabels: Record<string, string> = {
-  alerts: 'Alerts',
-  ash: 'ASH',
-  clusters: 'Clusters',
-  events: 'Events',
-  findings: 'Findings',
-  indexes: 'Index analysis',
-  instances: 'Instances',
-  locks: 'Locks',
-  queries: 'Queries',
-  rules: 'Rules',
-  settings: 'Settings',
-  silences: 'Silences',
+const segmentLabels: Record<string, MessageKey> = {
+  alerts: 'shell.crumb.alerts',
+  ash: 'shell.crumb.ash',
+  clusters: 'shell.crumb.clusters',
+  events: 'shell.crumb.events',
+  findings: 'shell.crumb.findings',
+  help: 'shell.crumb.help',
+  indexes: 'shell.crumb.indexes',
+  instances: 'shell.crumb.instances',
+  locks: 'shell.crumb.locks',
+  queries: 'shell.crumb.queries',
+  rules: 'shell.crumb.rules',
+  settings: 'shell.crumb.settings',
+  silences: 'shell.crumb.silences',
 }
 
 // A mangled or hand-typed link can carry a malformed escape such as %E0. The
@@ -36,8 +40,9 @@ const LONG_NUMBER = /^-?\d{13,}$/
 
 // A full instance UUID or query id fills the header; its first characters are
 // enough to tell entries apart in the trail, and the title keeps the whole value.
-function labelForSegment(segment: string): string {
-  const label = segmentLabels[segment] ?? decodeSegment(segment)
+function labelForSegment(t: Translate, segment: string): string {
+  const key = segmentLabels[segment]
+  const label = key ? t(key) : decodeSegment(segment)
   if (UUID.test(label)) return `${label.slice(0, 8)}…`
   if (LONG_NUMBER.test(label)) return `${label.slice(0, 10)}…`
   return label
@@ -47,13 +52,19 @@ function labelForSegment(segment: string): string {
  * The crumb of a cluster or instance id shows its name (D14, D15), read from the
  * cluster list the shell polls; a miss keeps the shortened id.
  */
-function namedLabel(parent: string | undefined, segment: string, lookup: NameLookup): string {
-  const fallback = labelForSegment(segment)
+function namedLabel(
+  t: Translate,
+  parent: string | undefined,
+  segment: string,
+  lookup: NameLookup,
+): string {
+  const fallback = labelForSegment(t, segment)
   const id = decodeSegment(segment)
   if (parent === 'clusters') {
     const cluster = lookup.cluster(id)
     return cluster ? clusterLabel(cluster, fallback) : fallback
   }
+  if (parent === 'help') return helpTopicTitle(id) ?? fallback
   if (parent === 'instances') {
     const instance = lookup.instance(id)
     return instance ? instanceLabel(instance) : fallback
@@ -62,26 +73,27 @@ function namedLabel(parent: string | undefined, segment: string, lookup: NameLoo
 }
 
 export function Breadcrumbs() {
+  const t = useT()
   const { pathname } = useLocation()
   const clusters = useCachedClusters()
   const lookup = useMemo(() => nameLookup(clusters), [clusters])
   const segments = pathname.split('/').filter(Boolean)
   const items =
     segments.length === 0
-      ? [{ label: 'Fleet overview', path: '/', title: 'Fleet overview', titled: false }]
+      ? [{ label: t('shell.crumb.fleet'), path: '/', title: t('shell.crumb.fleet'), titled: false }]
       : segments.map((segment, index) => {
-          const label = namedLabel(segments[index - 1], segment, lookup)
+          const label = namedLabel(t, segments[index - 1], segment, lookup)
           return {
             label,
             title: decodeSegment(segment),
             path: `/${segments.slice(0, index + 1).join('/')}`,
             // A shortened id or a name keeps the raw id in its tooltip.
-            titled: label.endsWith('…') || label !== labelForSegment(segment),
+            titled: label.endsWith('…') || label !== labelForSegment(t, segment),
           }
         })
 
   return (
-    <nav aria-label="Breadcrumb" className="min-w-0 overflow-x-clip">
+    <nav aria-label={t('shell.crumb.trail')} className="min-w-0 overflow-x-clip">
       <ol className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-sm">
         {items.map((item, index) => {
           const current = index === items.length - 1

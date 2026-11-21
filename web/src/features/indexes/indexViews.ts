@@ -4,10 +4,10 @@
  * the default.
  */
 export const INDEX_VIEWS = [
-  { id: 'inventory', label: 'Inventory' },
-  { id: 'summary', label: 'Summary' },
-  { id: 'findings', label: 'Advisor findings' },
-  { id: 'foreign-keys', label: 'Foreign keys' },
+  { id: 'inventory', labelKey: 'indexes.view.inventory' },
+  { id: 'summary', labelKey: 'indexes.view.summary' },
+  { id: 'findings', labelKey: 'indexes.view.findings' },
+  { id: 'foreign-keys', labelKey: 'indexes.view.foreignKeys' },
 ] as const
 
 export type IndexView = (typeof INDEX_VIEWS)[number]['id']

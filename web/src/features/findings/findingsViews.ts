@@ -3,10 +3,13 @@
  * registry is used by the page and the tests.
  */
 
+import type { MessageKey } from '@/i18n/messages/en'
+
+/** `label` names the view in tests and route lists; the tab shows `labelKey`. */
 export const FINDINGS_VIEWS = [
-  { id: 'findings', label: 'Findings' },
-  { id: 'rules', label: 'Rule catalogue' },
-] as const
+  { id: 'findings', label: 'Findings', labelKey: 'findings.view.findings' },
+  { id: 'rules', label: 'Rule catalogue', labelKey: 'findings.ruleCatalogue.title' },
+] as const satisfies readonly { id: string; label: string; labelKey: MessageKey }[]
 
 export type FindingsViewId = (typeof FINDINGS_VIEWS)[number]['id']
 

@@ -1,0 +1,62 @@
+[
+  { "locale": "en", "message": "Hello {name}", "args": { "name": "Ada" }, "want": "Hello Ada" },
+  { "locale": "en", "message": "Missing {name}", "args": {}, "want": "Missing {name}" },
+  { "locale": "en", "message": "{n} ms", "args": { "n": 1234.567 }, "want": "1234.57 ms" },
+  { "locale": "it", "message": "{n} ms", "args": { "n": 1.5 }, "want": "1,5 ms" },
+  { "locale": "it", "message": "{n} ms", "args": { "n": 2 }, "want": "2 ms" },
+  {
+    "locale": "en",
+    "message": "{count, plural, one {# row} other {# rows}}",
+    "args": { "count": 1 },
+    "want": "1 row"
+  },
+  {
+    "locale": "en",
+    "message": "{count, plural, one {# row} other {# rows}}",
+    "args": { "count": 2 },
+    "want": "2 rows"
+  },
+  {
+    "locale": "en",
+    "message": "{count, plural, =0 {no rows} one {# row} other {# rows}}",
+    "args": { "count": 0 },
+    "want": "no rows"
+  },
+  {
+    "locale": "it",
+    "message": "{count, plural, one {# riga} other {# righe}}",
+    "args": { "count": 1 },
+    "want": "1 riga"
+  },
+  {
+    "locale": "it",
+    "message": "{count, plural, one {# riga} other {# righe}}",
+    "args": { "count": 0 },
+    "want": "0 righe"
+  },
+  {
+    "locale": "it",
+    "message": "{count, plural, one {# riga} other {# righe}}",
+    "args": { "count": 2.5 },
+    "want": "2,5 righe"
+  },
+  {
+    "locale": "en",
+    "message": "{kind, select, table {Table {name}} index {Index {name}} other {Object {name}}}",
+    "args": { "kind": "index", "name": "t_idx" },
+    "want": "Index t_idx"
+  },
+  {
+    "locale": "en",
+    "message": "{kind, select, table {Table} other {Object}}",
+    "args": { "kind": "slot" },
+    "want": "Object"
+  },
+  {
+    "locale": "it",
+    "message": "{kind, select, table {{count, plural, one {# tabella} other {# tabelle}}} other {altro}}",
+    "args": { "kind": "table", "count": 3 },
+    "want": "3 tabelle"
+  },
+  { "locale": "en", "message": "Issue #42 stays", "args": {}, "want": "Issue #42 stays" }
+]

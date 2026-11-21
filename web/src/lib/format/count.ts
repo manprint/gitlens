@@ -1,6 +1,7 @@
+import { activeIntl } from '@/i18n/store'
 import { localizedNumber } from './shared'
 
-export function formatCount(n: number, locale = 'en-US'): string {
+export function formatCount(n: number, locale = activeIntl()): string {
   return localizedNumber(n, locale, {
     maximumFractionDigits: 0,
     useGrouping: true,
@@ -17,7 +18,7 @@ export function formatCountOf(n: number, singular: string, plural = `${singular}
  * value, which a double cannot hold exactly. A string that is not an integer
  * is returned as it is.
  */
-export function formatIntegerString(value: string, locale = 'en-US'): string {
+export function formatIntegerString(value: string, locale = activeIntl()): string {
   if (value.trim() === '') return value
   let parsed: bigint
   try {

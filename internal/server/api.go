@@ -1091,9 +1091,21 @@ func (a *API) handleMetricsQuery(w http.ResponseWriter, r *http.Request) {
 
 // ----- /api/v1/events -----
 
+// eventTypeList splits a comma-separated type filter, dropping empty entries.
+func eventTypeList(filter string) []string {
+	var out []string
+	for _, t := range strings.Split(filter, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	clusterIDStr := q.Get("cluster_id")
+	instanceIDStr := q.Get("instance_id")
 	typeFilter := q.Get("type")
 	fromStr := q.Get("from")
 	toStr := q.Get("to")
@@ -1114,6 +1126,15 @@ func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		v := store.ToDB(cid)
 		clusterDB = &v
+	}
+	var instanceID *uuid.UUID
+	if instanceIDStr != "" {
+		id, perr := uuid.Parse(instanceIDStr)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid instance_id", perr.Error())
+			return
+		}
+		instanceID = &id
 	}
 
 	var fromPtr, toPtr *time.Time
@@ -1156,9 +1177,14 @@ func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
 		args = append(args, *clusterDB)
 		argIdx++
 	}
-	if typeFilter != "" {
-		fmt.Fprintf(&sb, " AND type=$%d", argIdx)
-		args = append(args, typeFilter)
+	if instanceID != nil {
+		fmt.Fprintf(&sb, " AND instance_id=$%d", argIdx)
+		args = append(args, *instanceID)
+		argIdx++
+	}
+	if types := eventTypeList(typeFilter); len(types) > 0 {
+		fmt.Fprintf(&sb, " AND type = ANY($%d)", argIdx)
+		args = append(args, types)
 		argIdx++
 	}
 	if fromPtr != nil {

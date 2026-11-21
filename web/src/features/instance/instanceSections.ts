@@ -9,6 +9,7 @@ export const INSTANCE_SECTIONS = [
   {
     id: 'overview',
     label: 'Overview',
+    labelKey: 'instance.section.overview',
     kind: 'charts',
     legacyHash: 'instance-overview',
     captionId: 'overview.section',
@@ -16,6 +17,7 @@ export const INSTANCE_SECTIONS = [
   {
     id: 'host',
     label: 'Host',
+    labelKey: 'instance.section.host',
     kind: 'charts',
     legacyHash: 'host-metrics',
     captionId: 'host.section',
@@ -23,6 +25,7 @@ export const INSTANCE_SECTIONS = [
   {
     id: 'settings',
     label: 'Settings',
+    labelKey: 'instance.section.settings',
     kind: 'table',
     legacyHash: 'settings',
     captionId: 'instance.settings',
@@ -30,6 +33,7 @@ export const INSTANCE_SECTIONS = [
   {
     id: 'relations',
     label: 'Tables and indexes',
+    labelKey: 'instance.section.relations',
     kind: 'table',
     legacyHash: 'instance-relations',
     captionId: 'relations.section',
@@ -37,6 +41,7 @@ export const INSTANCE_SECTIONS = [
   {
     id: 'catalog',
     label: 'Schema objects',
+    labelKey: 'instance.section.catalog',
     kind: 'table',
     legacyHash: 'catalog',
     captionId: 'catalog.section',
@@ -44,6 +49,7 @@ export const INSTANCE_SECTIONS = [
   {
     id: 'logical',
     label: 'Logical replication',
+    labelKey: 'instance.section.logical',
     kind: 'table',
     legacyHash: 'logical-replication',
     captionId: 'logical.section',
@@ -51,6 +57,7 @@ export const INSTANCE_SECTIONS = [
   {
     id: 'internals',
     label: 'Internals',
+    labelKey: 'instance.section.internals',
     kind: 'table',
     legacyHash: 'internals',
     captionId: 'internals.section',
@@ -58,6 +65,7 @@ export const INSTANCE_SECTIONS = [
   {
     id: 'readiness',
     label: 'Readiness',
+    labelKey: 'instance.section.readiness',
     kind: 'table',
     legacyHash: 'readiness',
     captionId: 'instance.readiness',

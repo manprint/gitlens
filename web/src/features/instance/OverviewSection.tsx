@@ -9,6 +9,8 @@ import {
 } from '@/lib/metrics'
 import { formatBytes, formatCount, formatRate } from '@/lib/format'
 import { useQueryMetrics } from '@/api/queries'
+import { useT } from '@/i18n/react'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { Unknown } from '@/components/state/Unknown'
@@ -104,6 +106,7 @@ function formattedRate(value: number | null): string | null {
 
 export function OverviewSection({ database, instanceId }: OverviewSectionProps) {
   const { range } = useTimeRange()
+  const t = useT()
   const timeWindow = queryWindowOf(range)
   const stepOf = (metric: string) => overviewStepSeconds(metric, range.from, range.to)
   const queries = useOverviewMetricQueries(instanceId, database, timeWindow, stepOf)
@@ -135,63 +138,75 @@ export function OverviewSection({ database, instanceId }: OverviewSectionProps) 
   const tempFilesInRange = integrateRate(tempFileRate, databaseRateStep)
 
   return (
-    <Section id="instance-overview" title="Instance overview" captionId="overview.section">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricTile
-          label="Connections in use"
-          unit="connections"
-          captionId="activity.connections-used"
-          detail={
-            <>
-              Out of a configured maximum of{' '}
-              {latestConnectionsLimit === null ? <Unknown /> : formatCount(latestConnectionsLimit)}{' '}
-              connections.
-            </>
-          }
-          value={formattedCount(latestValue(connectionsUsed))}
-        />
-        <MetricTile
-          label="Transactions"
-          unit="per second"
-          captionId="overview.tx-rate"
-          value={formattedRate(latestValue(transactionRate))}
-        />
-        <MetricTile
-          label="Cache hit ratio"
-          captionId="overview.cache-hit-ratio"
-          value={latestCacheHitRatio}
-        />
-        <MetricTile
-          label="WAL generated in range"
-          captionId="overview.wal-in-range"
-          value={formattedBytes(integrateRate(walRate, walStep))}
-        />
-        <MetricTile
-          label="Checkpoints in range"
-          unit="checkpoints"
-          captionId="overview.checkpoints-in-range"
-          value={checkpointsInRange === null ? null : formatCount(Math.round(checkpointsInRange))}
-        />
-        <MetricTile
-          label="Temporary bytes in range"
-          captionId="overview.temp-bytes-in-range"
-          value={formattedBytes(integrateRate(tempByteRate, databaseRateStep))}
-        />
-        <MetricTile
-          label="Temporary files in range"
-          unit="files"
-          captionId="overview.temp-files-in-range"
-          value={tempFilesInRange === null ? null : formatCount(Math.round(tempFilesInRange))}
-        />
-        <MetricTile
-          label="Deadlocks in range"
-          unit="deadlocks"
-          captionId="overview.deadlocks-in-range"
-          value={deadlocksInRange === null ? null : formatCount(Math.round(deadlocksInRange))}
-        />
-      </div>
-
+    <>
+      <Section
+        actions={
+          <HelpLink anchor="instance-overview#summary-tiles" label={t('instance.overview.tiles')} />
+        }
+        id="instance-overview"
+        title={t('instance.overview.section')}
+        captionId="overview.section"
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricTile
+            label={t('instance.overview.tile.connectionsUsed')}
+            unit="connections"
+            captionId="activity.connections-used"
+            detail={
+              <>
+                {t('instance.overview.limitBefore')}{' '}
+                {latestConnectionsLimit === null ? (
+                  <Unknown />
+                ) : (
+                  formatCount(latestConnectionsLimit)
+                )}{' '}
+                {t('instance.overview.limitAfter')}
+              </>
+            }
+            value={formattedCount(latestValue(connectionsUsed))}
+          />
+          <MetricTile
+            label={t('instance.overview.tile.transactions')}
+            unit="per second"
+            captionId="overview.tx-rate"
+            value={formattedRate(latestValue(transactionRate))}
+          />
+          <MetricTile
+            label={t('instance.overview.tile.cacheHitRatio')}
+            captionId="overview.cache-hit-ratio"
+            value={latestCacheHitRatio}
+          />
+          <MetricTile
+            label={t('instance.overview.tile.walInRange')}
+            captionId="overview.wal-in-range"
+            value={formattedBytes(integrateRate(walRate, walStep))}
+          />
+          <MetricTile
+            label={t('instance.overview.tile.checkpointsInRange')}
+            unit="checkpoints"
+            captionId="overview.checkpoints-in-range"
+            value={checkpointsInRange === null ? null : formatCount(Math.round(checkpointsInRange))}
+          />
+          <MetricTile
+            label={t('instance.overview.tile.tempBytesInRange')}
+            captionId="overview.temp-bytes-in-range"
+            value={formattedBytes(integrateRate(tempByteRate, databaseRateStep))}
+          />
+          <MetricTile
+            label={t('instance.overview.tile.tempFilesInRange')}
+            unit="files"
+            captionId="overview.temp-files-in-range"
+            value={tempFilesInRange === null ? null : formatCount(Math.round(tempFilesInRange))}
+          />
+          <MetricTile
+            label={t('instance.overview.tile.deadlocksInRange')}
+            unit="deadlocks"
+            captionId="overview.deadlocks-in-range"
+            value={deadlocksInRange === null ? null : formatCount(Math.round(deadlocksInRange))}
+          />
+        </div>
+      </Section>
       <OverviewCharts database={database} instanceId={instanceId} />
-    </Section>
+    </>
   )
 }

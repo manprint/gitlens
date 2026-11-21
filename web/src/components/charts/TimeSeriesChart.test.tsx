@@ -71,61 +71,20 @@ describe('TimeSeriesChart', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(7)
   })
 
-  it('UI-CLUS-017 writes an absolute range to the URL after a brush selection', () => {
+  it('UI-CLUS-017 keeps a zoom inside its chart: no shared group, no page range change', () => {
     const result = renderWithProviders(<TimeSeriesChart {...chartProps} />, {
       route: '/clusters/9007199254740993?range=1h',
     })
     const props = echartsMock.render.mock.calls[0]?.[0] as {
+      onChartReady?: unknown
       onEvents?: Record<string, (event: unknown) => void>
     }
-    const datazoom = props.onEvents?.datazoom
-    expect(datazoom).toBeDefined()
 
-    act(() => {
-      datazoom?.({
-        startValue: '2026-08-31T10:00:00Z',
-        endValue: '2026-08-31T10:01:00Z',
-      })
-    })
-
-    const params = new URLSearchParams(result.router.state.location.search)
-    expect(params.get('from')).toBe('2026-08-31T10:00:00.000Z')
-    expect(params.get('to')).toBe('2026-08-31T10:01:00.000Z')
-    expect(params.get('range')).toBeNull()
+    expect(props.onEvents?.datazoom).toBeUndefined()
+    expect(props.onChartReady).toBeUndefined()
+    expect(result.router.state.location.search).toBe('?range=1h')
   })
 
-  it('ignores malformed brush payloads and accepts numeric batch bounds', () => {
-    const result = renderWithProviders(<TimeSeriesChart {...chartProps} />, {
-      route: '/clusters/9007199254740993?range=1h',
-    })
-    const props = echartsMock.render.mock.calls[0]?.[0] as {
-      onEvents?: Record<string, (event: unknown) => void>
-    }
-    const datazoom = props.onEvents?.datazoom
-    expect(datazoom).toBeDefined()
-
-    const from = Date.parse('2026-08-31T10:00:00Z')
-    const to = Date.parse('2026-08-31T10:01:00Z')
-    act(() => {
-      datazoom?.({ batch: [{ startValue: from, endValue: to }] })
-    })
-    const changedSearch = result.router.state.location.search
-
-    for (const event of [
-      null,
-      {},
-      { batch: [] },
-      { batch: [1] },
-      { startValue: 'not-a-date', endValue: '2026-08-31T10:01:00Z' },
-      { startValue: to, endValue: from },
-      { startValue: Number.NaN, endValue: to },
-      { startValue: {}, endValue: to },
-    ]) {
-      act(() => datazoom?.(event))
-    }
-
-    expect(result.router.state.location.search).toBe(changedSearch)
-  })
   it('keeps the data table outside the image role, where screen readers reach it', () => {
     renderWithProviders(<TimeSeriesChart {...chartProps} />)
 

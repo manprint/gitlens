@@ -13,6 +13,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { useT } from '@/i18n/react'
 import {
   NAME_MAX_LENGTH,
   renameErrorMessage,
@@ -53,7 +54,16 @@ export function RenameDialog({ kind, subject, current, fallback, onSave }: Renam
   const inputId = `rename-${domId}`
   const helpId = `rename-help-${domId}`
   const errorId = `rename-error-${domId}`
-  const kindLabel = kind === 'cluster' ? 'Cluster' : 'Instance'
+  const t = useT()
+  const kindWord = t(
+    kind === 'cluster' ? 'settings.rename.clusterWord' : 'settings.rename.instanceWord',
+  )
+  const nameLabel = t(
+    kind === 'cluster' ? 'settings.rename.clusterName' : 'settings.rename.instanceName',
+  )
+  const what = t(
+    kind === 'cluster' ? 'settings.rename.whatIdentifier' : 'settings.rename.whatAddress',
+  )
 
   function changeOpen(next: boolean) {
     if (pending) return
@@ -82,8 +92,13 @@ export function RenameDialog({ kind, subject, current, fallback, onSave }: Renam
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogTrigger asChild>
-        <Button aria-label={`Rename ${kind} ${subject}`} size="xs" type="button" variant="outline">
-          Rename
+        <Button
+          aria-label={t('settings.rename.buttonLabel', { kind: kindWord, subject })}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          {t('settings.rename.button')}
         </Button>
       </DialogTrigger>
       <DialogContent
@@ -94,17 +109,16 @@ export function RenameDialog({ kind, subject, current, fallback, onSave }: Renam
         }}
       >
         <DialogHeader>
-          <DialogTitle>Rename {kind}</DialogTitle>
+          <DialogTitle>{t('settings.rename.title', { kind: kindWord })}</DialogTitle>
           <DialogDescription>
-            The name the console shows for {subject} instead of its{' '}
-            {kind === 'cluster' ? 'identifier' : 'address and port'}.
+            {t('settings.rename.description', { subject, what })}
           </DialogDescription>
         </DialogHeader>
 
         <form className="space-y-4" onSubmit={(event) => void submit(event)}>
           <div className="space-y-2">
             <label className="text-sm font-medium" htmlFor={inputId}>
-              {kindLabel} name
+              {nameLabel}
             </label>
             <Input
               aria-describedby={validation.ok ? helpId : `${errorId} ${helpId}`}
@@ -123,7 +137,7 @@ export function RenameDialog({ kind, subject, current, fallback, onSave }: Renam
               {validation.ok ? '' : validation.error}
             </p>
             <p className="text-muted-foreground text-xs" id={helpId}>
-              1–{NAME_MAX_LENGTH} characters; leave empty to restore the default ({fallback}).
+              {t('settings.rename.help', { max: NAME_MAX_LENGTH, fallback })}
             </p>
           </div>
 
@@ -136,11 +150,11 @@ export function RenameDialog({ kind, subject, current, fallback, onSave }: Renam
           <DialogFooter>
             <DialogClose asChild>
               <Button disabled={pending} type="button" variant="outline">
-                Cancel
+                {t('settings.rename.cancel')}
               </Button>
             </DialogClose>
             <Button disabled={!validation.ok || unchanged || pending} type="submit">
-              {pending ? 'Saving…' : 'Save'}
+              {pending ? t('settings.rename.saving') : t('settings.rename.save')}
             </Button>
           </DialogFooter>
         </form>

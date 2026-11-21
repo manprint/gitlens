@@ -23,6 +23,7 @@ import { PAGE_SIZES, paginate, sortRows, type Comparable } from '@/lib/tableCont
 import type { CaptionId, ColumnHelpId } from '@/lib/captions'
 
 import { cn } from '@/lib/utils'
+import { useT } from '@/i18n/react'
 
 import {
   FULLHD_CELL,
@@ -159,12 +160,15 @@ function DataTableView<TData extends RowData>({
   footerNote,
   toolbarExtra,
   captionId,
-  scope = 'rows',
-  ariaLabel = 'Data table',
+  scope: scopeProp,
+  ariaLabel: ariaLabelProp,
   toolbar,
   getRowId,
   controls,
 }: DataTableProps<TData> & { controls: TableStateControls }) {
+  const t = useT()
+  const scope = scopeProp ?? t('shell.table.rows')
+  const ariaLabel = ariaLabelProp ?? t('shell.table.dataTable')
   const { state, set, clear } = controls
   const {
     filtered,
@@ -259,7 +263,7 @@ function DataTableView<TData extends RowData>({
         <details className="relative">
           <summary className="border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-8 list-none items-center gap-1.5 rounded-md border px-3 text-xs font-medium shadow-xs transition-colors min-[1600px]:h-7 [&::-webkit-details-marker]:hidden">
             <Columns3 aria-hidden="true" className="size-3.5" />
-            Columns
+            {t('shell.table.columns')}
           </summary>
           <div className="bg-popover shadow-raised absolute right-0 z-20 mt-1.5 max-h-80 min-w-56 space-y-2 overflow-auto rounded-lg border p-3">
             {table.getAllLeafColumns().map((column) => {

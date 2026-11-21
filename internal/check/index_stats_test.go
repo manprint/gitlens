@@ -135,7 +135,7 @@ func TestIndexStats_ScrapeReadsLastScanOnlyOnPG16Plus(t *testing.T) {
 				return &mockRows{rows: [][]any{{
 					"public", "t", "i", int64(1), int64(2), int64(3), int64(4),
 					int64(5), int64(4096), true, false, true, uint32(16384),
-					scanned, nil, nil,
+					scanned, nil, nil, int64(1),
 				}}}, nil
 			},
 			queryRowFunc: func(context.Context, string, ...any) pgx.Row {

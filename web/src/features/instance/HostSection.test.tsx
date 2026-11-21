@@ -2,14 +2,18 @@ import { act, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Schemas } from '@/api/types'
+import { messages as english } from '@/i18n/messages/en'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { INSTANCE_ID, NOW } from '@/test/fixture-helpers'
 import { ok } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
 
-import { FILESYSTEM_HINT, NO_SWAP_TEXT } from './HostCharts'
-import { DISK_NOT_VISIBLE, HostSection } from './HostSection'
+import { HostSection } from './HostSection'
+
+const FILESYSTEM_HINT = english['instance.host.chart.filesystemHint']
+const NO_SWAP_TEXT = english['instance.host.chart.noSwap']
+const DISK_NOT_VISIBLE = english['instance.host.notVisible']
 
 vi.mock('echarts-for-react/esm/core', () => ({
   default: () => null,

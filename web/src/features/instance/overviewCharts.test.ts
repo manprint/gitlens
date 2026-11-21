@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { captionOf } from '@/lib/captions'
 import { metricKind } from '@/lib/chartStep'
 import { isWorkloadSeries, WORKLOAD_SERIES } from '@/lib/workloadSeries'
 
@@ -70,7 +71,7 @@ describe('OVERVIEW_GROUPS', () => {
     ])
     for (const group of OVERVIEW_GROUPS) {
       expect(group.title).not.toBe('')
-      expect(group.description).not.toBe('')
+      expect(captionOf(group.captionId).what).not.toBe('')
       expect(group.cards.length).toBeGreaterThan(0)
     }
   })

@@ -4,18 +4,14 @@ import { useIsFetching } from '@tanstack/react-query'
 
 import { useInstanceSearch } from '@/api/queries'
 import type { Schemas } from '@/api/types'
-import {
-  FULL_SEARCH_HINT,
-  HighlightedText,
-  MARK_CLASS,
-  SearchBox,
-} from '@/components/layout/SearchBox'
+import { HighlightedText, MARK_CLASS, SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
 import { ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useShownTerm } from '@/hooks/useSearch'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { useT } from '@/i18n/react'
 import { formatCount } from '@/lib/format'
 import { searchTermOf } from '@/lib/highlight'
 import { queryWindowKey, queryWindowOf, resolveQueryWindow } from '@/lib/timerange'
@@ -24,12 +20,12 @@ type SearchGroup = Schemas['SearchGroup']
 type SearchHit = Schemas['SearchHit']
 
 /** The groups in the order the panel shows them, with their names (D20). */
-const SEARCH_GROUPS: readonly { kind: SearchGroup['kind']; label: string }[] = [
-  { kind: 'indexes', label: 'Indexes' },
-  { kind: 'tables', label: 'Tables' },
-  { kind: 'columns', label: 'Columns' },
-  { kind: 'statements', label: 'Queries' },
-]
+const SEARCH_GROUPS = [
+  { kind: 'indexes', labelKey: 'indexes.search.groupIndexes' },
+  { kind: 'tables', labelKey: 'indexes.search.groupTables' },
+  { kind: 'columns', labelKey: 'indexes.search.groupColumns' },
+  { kind: 'statements', labelKey: 'indexes.search.groupQueries' },
+] as const satisfies readonly { kind: SearchGroup['kind']; labelKey: string }[]
 
 /** The URL keys of the page's time range (useTimeRange). */
 const RANGE_KEYS = ['range', 'from', 'to'] as const
@@ -80,17 +76,18 @@ interface SearchEverythingProps {
  * title line with the tabs; the results show in `SearchEverythingResults`.
  */
 export function SearchEverythingBox({ instanceId }: Pick<SearchEverythingProps, 'instanceId'>) {
+  const t = useT()
   const { q, term, setSearch } = useSearchParam()
   const fetching = useIsFetching({ queryKey: ['searchInstance', instanceId] }) > 0
   return (
     <SearchBox
       busy={fetching && term !== ''}
       boxClassName="min-[1600px]:w-48 min-[1800px]:w-56"
-      hint={FULL_SEARCH_HINT}
+      fullSearch
       id="index-search"
-      label="Search everything"
+      label={t('indexes.search.box')}
       onChange={setSearch}
-      placeholder="Search everything"
+      placeholder={t('indexes.search.box')}
       value={q}
     />
   )
@@ -139,6 +136,7 @@ interface GroupProps {
 }
 
 function Group({ group, label, term, current }: GroupProps) {
+  const t = useT()
   const titleId = `${useId().replaceAll(':', '')}-group`
   return (
     <section aria-labelledby={titleId} className="min-w-0 space-y-1.5">
@@ -146,20 +144,25 @@ function Group({ group, label, term, current }: GroupProps) {
         {label}
         <Badge variant="secondary">
           {formatCount(group.total)}
-          <span className="sr-only">{group.total === 1 ? ' match' : ' matches'}</span>
+          <span className="sr-only">
+            {group.total === 1 ? t('indexes.search.matchOne') : t('indexes.search.matchMany')}
+          </span>
         </Badge>
       </h3>
       {group.truncated ? (
         <p className="text-muted-foreground text-xs">
-          Showing {formatCount(group.hits.length)} of {formatCount(group.total)}
+          {t('indexes.search.showing', {
+            shown: formatCount(group.hits.length),
+            total: formatCount(group.total),
+          })}
         </p>
       ) : null}
       {group.hits.length === 0 ? (
-        <p className="text-muted-foreground text-xs">No match.</p>
+        <p className="text-muted-foreground text-xs">{t('indexes.search.noMatch')}</p>
       ) : (
         // From 1600 px the lists stay short, so the tab's table header stays on a Full HD screen.
         <ul
-          aria-label={`${label} found`}
+          aria-label={t('indexes.search.groupFound', { group: label })}
           className="max-h-64 space-y-0.5 overflow-auto pr-1 min-[1600px]:max-h-40"
         >
           {group.hits.map((hit) => (
@@ -194,6 +197,7 @@ function Group({ group, label, term, current }: GroupProps) {
  * tabs' content while a term of 2 characters or more is searched.
  */
 export function SearchEverythingResults({ instanceId, database }: SearchEverythingProps) {
+  const t = useT()
   const { term, setSearch, searchParams } = useSearchParam()
   const bounds = useSearchBounds(term)
   const searchQuery = useInstanceSearch(instanceId, {
@@ -206,14 +210,17 @@ export function SearchEverythingResults({ instanceId, database }: SearchEverythi
   if (term === '') return null
 
   const data = searchQuery.data
-  const groups = SEARCH_GROUPS.flatMap(({ kind, label }) => {
+  const groups = SEARCH_GROUPS.flatMap(({ kind, labelKey }) => {
     const group = data?.groups.find((candidate) => candidate.kind === kind)
-    return group ? [{ group, label }] : []
+    return group ? [{ group, label: t(labelKey) }] : []
   })
   const nothing = data !== undefined && groups.every(({ group }) => group.total === 0)
 
   return (
-    <Section captionId="indexes.search" title={`Search results for “${shownTerm}”`}>
+    <Section
+      captionId="indexes.search"
+      title={t('indexes.search.resultsTitle', { term: shownTerm })}
+    >
       {data === undefined ? (
         searchQuery.error ? (
           <ErrorState
@@ -223,15 +230,12 @@ export function SearchEverythingResults({ instanceId, database }: SearchEverythi
           />
         ) : (
           <div aria-busy="true" role="status">
-            Searching…
+            {t('indexes.search.searching')}
           </div>
         )
       ) : nothing ? (
         <div className="flex flex-wrap items-center gap-3 text-sm" role="status">
-          <span>
-            Nothing matches “{shownTerm}” in this range: no index, table, column or query collected
-            for this server.
-          </span>
+          <span>{t('indexes.search.nothing', { term: shownTerm })}</span>
           <Button
             onClick={() => {
               setSearch('')
@@ -242,7 +246,7 @@ export function SearchEverythingResults({ instanceId, database }: SearchEverythi
             type="button"
             variant="outline"
           >
-            Clear the search
+            {t('indexes.search.clear')}
           </Button>
         </div>
       ) : (

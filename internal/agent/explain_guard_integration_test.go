@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -725,5 +726,161 @@ func TestINTCMD035_ExplainAdmitsTheStockContribExtensions(t *testing.T) {
 				require.NoError(t, err, role.String())
 			}
 		}
+	})
+}
+
+func explainWith(t *testing.T, pg *pgtest.PG, role pgtest.Role, args command.Args) (json.RawMessage, error) {
+	t.Helper()
+	ctx := context.Background()
+	mgr, err := NewManager(ctx, "explain-with-"+role.String(), pg.DSN("postgres", role), DefaultConnOptions(), clock.System())
+	require.NoError(t, err)
+	defer mgr.Close()
+	args.Datname = "postgres"
+	return NewExplainExecutor().Execute(ctx, mgr, args)
+}
+
+func valuesFrom(t *testing.T, result json.RawMessage) string {
+	t.Helper()
+	var payload struct {
+		ValuesFrom string `json:"values_from"`
+	}
+	require.NoError(t, json.Unmarshal(result, &payload))
+	return payload.ValuesFrom
+}
+
+// TestINTCMD036_ExplainReadsTheCodeOfUserFunctions: a database that defines
+// IMMUTABLE or STABLE functions is explained when their code calls nothing
+// with an effect (a cast check like isnumeric()), and refused when it does,
+// directly, through another function, through a view, or with dynamic SQL.
+func TestINTCMD036_ExplainReadsTheCodeOfUserFunctions(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture+`
+CREATE FUNCTION pglens_guard.isnumeric(text) RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE x numeric;
+BEGIN
+	x = $1::numeric;
+	RETURN true;
+EXCEPTION WHEN others THEN
+	RETURN false;
+END $$;
+CREATE FUNCTION pglens_guard.label(int) RETURNS text LANGUAGE sql STABLE
+	AS $$ SELECT upper(b) FROM pglens_guard.t WHERE a = $1 $$;`)
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE") })
+
+		const usesFunctions = "SELECT count(*) FROM pglens_guard.t WHERE pglens_guard.isnumeric(b) OR pglens_guard.label(a) IS NULL"
+		ids := registerStatements(t, pg, usesFunctions)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			for _, analyze := range []bool{false, true} {
+				result, err := explainAs(t, pg, role, ids[usesFunctions], analyze)
+				require.NoError(t, err, "%s analyze=%v", role, analyze)
+				require.Contains(t, string(result), "Seq Scan")
+			}
+		}
+
+		hazards := []struct{ name, fixture, reason string }{
+			{"through another function", `
+CREATE FUNCTION pglens_guard.inner_lock() RETURNS int LANGUAGE plpgsql
+	AS $$ BEGIN PERFORM pg_advisory_lock(4250); RETURN 1; END $$;
+CREATE FUNCTION pglens_guard.outer_plain() RETURNS int LANGUAGE sql IMMUTABLE
+	AS $$ SELECT pglens_guard.inner_lock() $$;`, "pg_advisory_lock()"},
+			{"through a view", `
+CREATE VIEW pglens_guard.lock_view AS SELECT pg_try_advisory_lock(4251) AS locked;
+CREATE FUNCTION pglens_guard.reads_view() RETURNS boolean LANGUAGE sql STABLE
+	AS $$ SELECT locked FROM pglens_guard.lock_view $$;`, "pglens_guard.lock_view"},
+			{"with dynamic SQL", `
+CREATE FUNCTION pglens_guard.dynamic(text) RETURNS int LANGUAGE plpgsql IMMUTABLE
+	AS $$ BEGIN EXECUTE $1; RETURN 1; END $$;`, "EXECUTE"},
+			{"in C", `
+CREATE FUNCTION pglens_guard.c_code(cstring) RETURNS int4 LANGUAGE internal IMMUTABLE STRICT AS 'int4in';`, "pglens_guard.c_code()"},
+		}
+		for _, hazard := range hazards {
+			_, err = admin.Exec(ctx, "CREATE SCHEMA pglens_hazard;"+replaceSchema(hazard.fixture))
+			require.NoError(t, err, hazard.name)
+			for _, analyze := range []bool{false, true} {
+				_, err := explainAs(t, pg, pgtest.RoleT1, ids[usesFunctions], analyze)
+				requireRefused(t, err, "the database defines pglens_hazard.")
+				requireRefused(t, err, replaceSchema(hazard.reason))
+			}
+			requireNoAdvisoryLocks(t, admin)
+			_, err = admin.Exec(ctx, "DROP SCHEMA pglens_hazard CASCADE")
+			require.NoError(t, err)
+		}
+	})
+}
+
+// replaceSchema moves a hazard fixture to its own schema, dropped after each
+// case, so that the benign functions of pglens_guard stay.
+func replaceSchema(sql string) string {
+	return strings.ReplaceAll(sql, "pglens_guard.", "pglens_hazard.")
+}
+
+// TestINTCMD037_ExplainAnalyzeTakesParameterValues: a statement normalised
+// with $n is analyzed with the values the command gives, bound and never
+// spliced, or with the constants of an execution pg_stat_activity shows; with
+// neither it is refused, and nothing runs.
+func TestINTCMD037_ExplainAnalyzeTakesParameterValues(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx := context.Background()
+		admin := pg.Pool(t, "postgres", pgtest.RoleSuperuser)
+		_, err := admin.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+		require.NoError(t, err)
+		_, err = admin.Exec(ctx, guardFixture)
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS pglens_guard CASCADE") })
+
+		const normalised = "SELECT count(*) FROM pglens_guard.t WHERE a = $1 AND b <> $2"
+		_, err = admin.Exec(ctx, "SELECT count(*) FROM pglens_guard.t WHERE a = 1 AND b <> 'z'")
+		require.NoError(t, err)
+		var queryID int64
+		require.NoError(t, admin.QueryRow(ctx, "SELECT queryid FROM pg_stat_statements WHERE query = $1 LIMIT 1", normalised).Scan(&queryID))
+
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			one, injected := "1", "x' OR true --"
+			result, err := explainWith(t, pg, role, command.Args{QueryID: &queryID, Analyze: true, Params: []*string{&one, &injected}})
+			require.NoError(t, err, role.String())
+			require.Contains(t, string(result), "Actual Rows")
+			require.Equal(t, "values", valuesFrom(t, result))
+
+			bad := "not a number"
+			_, err = explainWith(t, pg, role, command.Args{QueryID: &queryID, Analyze: true, Params: []*string{&bad, &one}})
+			requireRefused(t, err, "invalid input syntax")
+
+			_, err = explainWith(t, pg, role, command.Args{QueryID: &queryID, Analyze: true, Params: []*string{&one}})
+			requireRefused(t, err, "2 parameter(s)")
+
+			_, err = explainWith(t, pg, role, command.Args{QueryID: &queryID, Analyze: true})
+			requireRefused(t, err, "a value for each of its 2 parameters")
+		}
+
+		// An application session that ran the statement and is now idle:
+		// pg_stat_activity keeps its text and queryid.
+		app, err := pgx.Connect(ctx, pg.DSN("postgres", pgtest.RoleSuperuser))
+		require.NoError(t, err)
+		defer app.Close(ctx)
+		_, err = app.Exec(ctx, "SELECT count(*) FROM pglens_guard.t WHERE a = 2 AND b <> 'q'")
+		require.NoError(t, err)
+		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
+			result, err := explainWith(t, pg, role, command.Args{QueryID: &queryID, Analyze: true})
+			require.NoError(t, err, role.String())
+			require.Contains(t, string(result), "Actual Rows")
+			require.Equal(t, "recent_execution", valuesFrom(t, result))
+		}
+
+		// Plan-only needs no values on PostgreSQL 16+ (GENERIC_PLAN); before
+		// 16 it takes the recent execution's.
+		result, err := explainWith(t, pg, pgtest.RoleT1, command.Args{QueryID: &queryID})
+		require.NoError(t, err)
+		want := "generic"
+		if pg.Major < 16 {
+			want = "recent_execution"
+		}
+		require.Equal(t, want, valuesFrom(t, result))
 	})
 }

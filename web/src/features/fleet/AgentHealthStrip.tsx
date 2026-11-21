@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
 
+import { HelpLink } from '@/components/layout/HelpLink'
 import { InfoHint } from '@/components/layout/InfoHint'
+import { useT } from '@/i18n/react'
 import { formatDuration } from '@/lib/format'
 import type { AgentHealthIssue } from '@/lib/fleet'
 import { clusterLabel, instanceAddress, instanceLabel } from '@/lib/names'
@@ -19,6 +21,7 @@ function readableReason(reason: string): string {
 }
 
 export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
+  const t = useT()
   if (issues.length === 0) return null
 
   return (
@@ -29,17 +32,16 @@ export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
     >
       <div>
         <p className="text-destructive text-xs font-semibold tracking-wide uppercase">
-          Agent health
+          {t('fleet.agentHealth.eyebrow')}
         </p>
         <div className="mt-1 flex items-center gap-1">
           <h2 id="agent-health-title" className="text-xl font-semibold">
-            Agents requiring attention
+            {t('fleet.agentHealth.title')}
           </h2>
-          <InfoHint id="fleet.agent-health" label="Agents requiring attention" />
+          <InfoHint id="fleet.agent-health" label={t('fleet.agentHealth.title')} />
+          <HelpLink anchor="fleet#agent-health" label={t('fleet.agentHealth.title')} />
         </div>
-        <p className="text-muted-foreground mt-1 text-sm">
-          These instances are not reporting reliably. Values for their clusters may be stale.
-        </p>
+        <p className="text-muted-foreground mt-1 text-sm">{t('fleet.agentHealth.help')}</p>
       </div>
 
       <ul className="grid gap-3 lg:grid-cols-2">
@@ -55,7 +57,7 @@ export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                 <Link
                   to={`/instances/${encodeURIComponent(issue.instance.instance_id)}`}
-                  aria-label={`Open instance ${instance} (${cluster})`}
+                  aria-label={t('fleet.agentHealth.openInstance', { instance, cluster })}
                   className="font-semibold underline underline-offset-2"
                   title={instanceAddress(issue.instance)}
                 >
@@ -64,16 +66,17 @@ export function AgentHealthStrip({ issues }: AgentHealthStripProps) {
                 <span className="text-muted-foreground text-xs">{cluster}</span>
               </div>
               <p className="mt-2 text-sm">
-                <span className="font-medium">Reported reason:</span> {readableReason(issue.reason)}
+                <span className="font-medium">{t('fleet.agentHealth.reportedReason')}</span>{' '}
+                {readableReason(issue.reason)}
               </p>
               <p className="text-muted-foreground mt-1 text-xs">
-                Last seen: {formatDuration(issue.ageSeconds)} ago
+                {t('fleet.agentHealth.lastSeen', { age: formatDuration(issue.ageSeconds) })}
               </p>
               <a
                 href={troubleshootingHref}
                 className="text-destructive mt-3 inline-block text-sm font-medium underline underline-offset-2"
               >
-                View agent troubleshooting
+                {t('fleet.agentHealth.troubleshooting')}
               </a>
             </li>
           )

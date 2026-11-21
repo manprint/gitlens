@@ -5,10 +5,13 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import type { ApiFailure } from '@/api/client'
 import { useInstance, useInstanceActivity, useLocks } from '@/api/queries'
 import type { PermTier } from '@/api/types'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Section } from '@/components/layout/Section'
 import { Degraded, EmptyState, ErrorState, Stale, Truncated } from '@/components/state'
+import { useT } from '@/i18n/react'
 import { ActivitySection, type ActivityResponseLike } from './ActivitySection'
+import { CapturedIncidents } from './CapturedIncidents'
 import { SignalActions } from './SignalActions'
 import { formatDuration, formatRelative, formatTimestamp, truncateQuery } from '@/lib/format'
 import {
@@ -155,6 +158,7 @@ function visibleEntries(forest: BlockingForest, expandedKeys: ReadonlySet<string
 }
 
 function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | null }) {
+  const t = useT()
   const query = typeof node.query === 'string' ? node.query : ''
   // The tree places a waiter under one blocker, so every direct blocker is listed here,
   // each pid once even if the snapshot repeats it.
@@ -168,27 +172,27 @@ function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | 
   return (
     <div className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
       <div>
-        <span className="text-muted-foreground">User</span>
+        <span className="text-muted-foreground">{t('locks.sessions.user')}</span>
         <span className="block">{nodeText(node.usename ?? node.username)}</span>
       </div>
       <div>
-        <span className="text-muted-foreground">Application</span>
+        <span className="text-muted-foreground">{t('locks.sessions.application')}</span>
         <span className="block">{nodeText(node.application_name)}</span>
       </div>
       <div>
-        <span className="text-muted-foreground">Database</span>
+        <span className="text-muted-foreground">{t('locks.sessions.database')}</span>
         <span className="block">{nodeText(node.datname ?? node.database)}</span>
       </div>
       <div>
-        <span className="text-muted-foreground">Blocked by</span>
+        <span className="text-muted-foreground">{t('locks.detail.blockedBy')}</span>
         <span className="block">{blockedBy}</span>
       </div>
       <div>
-        <span className="text-muted-foreground">State</span>
+        <span className="text-muted-foreground">{t('locks.sessions.state')}</span>
         <span className="block">{nodeText(node.state)}</span>
       </div>
       <div>
-        <span className="text-muted-foreground">Wait event</span>
+        <span className="text-muted-foreground">{t('locks.detail.waitEvent')}</span>
         <span className="block">
           {nodeText(node.wait_event_type)} / {nodeText(node.wait_event)}
         </span>
@@ -197,34 +201,34 @@ function LockDetails({ node, sampledAt }: { node: LockNode; sampledAt: string | 
           a blocker that waits on nothing shows a dash. The agent sent no mode
           before, so this cell read "—" for every session, deadlocks included. */}
       <div>
-        <span className="text-muted-foreground">Lock mode</span>
+        <span className="text-muted-foreground">{t('locks.blocking.lockMode')}</span>
         <span className="block">{nodeText(node.lock_mode)}</span>
       </div>
       <div>
-        <span className="text-muted-foreground">Waits on</span>
+        <span className="text-muted-foreground">{t('locks.blocking.waitsOn')}</span>
         <span className="block">{lockTarget(node)}</span>
       </div>
       <div>
-        <span className="text-muted-foreground">Wait duration</span>
+        <span className="text-muted-foreground">{t('locks.blocking.waitDuration')}</span>
         <span className="block">
-          {waiting ? formatDuration(waitDuration(node, sampledAt)) : 'Not waiting'}
+          {waiting ? formatDuration(waitDuration(node, sampledAt)) : t('locks.blocking.notWaiting')}
         </span>
       </div>
       {waiting && typeof node.wait_started_at === 'string' ? (
         <div>
-          <span className="text-muted-foreground">Waiting since</span>
-          <span className="block">{formatTimestamp(node.wait_started_at, 'UTC')}</span>
+          <span className="text-muted-foreground">{t('locks.blocking.waitingSince')}</span>
+          <span className="block">{formatTimestamp(node.wait_started_at)}</span>
         </div>
       ) : null}
       <div className="sm:col-span-2 lg:col-span-4">
-        <span className="text-muted-foreground">Query</span>
+        <span className="text-muted-foreground">{t('locks.sessions.query')}</span>
         <span className="block">
           {query ? <code className="break-words">{shownQuery}</code> : <span>—</span>}
           {queryWasTruncated ? (
             <Truncated
               shown={Math.min(bytes, QUERY_BYTE_BUDGET)}
               budget={QUERY_BYTE_BUDGET}
-              scope="query bytes"
+              scope={t('locks.blocking.queryBytes')}
             />
           ) : null}
         </span>
@@ -245,6 +249,7 @@ function TreeItem({
   registerRef,
   expandedKeys,
 }: TreeItemProps) {
+  const t = useT()
   const { tree } = entry
   const hasChildren = !tree.cycle && tree.children.length > 0
   const pid = String(tree.node.pid)
@@ -267,7 +272,10 @@ function TreeItem({
             variant="outline"
             type="button"
             className="mt-0.5"
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} lock session ${pid}`}
+            aria-label={t(
+              expanded ? 'locks.blocking.collapseSession' : 'locks.blocking.expandSession',
+              { pid },
+            )}
             onClick={() => onToggle(entry.key)}
           >
             {expanded ? '−' : '+'}
@@ -282,27 +290,28 @@ function TreeItem({
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <strong>PID {pid}</strong>
+            <strong>
+              {t('locks.sessions.pid')} {pid}
+            </strong>
             <OriginBadge session={tree.node} />
-            {tree.cycle ? <span className="text-destructive">Cycle detected</span> : null}
-            {rootBlocker ? <span className="font-medium">Root blocker</span> : null}
+            {tree.cycle ? (
+              <span className="text-destructive">{t('locks.blocking.cycle')}</span>
+            ) : null}
+            {rootBlocker ? (
+              <span className="font-medium">{t('locks.blocking.rootBlocker')}</span>
+            ) : null}
             <span className="text-muted-foreground">
               {tree.cycle
-                ? 'blocking relationship repeats this session'
+                ? t('locks.blocking.repeatsSession')
                 : rootBlocker
-                  ? 'blocks the sessions below; not itself blocked'
-                  : 'blocking session'}
+                  ? t('locks.blocking.rootRole')
+                  : t('locks.blocking.blockingSession')}
             </span>
           </div>
           {tree.cycle ? (
-            <p className="text-muted-foreground mt-1 text-sm">
-              The blocking relationship forms a cycle; expansion stops at this marker.
-            </p>
+            <p className="text-muted-foreground mt-1 text-sm">{t('locks.blocking.cycleNote')}</p>
           ) : tree.reference ? (
-            <p className="text-muted-foreground mt-1 text-sm">
-              Also waits on this blocker. Its details are shown under the first blocker that reaches
-              it.
-            </p>
+            <p className="text-muted-foreground mt-1 text-sm">{t('locks.blocking.reference')}</p>
           ) : (
             <>
               <LockDetails node={tree.node} sampledAt={sampledAt} />
@@ -360,6 +369,7 @@ export function BlockingTree({
   currentTier?: PermTier
   instanceId?: string
 }) {
+  const t = useT()
   const normalizedNodes = useMemo(
     () => response.nodes.map(normalizeNode).filter((node): node is LockNode => node !== null),
     [response.nodes],
@@ -373,11 +383,7 @@ export function BlockingTree({
   const itemRefs = useRef(new Map<string, HTMLLIElement>())
 
   if (response.sampled_at === null) {
-    return (
-      <Degraded
-        reason={`No lock sample has been stored for this instance yet. Locks are sampled every ${SAMPLE_INTERVAL_SECONDS} seconds; shorter episodes can be missed.`}
-      />
-    )
+    return <Degraded reason={t('locks.blocking.noSample', { seconds: SAMPLE_INTERVAL_SECONDS })} />
   }
 
   const age = sampleAge(response.sampled_at, now)
@@ -386,14 +392,21 @@ export function BlockingTree({
 
   if (forest.length === 0) {
     return (
-      <Section captionId="locks.blocking-tree" title="Blocking tree">
+      <Section
+        actions={<HelpLink anchor="locks#blocking-tree" label={t('locks.blocking.title')} />}
+        captionId="locks.blocking-tree"
+        title={t('locks.blocking.title')}
+      >
         <p className="text-muted-foreground mb-3 text-sm">
-          Latest sample: {formatRelative(response.sampled_at, now)}; sample age:{' '}
-          {formatDuration(age)}; sampled every {SAMPLE_INTERVAL_SECONDS} seconds.
+          {t('locks.blocking.emptySampleLine', {
+            time: formatRelative(response.sampled_at, now),
+            age: formatDuration(age),
+            seconds: SAMPLE_INTERVAL_SECONDS,
+          })}
         </p>
         <EmptyState
-          title="No lock contention in the latest sample"
-          description={`No blocked sessions were present in the most recent ${SAMPLE_INTERVAL_SECONDS}-second sample.`}
+          title={t('locks.blocking.emptyTitle')}
+          description={t('locks.blocking.emptyDescription', { seconds: SAMPLE_INTERVAL_SECONDS })}
         />
       </Section>
     )
@@ -441,20 +454,24 @@ export function BlockingTree({
   }
 
   return (
-    <Section captionId="locks.blocking-tree" title="Blocking tree">
+    <Section
+      actions={<HelpLink anchor="locks#blocking-tree" label={t('locks.blocking.title')} />}
+      captionId="locks.blocking-tree"
+      title={t('locks.blocking.title')}
+    >
       <p className="text-muted-foreground mb-3 text-sm">
-        Latest sample: {formatRelative(response.sampled_at, now)}; sample age: {formatDuration(age)}
-        . Samples are collected every {SAMPLE_INTERVAL_SECONDS} seconds; shorter episodes can be
-        missed. Wait durations are measured on the server at the sample. Lock mode and Waits on
-        describe the lock a waiting session asks for: its mode, its type and the relation it is on;
-        a relation in another database than the agent&apos;s is not named.
+        {t('locks.blocking.sampleNote', {
+          time: formatRelative(response.sampled_at, now),
+          age: formatDuration(age),
+          seconds: SAMPLE_INTERVAL_SECONDS,
+        })}
       </p>
       {response.stale && age !== null ? (
         <Stale age={age} threshold={STALE_THRESHOLD_SECONDS}>
-          <span>Lock data is older than the freshness threshold.</span>
+          <span>{t('locks.blocking.staleData')}</span>
         </Stale>
       ) : null}
-      <ul role="tree" aria-label="Blocking lock tree" className="space-y-2">
+      <ul role="tree" aria-label={t('locks.blocking.treeLabel')} className="space-y-2">
         {forest.map((tree, index) => {
           const entry: TreeEntry = {
             key: itemKey(undefined, tree, index),
@@ -500,9 +517,6 @@ function normalizeSessions(response: LocksResponseLike | undefined): LockNode[] 
   )
 }
 
-const LOCKS_SUBTITLE =
-  'Who is blocking whom right now: the blocking chains from the latest lock sample, and the sessions currently running on the instance.'
-
 interface OriginLocksProps {
   instanceId: string
   response: LocksResponseLike
@@ -517,6 +531,7 @@ interface OriginLocksProps {
 
 // Once the server sends session origins the page has one table per tab (D26).
 function OriginLocks({ instanceId, response, sessions, currentTier, activity }: OriginLocksProps) {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   const view = readLocksView(searchParams.get('view'))
   const connections = response.connections
@@ -549,7 +564,7 @@ function OriginLocks({ instanceId, response, sessions, currentTier, activity }: 
         sessionsStale={sampleStale}
       />
     ) : (
-      <p role="status">Loading activity sample…</p>
+      <p role="status">{t('locks.blocking.loadingActivity')}</p>
     )
 
   const table = (origin: SessionOrigin) => (
@@ -571,15 +586,16 @@ function OriginLocks({ instanceId, response, sessions, currentTier, activity }: 
       value={view}
     >
       <PageHeader
+        help={<HelpLink anchor="locks" label={t('locks.blocking.pageHelp')} />}
         icon={Lock}
-        eyebrow="Instance"
-        title="Locks and activity"
-        subtitle={LOCKS_SUBTITLE}
+        eyebrow={t('locks.blocking.eyebrow')}
+        title={t('locks.blocking.pageTitle')}
+        subtitle={t('locks.blocking.subtitle')}
         actions={
-          <TabsList aria-label="Locks views">
+          <TabsList aria-label={t('locks.blocking.viewsLabel')}>
             {LOCKS_VIEWS.map((entry) => (
               <TabsTrigger key={entry.id} value={entry.id}>
-                {entry.label}
+                {t(entry.labelKey)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -592,11 +608,15 @@ function OriginLocks({ instanceId, response, sessions, currentTier, activity }: 
       <TabsContent value="application">{table('application')}</TabsContent>
       <TabsContent value="pglens">{table('pglens')}</TabsContent>
       <TabsContent value="activity">{activityBlock('details')}</TabsContent>
+      <TabsContent value="incidents">
+        <CapturedIncidents instanceId={instanceId} />
+      </TabsContent>
     </Tabs>
   )
 }
 
 export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {}) {
+  const t = useT()
   const location = useLocation()
   const navigate = useNavigate()
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
@@ -621,7 +641,7 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
   }, [location.pathname, location.search, navigate, unauthorized])
 
   if (!instanceId) {
-    return <p role="status">Select an instance to inspect locks.</p>
+    return <p role="status">{t('locks.blocking.selectInstance')}</p>
   }
 
   if (response && usesOriginTables(sessions, response.connections)) {
@@ -644,13 +664,14 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
   return (
     <div className="space-y-8 min-[1600px]:space-y-4">
       <PageHeader
+        help={<HelpLink anchor="locks" label={t('locks.blocking.pageHelp')} />}
         icon={Lock}
-        eyebrow="Instance"
-        title="Locks and activity"
-        subtitle={LOCKS_SUBTITLE}
+        eyebrow={t('locks.blocking.eyebrow')}
+        title={t('locks.blocking.pageTitle')}
+        subtitle={t('locks.blocking.subtitle')}
       />
       {locksQuery.isPending && response === undefined ? (
-        <p role="status">Loading lock sample…</p>
+        <p role="status">{t('locks.blocking.loadingLocks')}</p>
       ) : locksQuery.isError && response === undefined ? (
         <ErrorState
           failure={locksQuery.error}
@@ -679,11 +700,12 @@ export function LocksPage({ instanceId: explicitInstanceId }: LocksPageProps = {
               sessionsStale={sampleIsStale(response, new Date())}
             />
           ) : (
-            <p role="status">Loading activity sample…</p>
+            <p role="status">{t('locks.blocking.loadingActivity')}</p>
           )}
+          <CapturedIncidents instanceId={instanceId} />
         </>
       ) : (
-        <p role="status">Waiting for the first lock sample…</p>
+        <p role="status">{t('locks.blocking.waitingFirst')}</p>
       )}
     </div>
   )

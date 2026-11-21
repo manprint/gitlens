@@ -38,7 +38,7 @@ func TestINTRUN001_ShutdownReturnsWhileASHHoldsAConnection(t *testing.T) {
 
 		var mu sync.Mutex
 		pending := map[string][]wire.Result{}
-		stop, enabled := startASH(ctx, mgr, "shutdown-target", agent.CheckConfig{}, clock.System(), &mu, pending)
+		stop, enabled := startASH(ctx, mgr, "shutdown-target", agent.CheckConfig{}, agent.CheckConfig{}, clock.System(), &mu, pending)
 		require.True(t, enabled, "ASH must be enabled for the default config")
 
 		// The dedicated connection is acquired on the sampler's first tick, so

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -61,29 +62,54 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 		return nil, rejectedf("statement keyword %q is not safe to explain", keyword)
 	}
 	hasParams := hasParameterPlaceholders(statement)
-	if args.Analyze {
+	if args.Analyze && !readOnlyExplainKeyword(keyword) {
 		// ANALYZE executes the statement. pglens never modifies a monitored
 		// database, so only statements that read are eligible; the READ ONLY
 		// transaction below is the enforcement, this is the clear refusal.
-		if !readOnlyExplainKeyword(keyword) {
-			return nil, rejectedf("EXPLAIN ANALYZE would execute a %s statement; only read-only statements can be analyzed", keyword)
-		}
-		if hasParams {
-			return nil, rejectedf("normalised statement has parameter placeholders; EXPLAIN ANALYZE needs concrete values")
+		return nil, rejectedf("EXPLAIN ANALYZE would execute a %s statement; only read-only statements can be analyzed", keyword)
+	}
+	// pg_stat_statements replaces every constant with $n. The values come from
+	// the command (typed by the operator, bound as parameters, never spliced
+	// into the text), or else from a recent execution of the same statement
+	// that pg_stat_activity still shows with its constants. Plan-only EXPLAIN
+	// can do without them on PostgreSQL 16+ (GENERIC_PLAN).
+	var params []*string
+	valuesFrom := ""
+	if hasParams {
+		count := placeholderCount(statement)
+		switch {
+		case len(args.Params) > 0:
+			if len(args.Params) != count {
+				return nil, rejectedf("the statement has %d parameter(s) ($1 to $%d) and the command gives %d value(s)", count, count, len(args.Params))
+			}
+			params, valuesFrom = args.Params, "values"
+		case args.Analyze || target.PGVersion().Major() < 16:
+			sample, err := recentExecution(ctx, conn, target.PGVersion().Major(), *args.QueryID, keyword)
+			if err != nil {
+				return nil, err
+			}
+			if sample == "" {
+				what := "EXPLAIN ANALYZE"
+				if !args.Analyze {
+					what = "EXPLAIN on PostgreSQL before 16 (no GENERIC_PLAN)"
+				}
+				needs := "a value for its parameter $1"
+				if count > 1 {
+					needs = fmt.Sprintf("a value for each of its %d parameters ($1 to $%d)", count, count)
+				}
+				return nil, rejectedf("%s needs %s: enter them, or run it while the application runs the statement, so that pglens can take the values of an execution pg_stat_activity shows", what, needs)
+			}
+			statement, hasParams, valuesFrom = sample, false, "recent_execution"
+		default:
+			valuesFrom = "generic"
 		}
 	}
 
 	options := "FORMAT JSON, VERBOSE, COSTS"
 	if args.Analyze {
 		options = "ANALYZE, FORMAT JSON, VERBOSE, COSTS, BUFFERS"
-	} else if hasParams {
-		// pg_stat_statements replaces every constant with $n, so nearly every
-		// normalised statement has placeholders and plain EXPLAIN rejects it
-		// with "there is no parameter $1". GENERIC_PLAN (PostgreSQL 16+) plans
-		// it without values — the only way such a statement can be explained.
-		if target.PGVersion().Major() < 16 {
-			return nil, rejectedf("normalised statement has parameter placeholders; explaining it requires PostgreSQL 16 or later (GENERIC_PLAN)")
-		}
+	} else if hasParams && params == nil {
+		// GENERIC_PLAN plans a statement with placeholders and no values.
 		options += ", GENERIC_PLAN"
 	}
 
@@ -114,40 +140,52 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if _, err := conn.Exec(ctx, "SET LOCAL search_path TO DEFAULT"); err != nil {
 		return nil, err
 	}
+	run := func(ctx context.Context, sql string) (json.RawMessage, error) {
+		switch {
+		case params != nil:
+			return explainBound(ctx, conn, sql, params)
+		case hasParams:
+			// A statement with placeholders cannot go through the extended
+			// protocol with no arguments (the server would expect a value per
+			// placeholder); GENERIC_PLAN is designed for the simple protocol.
+			// singleStatement above guarantees there is nothing after it.
+			return explainVerbatim(ctx, conn, sql)
+		default:
+			var plan json.RawMessage
+			err := conn.QueryRow(ctx, sql).Scan(&plan)
+			return plan, err
+		}
+	}
 	// Planning alone can run user code (see explain_guard.go), so the database
 	// is checked before anything is planned, privileges are dropped next, and
 	// ANALYZE runs only once the guard has inspected the statement and the plan.
-	if err := guardPlanning(ctx, conn); err != nil {
+	code := newCodeGraph(conn, target.PGVersion().Major())
+	if err := guardPlanning(ctx, conn, code); err != nil {
 		return nil, err
 	}
 	if err := dropExplainPrivileges(ctx, conn, target.PGVersion().Major(), args.Analyze); err != nil {
 		return nil, err
 	}
 	if args.Analyze {
-		if err := guardAnalyze(ctx, conn, statement); err != nil {
+		if err := guardAnalyze(ctx, conn, code, statement, run); err != nil {
 			return nil, err
 		}
 	}
 
 	explainSQL := fmt.Sprintf("EXPLAIN (%s) %s", options, statement)
-	var plan json.RawMessage
-	var scanErr error
-	if hasParams {
-		// A statement with placeholders cannot go through the extended
-		// protocol with no arguments (the server would expect a value per
-		// placeholder); GENERIC_PLAN is designed for the simple protocol.
-		// singleStatement above guarantees there is nothing after it.
-		plan, scanErr = explainVerbatim(ctx, conn, explainSQL)
-	} else {
-		scanErr = conn.QueryRow(ctx, explainSQL).Scan(&plan)
-	}
+	plan, scanErr := run(ctx, explainSQL)
 	if scanErr != nil {
 		if !readOnlyExplainKeyword(keyword) && isInsufficientPrivilege(scanErr) {
 			// PostgreSQL checks the privileges a statement needs even when
 			// it only plans it, and the monitoring role holds none that write.
 			return nil, rejectedf("explaining a %s statement needs the privilege to run it, which the read-only monitoring role does not hold: %v", keyword, scanErr)
 		}
-		if !args.Analyze {
+		switch {
+		case params != nil:
+			return nil, rejectedf("the statement cannot be explained with the values given: %v", scanErr)
+		case valuesFrom == "recent_execution":
+			return nil, rejectedf("the statement cannot be explained with the values of its recent execution: %v", scanErr)
+		case !args.Analyze:
 			return nil, rejectedf("normalised statement cannot be explained: %v", scanErr)
 		}
 		return nil, scanErr
@@ -169,11 +207,15 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if err := conn.QueryRow(ctx, "SELECT current_database()").Scan(&datname); err != nil {
 		return nil, err
 	}
+	// values_from tells the console where the constants of the plan come
+	// from: "values" typed by the operator, a "recent_execution", "generic"
+	// (GENERIC_PLAN), or "" when the statement has none.
 	result, err := json.Marshal(struct {
-		Plan     json.RawMessage `json:"plan"`
-		PlanHash string          `json:"plan_hash"`
-		Datname  string          `json:"datname"`
-	}{Plan: plan, PlanHash: hash, Datname: datname})
+		Plan       json.RawMessage `json:"plan"`
+		PlanHash   string          `json:"plan_hash"`
+		Datname    string          `json:"datname"`
+		ValuesFrom string          `json:"values_from,omitempty"`
+	}{Plan: plan, PlanHash: hash, Datname: datname, ValuesFrom: valuesFrom})
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +277,101 @@ var parameterPlaceholder = regexp.MustCompile(`\$[0-9]+`)
 
 func hasParameterPlaceholders(statement string) bool {
 	return parameterPlaceholder.MatchString(statement)
+}
+
+// placeholderCount is the highest $n in statement: the number of values it
+// takes.
+func placeholderCount(statement string) int {
+	highest := 0
+	for _, match := range parameterPlaceholder.FindAllString(statement, -1) {
+		if n, err := strconv.Atoi(match[1:]); err == nil && n > highest {
+			highest = n
+		}
+	}
+	return highest
+}
+
+// recentExecutionLookup lists what pg_stat_activity shows of the sessions
+// whose current or last statement is this queryid, in this database, newest
+// first. A text as long as track_activity_query_size allows was cut and is
+// left out. query_id exists from PostgreSQL 14.
+const recentExecutionLookup = `/* pglens: explain, recent execution */
+SELECT a.query
+FROM pg_catalog.pg_stat_activity a
+WHERE a.query_id = $1
+  AND a.datid = (SELECT d.oid FROM pg_catalog.pg_database d WHERE d.datname = pg_catalog.current_database())
+  AND a.pid <> pg_catalog.pg_backend_pid()
+  AND pg_catalog.octet_length(a.query) < (SELECT s.setting::int FROM pg_catalog.pg_settings s WHERE s.name = 'track_activity_query_size') - 1
+ORDER BY a.query_start DESC NULLS LAST
+LIMIT 20`
+
+// recentExecution returns the text of a recent execution of the statement
+// with its constants, as its application sent it, or "" when pg_stat_activity
+// shows none that pglens can use: one statement, no placeholders, the same
+// kind of statement, no sign of a credential.
+func recentExecution(ctx context.Context, conn check.Conn, major int, queryID int64, keyword string) (string, error) {
+	if major < 14 {
+		return "", nil
+	}
+	rows, err := conn.Query(ctx, recentExecutionLookup, queryID)
+	if err != nil {
+		return "", fmt.Errorf("look up a recent execution: %w", err)
+	}
+	defer rows.Close()
+	var found string
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			return "", err
+		}
+		statement, ok := singleStatement(text)
+		if found != "" || !ok || hasParameterPlaceholders(statement) || firstSQLKeyword(statement) != keyword || redact.MayHoldCredential(statement) {
+			continue
+		}
+		found = statement
+	}
+	return found, rows.Err()
+}
+
+// boundQuerier runs one statement over the extended protocol with its
+// parameter values in text form and their types left to the server, as psql
+// would read the same constants. Tests provide it directly.
+type boundQuerier interface {
+	QueryBound(ctx context.Context, sql string, values [][]byte) (json.RawMessage, error)
+}
+
+type pgxBoundQuerier struct{ conn *pgx.Conn }
+
+func (q pgxBoundQuerier) QueryBound(ctx context.Context, sql string, values [][]byte) (json.RawMessage, error) {
+	result := q.conn.PgConn().ExecParams(ctx, sql, values, nil, nil, nil).Read()
+	if result.Err != nil {
+		return nil, result.Err
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		return nil, errors.New("EXPLAIN returned an unexpected result shape")
+	}
+	return json.RawMessage(append([]byte(nil), result.Rows[0][0]...)), nil
+}
+
+// explainBound sends an EXPLAIN with the values the operator gave for the
+// statement's placeholders. A nil value is SQL NULL.
+func explainBound(ctx context.Context, conn check.Conn, sql string, params []*string) (json.RawMessage, error) {
+	var querier boundQuerier
+	switch c := conn.(type) {
+	case boundQuerier:
+		querier = c
+	case interface{ Conn() *pgx.Conn }:
+		querier = pgxBoundQuerier{conn: c.Conn()}
+	default:
+		return nil, fmt.Errorf("connection %T cannot bind parameter values", conn)
+	}
+	values := make([][]byte, len(params))
+	for i, value := range params {
+		if value != nil {
+			values[i] = []byte(*value)
+		}
+	}
+	return querier.QueryBound(ctx, sql, values)
 }
 
 // readOnlyExplainKeyword lists the statements EXPLAIN ANALYZE may execute. A

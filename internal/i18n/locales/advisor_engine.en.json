@@ -1,0 +1,8 @@
+{
+  "advisor.engine.rule_failed.title": "Advisor rule failed",
+  "advisor.engine.rule_failed.detail": "rule evaluation panicked",
+  "advisor.engine.tier_unavailable.title": "Permission tier unavailable",
+  "advisor.engine.tier_unavailable.detail": "advisor rule requires a higher permission tier",
+  "advisor.engine.input_unavailable.title": "Advisor input unavailable",
+  "advisor.engine.input_unavailable.detail": "required advisor input is unavailable: {reason}"
+}

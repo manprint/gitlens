@@ -10,6 +10,7 @@ export const base: NotificationChannel = {
   configured: true,
   source: 'env',
   host: 'chat.googleapis.com',
+  language: null,
 }
 
 /** Slack with no environment value: not configured once its stored URL is removed. */
@@ -18,4 +19,5 @@ export const none: NotificationChannel = {
   configured: false,
   source: 'env',
   host: null,
+  language: null,
 }

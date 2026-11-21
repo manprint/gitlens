@@ -3,12 +3,14 @@ import { useMemo, type ReactNode } from 'react'
 import { useInstanceSettings, useInstanceTableHistory, useInstanceTables } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { Sparkline } from '@/components/charts/Sparkline'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { useFocusMissing } from '@/hooks/useSearch'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { useT, type Translate } from '@/i18n/react'
 import {
   buildDeadRows,
   compareDeadRows,
@@ -22,7 +24,14 @@ import {
   type DeadRow,
   type DeadSortKey,
 } from '@/lib/deadRows'
-import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } from '@/lib/format'
+import {
+  formatBytes,
+  formatCount,
+  formatDecimal,
+  formatPercent,
+  formatRate,
+  formatRelative,
+} from '@/lib/format'
 import type { SortDirection } from '@/lib/tableControls'
 import { queryWindowOf } from '@/lib/timerange'
 import { cn } from '@/lib/utils'
@@ -36,39 +45,61 @@ const TREND_TABLES = 10
 
 type Finding = Schemas['Finding']
 
-const FILTERS: readonly { value: DeadFilter; label: string; hint: string }[] = [
-  { value: 'all', label: 'All', hint: 'Every table the agent reported.' },
-  { value: 'dead', label: 'With dead rows', hint: 'Tables with at least one dead row.' },
-  {
-    value: 'due',
-    label: 'Due for automatic vacuum',
-    hint: 'Dead rows at or above autovacuum_vacuum_threshold + scale_factor × live rows.',
-  },
-  { value: 'never', label: 'Never vacuumed', hint: 'No manual or automatic vacuum recorded.' },
-  { value: 'flagged', label: 'Flagged by advisor', hint: 'Tables with an open advisor finding.' },
-]
+function deadFilters(t: Translate): readonly { value: DeadFilter; label: string; hint: string }[] {
+  return [
+    {
+      value: 'all',
+      label: t('indexes.deadRows.filterAll'),
+      hint: t('indexes.deadRows.filterAllHint'),
+    },
+    {
+      value: 'dead',
+      label: t('indexes.deadRows.filterDead'),
+      hint: t('indexes.deadRows.filterDeadHint'),
+    },
+    {
+      value: 'due',
+      label: t('indexes.deadRows.dueAutovacuum'),
+      hint: t('indexes.deadRows.filterDueHint'),
+    },
+    {
+      value: 'never',
+      label: t('indexes.deadRows.neverVacuumed'),
+      hint: t('indexes.deadRows.filterNeverHint'),
+    },
+    {
+      value: 'flagged',
+      label: t('indexes.deadRows.filterFlagged'),
+      hint: t('indexes.deadRows.filterFlaggedHint'),
+    },
+  ]
+}
 
 function compareDead(a: DeadRow, b: DeadRow, key: string, direction: SortDirection): number {
   return compareDeadRows(a, b, key as DeadSortKey, direction === 'desc')
 }
 
 // The page's Database select scopes the rows already: no database filter (tables inventory).
-const DEAD_TOOLBAR: TableToolbarSpec<DeadRow> = {
-  searchLabel: 'Search tables',
-  searchFields: [(row) => row.table, (row) => row.schema, (row) => row.datname],
-  filters: [
-    {
-      id: 'show',
-      label: 'Show',
-      kind: 'select',
-      options: FILTERS.filter((option) => option.value !== 'all').map(({ value, label }) => ({
-        value,
-        label,
-      })),
-      accessor: () => null,
-      predicate: (row, value) => matchesDeadFilter(row, value as DeadFilter),
-    },
-  ],
+function deadToolbar(t: Translate): TableToolbarSpec<DeadRow> {
+  return {
+    searchLabel: t('indexes.deadRows.searchTables'),
+    searchFields: [(row) => row.table, (row) => row.schema, (row) => row.datname],
+    filters: [
+      {
+        id: 'show',
+        label: t('indexes.deadRows.show'),
+        kind: 'select',
+        options: deadFilters(t)
+          .filter((option) => option.value !== 'all')
+          .map(({ value, label }) => ({
+            value,
+            label,
+          })),
+        accessor: () => null,
+        predicate: (row, value) => matchesDeadFilter(row, value as DeadFilter),
+      },
+    ],
+  }
 }
 
 // compareDeadRows orders the rows: a column's sortValue only marks it sortable.
@@ -79,6 +110,7 @@ function deadColumns(
   database: string,
   now: Date,
   trends: ReadonlyMap<string, number[]>,
+  t: Translate,
 ): SimpleColumn<DeadRow>[] {
   const counted = (
     id: DeadSortKey,
@@ -86,10 +118,12 @@ function deadColumns(
     cell: (row: DeadRow) => ReactNode,
     width: string,
     help?: SimpleColumn<DeadRow>['help'],
+    truncate?: (row: DeadRow) => string,
   ): SimpleColumn<DeadRow> => ({
     id,
     header,
     ...(help === undefined ? {} : { help }),
+    ...(truncate === undefined ? {} : { truncate }),
     sortValue: SORTED_BY_COMPARE,
     firstDirection: 'desc',
     className: 'whitespace-nowrap',
@@ -99,11 +133,11 @@ function deadColumns(
   return [
     {
       id: 'table',
-      header: 'Table',
+      header: t('indexes.deadRows.table'),
       sortValue: SORTED_BY_COMPARE,
-      className: 'break-all',
+      className: 'break-all max-[1599px]:min-w-48',
       truncate: (row) =>
-        `${database === '' ? `${row.datname} · ` : ''}${row.schema}.${row.table}${row.findings.length > 0 ? ' (flagged)' : ''}`,
+        `${database === '' ? `${row.datname} · ` : ''}${row.schema}.${row.table}${row.findings.length > 0 ? t('indexes.deadRows.flaggedSuffix') : ''}`,
       cell: (row) => (
         <>
           <span className="text-muted-foreground">
@@ -113,7 +147,7 @@ function deadColumns(
           <span className="font-medium">{row.table}</span>
           {row.findings.length > 0 ? (
             <Badge className={cn('ml-2', CELL_BADGE)} variant="warning">
-              flagged
+              {t('indexes.deadRows.flagged')}
             </Badge>
           ) : null}
         </>
@@ -122,7 +156,7 @@ function deadColumns(
     // From 1600 px the second lines (dead space, "due") sit beside the figure (D26).
     counted(
       'dead',
-      'Dead rows',
+      t('indexes.deadRows.deadRows'),
       (row) => (
         <>
           {formatCount(row.dead)}
@@ -135,54 +169,74 @@ function deadColumns(
       ),
       '10rem',
       'indexes.dead-rows-column',
+      (row) =>
+        row.deadBytes === null || row.deadBytes <= 0
+          ? formatCount(row.dead)
+          : t('indexes.deadRows.deadRowsTitle', {
+              count: formatCount(row.dead),
+              size: formatBytes(row.deadBytes),
+            }),
     ),
-    counted('ratio', 'Dead / live', (row) => percent(row.deadRatio), '8.5rem', 'indexes.dead-live'),
+    counted(
+      'ratio',
+      t('indexes.deadRows.deadLive'),
+      (row) => percent(row.deadRatio, t),
+      '8.5rem',
+      'indexes.dead-live',
+    ),
     counted(
       'trigger',
-      'Vacuum due',
+      t('indexes.deadRows.vacuumDue'),
       (row) => (
-        <span
-          className={cn(row.triggerShare >= 1 && 'font-medium')}
-          title={`Autovacuum starts at about ${formatCount(Math.round(row.trigger))} dead rows.`}
-        >
+        <span className={cn(row.triggerShare >= 1 && 'font-medium')}>
           {triggerText(row)}
           {row.triggerShare >= 1 ? (
             <span className="text-muted-foreground block text-xs min-[1600px]:ml-1.5 min-[1600px]:inline">
-              due
+              {t('indexes.deadRows.due')}
             </span>
           ) : null}
         </span>
       ),
       '7rem',
       'indexes.vacuum-due',
+      (row) =>
+        row.triggerShare >= 1
+          ? t('indexes.deadRows.vacuumDueTitleDue', {
+              share: triggerText(row),
+              count: formatCount(Math.round(row.trigger)),
+            })
+          : t('indexes.deadRows.vacuumDueTitle', {
+              share: triggerText(row),
+              count: formatCount(Math.round(row.trigger)),
+            }),
     ),
     counted(
       'size',
-      'Size',
-      (row) => (row.bytes === null ? 'Unknown' : formatBytes(row.bytes)),
+      t('indexes.deadRows.size'),
+      (row) => (row.bytes === null ? t('indexes.deadRows.unknown') : formatBytes(row.bytes)),
       '6.5rem',
     ),
     {
       id: 'vacuum',
-      header: 'Last vacuum',
+      header: t('indexes.deadRows.lastVacuum'),
       help: 'indexes.dead-last-vacuum',
       sortValue: SORTED_BY_COMPARE,
       className: 'whitespace-nowrap',
-      width: '10rem',
-      truncate: (row) => vacuumText(row, now),
-      cell: (row) => vacuumText(row, now),
+      width: '12.5rem',
+      truncate: (row) => vacuumText(row, now, t),
+      cell: (row) => vacuumText(row, now, t),
     },
-    counted('hot', 'HOT', (row) => percent(row.hotRatio), '6rem', 'indexes.hot-share'),
+    counted('hot', 'HOT', (row) => percent(row.hotRatio, t), '6rem', 'indexes.hot-share'),
     counted(
       'writes',
-      'Writes',
-      (row) => (row.writeRate === null ? 'Unknown' : formatRate(row.writeRate)),
+      t('indexes.deadRows.writes'),
+      (row) => (row.writeRate === null ? t('indexes.deadRows.unknown') : formatRate(row.writeRate)),
       '7rem',
       'indexes.dead-writes',
     ),
     {
       id: 'trend',
-      header: 'Trend',
+      header: t('indexes.deadRows.trend'),
       help: 'indexes.dead-trend',
       className: 'whitespace-nowrap',
       width: '10rem',
@@ -201,10 +255,10 @@ function deadColumns(
           >
             <Sparkline
               className="min-[1600px]:h-4 min-[1600px]:w-16"
-              label={`Dead rows of ${row.table} over the selected range`}
+              label={t('indexes.deadRows.trendLabel', { table: row.table })}
               values={values}
             />
-            <span className="text-muted-foreground text-xs">{direction}</span>
+            <span className="text-muted-foreground text-xs">{directionText(t, direction)}</span>
           </span>
         )
       },
@@ -212,63 +266,87 @@ function deadColumns(
   ]
 }
 
-function percent(value: number | null): string {
-  return value === null ? 'Unknown' : (formatPercent(value, 1) ?? 'Unknown')
+function percent(value: number | null, t: Translate): string {
+  return value === null
+    ? t('indexes.deadRows.unknown')
+    : (formatPercent(value, 1) ?? t('indexes.deadRows.unknown'))
 }
 
-function vacuumText(row: DeadRow, now: Date): string {
-  if (row.lastVacuumAt === null) return row.neverVacuumed ? 'Never' : 'Unknown'
-  return `${formatRelative(row.lastVacuumAt, now)}${row.lastVacuumKind === 'auto' ? ' (auto)' : ''}`
+function directionText(t: Translate, direction: ReturnType<typeof trendDirection>): string {
+  if (direction === 'growing') return t('indexes.deadRows.trendGrowing')
+  return direction === 'shrinking'
+    ? t('indexes.deadRows.trendShrinking')
+    : t('indexes.deadRows.trendFlat')
+}
+
+function vacuumText(row: DeadRow, now: Date, t: Translate): string {
+  if (row.lastVacuumAt === null)
+    return row.neverVacuumed ? t('indexes.deadRows.never') : t('indexes.deadRows.unknown')
+  const when = formatRelative(row.lastVacuumAt, now)
+  return row.lastVacuumKind === 'auto' ? t('indexes.deadRows.vacuumAuto', { when }) : when
 }
 
 function triggerText(row: DeadRow): string {
-  return `${row.triggerShare.toFixed(row.triggerShare >= 10 ? 0 : 1)}×`
+  return `${formatDecimal(row.triggerShare, row.triggerShare >= 10 ? 0 : 1)}×`
 }
 
 function Detail({ row, now }: { row: DeadRow; now: Date }) {
+  const t = useT()
+
   return (
     <div className="space-y-4 px-4 py-4">
       <dl className="grid gap-x-8 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr_auto_1fr]">
-        <dt className="text-muted-foreground">Live rows</dt>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.liveRows')}</dt>
         <dd className="tabular-nums">{formatCount(row.live)}</dd>
-        <dt className="text-muted-foreground">Dead rows</dt>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.deadRows')}</dt>
         <dd className="tabular-nums">{formatCount(row.dead)}</dd>
-        <dt className="text-muted-foreground">Heap size</dt>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.heapSize')}</dt>
         <dd className="tabular-nums">
-          {row.tableBytes === null ? 'Unknown' : formatBytes(row.tableBytes)}
+          {row.tableBytes === null ? t('indexes.deadRows.unknown') : formatBytes(row.tableBytes)}
         </dd>
-        <dt className="text-muted-foreground">With indexes and TOAST</dt>
-        <dd className="tabular-nums">{row.bytes === null ? 'Unknown' : formatBytes(row.bytes)}</dd>
-        <dt className="text-muted-foreground">Autovacuum starts at</dt>
-        <dd className="tabular-nums">{formatCount(Math.round(row.trigger))} dead rows</dd>
-        <dt className="text-muted-foreground">Autovacuum runs</dt>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.withIndexesToast')}</dt>
         <dd className="tabular-nums">
-          {row.autovacuumPerDay === null ? 'Unknown' : `${row.autovacuumPerDay.toFixed(1)} per day`}
+          {row.bytes === null ? t('indexes.deadRows.unknown') : formatBytes(row.bytes)}
         </dd>
-        <dt className="text-muted-foreground">Changes since analyze</dt>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.autovacuumStartsAt')}</dt>
         <dd className="tabular-nums">
-          {row.modSinceAnalyze === null ? 'Unknown' : formatCount(row.modSinceAnalyze)}
+          {formatCount(Math.round(row.trigger))} {t('indexes.deadRows.deadRowsUnit')}
         </dd>
-        <dt className="text-muted-foreground">Last analyze</dt>
-        <dd>{row.lastAnalyzeAt === null ? 'Never' : formatRelative(row.lastAnalyzeAt, now)}</dd>
-        <dt className="text-muted-foreground">Updates</dt>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.autovacuumRuns')}</dt>
         <dd className="tabular-nums">
-          {row.updateRate === null ? 'Unknown' : formatRate(row.updateRate)}
+          {row.autovacuumPerDay === null
+            ? t('indexes.deadRows.unknown')
+            : t('indexes.deadRows.perDay', { rate: formatDecimal(row.autovacuumPerDay, 1) })}
         </dd>
-        <dt className="text-muted-foreground">Sequential scans</dt>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.changesSinceAnalyze')}</dt>
         <dd className="tabular-nums">
-          {row.seqScanRate === null ? 'Unknown' : formatRate(row.seqScanRate)}
+          {row.modSinceAnalyze === null
+            ? t('indexes.deadRows.unknown')
+            : formatCount(row.modSinceAnalyze)}
         </dd>
-        <dt className="text-muted-foreground">Transaction ID age</dt>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.lastAnalyze')}</dt>
+        <dd>
+          {row.lastAnalyzeAt === null
+            ? t('indexes.deadRows.never')
+            : formatRelative(row.lastAnalyzeAt, now)}
+        </dd>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.updates')}</dt>
         <dd className="tabular-nums">
-          {row.frozenAge === null ? 'Unknown' : formatCount(row.frozenAge)}
+          {row.updateRate === null ? t('indexes.deadRows.unknown') : formatRate(row.updateRate)}
+        </dd>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.seqScans')}</dt>
+        <dd className="tabular-nums">
+          {row.seqScanRate === null ? t('indexes.deadRows.unknown') : formatRate(row.seqScanRate)}
+        </dd>
+        <dt className="text-muted-foreground">{t('indexes.deadRows.transactionIdAge')}</dt>
+        <dd className="tabular-nums">
+          {row.frozenAge === null ? t('indexes.deadRows.unknown') : formatCount(row.frozenAge)}
         </dd>
       </dl>
 
       {row.hotRatio !== null && row.hotRatio < 0.5 && (row.updateRate ?? 0) > 0 ? (
         <p className="text-sm">
-          Only {percent(row.hotRatio)} of the updates are heap-only (HOT). The others write a new
-          entry in every index of the table, and leave dead rows that vacuum has to clean there too.
+          {t('indexes.deadRows.hotNote', { share: percent(row.hotRatio, t) })}
         </p>
       ) : null}
 
@@ -313,6 +391,8 @@ export function DeadRowsPanel({
   focusKey,
   onFocusDone,
 }: DeadRowsPanelProps) {
+  const t = useT()
+
   const { range } = useTimeRange()
 
   const tablesQuery = useInstanceTables(instanceId, {
@@ -356,21 +436,22 @@ export function DeadRowsPanel({
   const now = new Date(tablesQuery.dataUpdatedAt)
   const dataUpdatedAt = tablesQuery.dataUpdatedAt
   const columns = useMemo(
-    () => deadColumns(database, new Date(dataUpdatedAt), trends),
-    [database, dataUpdatedAt, trends],
+    () => deadColumns(database, new Date(dataUpdatedAt), trends, t),
+    [database, dataUpdatedAt, trends, t],
   )
+  const toolbar = useMemo(() => deadToolbar(t), [t])
 
   if (tablesQuery.isPending && response === undefined) {
     return (
-      <div aria-busy="true" aria-label="Loading tables" role="status">
-        Loading tables…
+      <div aria-busy="true" aria-label={t('indexes.deadRows.loadingTablesLabel')} role="status">
+        {t('indexes.deadRows.loadingTables')}
       </div>
     )
   }
   if (tablesQuery.error && response === undefined) {
     return (
       <ErrorState
-        endpoint="tables"
+        endpoint={t('indexes.deadRows.endpointTables')}
         failure={tablesQuery.error}
         onRetry={() => void tablesQuery.refetch()}
       />
@@ -378,25 +459,24 @@ export function DeadRowsPanel({
   }
 
   const incomplete = response?.truncated === true || allRows.length >= DEAD_ROWS_LIMIT
-  const incompleteText = `The list is incomplete. The agent reports the tables with the most dead rows first, up to checks.table_stats.top_n per database (50 by default). The figures cover the ${formatCount(allRows.length)} tables reported, so the worst tables are here and the long tail is not.`
-  const approximateText =
-    "Vacuum due is approximate. The instance's autovacuum settings are not reported yet, so the page assumes PostgreSQL's defaults (50 dead rows plus 20% of the live ones). A table's own storage parameters can change it."
+  const incompleteText = t('indexes.deadRows.incompleteTitle', {
+    count: formatCount(allRows.length),
+  })
+  const approximateText = t('indexes.deadRows.approximateTitle')
   const notes =
     incomplete || autovacuum.source === 'default' ? (
       <>
         {incomplete ? (
           <PanelNote title={incompleteText}>
-            <strong>The list is incomplete.</strong> The agent reports the tables with the most dead
-            rows first, up to <code>checks.table_stats.top_n</code> per database (50 by default).
-            The figures cover the {formatCount(allRows.length)} tables reported, so the worst tables
-            are here and the long tail is not.
+            <strong>{t('indexes.deadRows.incompleteLead')}</strong>{' '}
+            {t('indexes.deadRows.incompleteBefore')} <code>checks.table_stats.top_n</code>{' '}
+            {t('indexes.deadRows.incompleteAfter', { count: formatCount(allRows.length) })}
           </PanelNote>
         ) : null}
         {autovacuum.source === 'default' ? (
           <PanelNote title={approximateText}>
-            <strong>Vacuum due is approximate.</strong> The instance&apos;s autovacuum settings are
-            not reported yet, so the page assumes PostgreSQL&apos;s defaults (50 dead rows plus 20%
-            of the live ones). A table&apos;s own storage parameters can change it.
+            <strong>{t('indexes.deadRows.approximateLead')}</strong>{' '}
+            {t('indexes.deadRows.approximateRest')}
           </PanelNote>
         ) : null}
       </>
@@ -404,60 +484,72 @@ export function DeadRowsPanel({
 
   return (
     <IndexPanel
+      actions={<HelpLink anchor="indexes#dead-rows" label={t('indexes.deadRows.deadRowsTab')} />}
       captionId="indexes.dead-rows"
-      description={`${formatCount(scoped.length)} tables. Dead space is an estimate from heap size and dead rows.`}
+      description={t('indexes.deadRows.description', { count: formatCount(scoped.length) })}
       notes={notes}
       stats={[
         {
-          label: 'Tables with dead rows',
+          label: t('indexes.deadRows.statTablesWithDead'),
           value: formatCount(summary.withDead),
           unit: 'tables',
-          detail: `of ${formatCount(summary.tables)} ${summary.tables === 1 ? 'table' : 'tables'}`,
+          detail: t('indexes.deadRows.statOfTables', {
+            total: formatCount(summary.tables),
+            count: summary.tables,
+          }),
         },
         {
-          label: 'Dead rows',
+          label: t('indexes.deadRows.deadRows'),
           value: formatCount(summary.totalDead),
           unit: 'rows',
           ...(summary.deadBytes > 0 ? { detail: `≈ ${formatBytes(summary.deadBytes)}` } : {}),
         },
         {
-          label: 'Worst table',
-          value: summary.worst === null ? '—' : percent(summary.worst.deadRatio),
+          label: t('indexes.deadRows.worstTable'),
+          value: summary.worst === null ? '—' : percent(summary.worst.deadRatio, t),
           detail:
             summary.worst === null
-              ? `none past ${formatCount(WORST_FLOOR)} dead rows`
+              ? t('indexes.deadRows.statNonePast', { limit: formatCount(WORST_FLOOR) })
               : summary.worst.table,
         },
         {
-          label: 'Due for automatic vacuum',
+          label: t('indexes.deadRows.dueAutovacuum'),
           value: formatCount(summary.overTrigger),
           unit: 'tables',
         },
-        { label: 'Never vacuumed', value: formatCount(summary.neverVacuumed), unit: 'tables' },
+        {
+          label: t('indexes.deadRows.neverVacuumed'),
+          value: formatCount(summary.neverVacuumed),
+          unit: 'tables',
+        },
       ]}
-      title="Tables by dead rows"
+      title={t('indexes.deadRows.tablesByDeadRows')}
       titleId="dead-rows-title"
     >
       {scoped.length === 0 ? (
         <EmptyState
-          description="The agent has not reported table statistics for this server yet."
-          title="No tables to show"
+          description={t('indexes.deadRows.noTableStats')}
+          title={t('indexes.deadRows.noTablesToShow')}
         />
       ) : (
         <SimpleTable
-          ariaLabel="Tables"
+          ariaLabel={t('indexes.deadRows.tables')}
           captionId="indexes.dead-rows-table"
           columns={columns}
           compare={compareDead}
           defaultSort={{ id: 'dead', desc: true }}
-          detailLabel={(row, expanded) => `${expanded ? 'Hide' : 'Show'} details of ${row.table}`}
+          detailLabel={(row, expanded) =>
+            expanded
+              ? t('indexes.deadRows.hideDetails', { table: row.table })
+              : t('indexes.deadRows.showDetails', { table: row.table })
+          }
           emptyState={null}
           renderDetail={(row) => <Detail now={now} row={row} />}
           rowKey={(row) => row.key}
           rows={scoped}
           scope="tables"
           tableId="dead-rows"
-          toolbar={DEAD_TOOLBAR}
+          toolbar={toolbar}
           focusKey={focusKey}
           {...(onFocusDone === undefined ? {} : { onFocusDone })}
         />

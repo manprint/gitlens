@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/manprint/pglens/internal/i18n"
 )
 
 const (
@@ -27,17 +29,16 @@ type instanceObjectRule struct{ relationRule }
 
 func (r instanceObjectRule) Scope() Scope { return ScopeInstance }
 
-func subscriptionFinding(id string, sev Severity, f Fact, title, detail, remediation string, evidence map[string]any) Finding {
-	return Finding{RuleID: id, Severity: sev, State: StateOpen, Scope: ScopeInstance, ObjectName: "subscription:" + f.Key,
-		Title: title, Detail: detail, Remediation: remediation, Evidence: evidence}
+// subscriptionArgs are the message arguments naming a subscription, with the
+// database it lives in when the fact has one.
+func subscriptionArgs(f Fact) i18n.Args {
+	db := f.Labels["database"]
+	return i18n.Args{"subscription": f.Key, "has_db": db != "", "database": db, "ident": pgx.Identifier{f.Key}.Sanitize()}
 }
 
-// subscriptionWhere names a subscription with the database it lives in.
-func subscriptionWhere(f Fact) string {
-	if db := f.Labels["database"]; db != "" {
-		return fmt.Sprintf("Subscription %s (database %s)", f.Key, db)
-	}
-	return "Subscription " + f.Key
+func subscriptionFinding(id, key string, f Fact, args i18n.Args, evidence map[string]any) Finding {
+	return Finding{RuleID: id, Severity: SeverityWarning, State: StateOpen, Scope: ScopeInstance, ObjectName: "subscription:" + f.Key,
+		Evidence: evidence}.say(key, args)
 }
 
 func init() {
@@ -48,16 +49,13 @@ func init() {
 			if f.ValueText != "disabled" {
 				continue
 			}
-			name := pgx.Identifier{f.Key}.Sanitize()
-			retains := "It has no slot (slot_name = NONE), so the publisher keeps nothing for it."
-			if slot := f.Labels["slot_name"]; slot != "" {
-				retains = fmt.Sprintf("Its slot %s on the publisher keeps every change it has not confirmed, and the WAL that holds them fills the publisher's disk until the subscription is enabled or the slot dropped.", slot)
-			}
-			out = append(out, subscriptionFinding(id, SeverityWarning, f,
-				fmt.Sprintf("Subscription %s is disabled", f.Key),
-				fmt.Sprintf("%s is disabled, so it applies no change from its publications (%s). %s", subscriptionWhere(f), f.Labels["publications"], retains),
-				fmt.Sprintf("Find why it was disabled (with disable_on_error, the subscriber's log names the failed change), fix it, then ALTER SUBSCRIPTION %s ENABLE;. If it is no longer needed, DROP SUBSCRIPTION %s; also drops its slot on the publisher.", name, name),
-				map[string]any{"subscription": f.Key, "slot_name": f.Labels["slot_name"]}))
+			slot := f.Labels["slot_name"]
+			args := subscriptionArgs(f)
+			args["publications"] = f.Labels["publications"]
+			args["has_slot"] = slot != ""
+			args["slot_name"] = slot
+			out = append(out, subscriptionFinding(id, id, f, args,
+				map[string]any{"subscription": f.Key, "slot_name": slot}))
 		}
 		return out
 	}}})
@@ -68,12 +66,8 @@ func init() {
 			if f.ValueText != "enabled" {
 				continue
 			}
-			name := pgx.Identifier{f.Key}.Sanitize()
 			if f.Labels["apply_worker"] != "true" {
-				out = append(out, subscriptionFinding(id, SeverityWarning, f,
-					fmt.Sprintf("Subscription %s has no apply worker running", f.Key),
-					fmt.Sprintf("%s is enabled, but no apply worker runs for it, so no change is applied. A worker that fails, on a conflict or a lost connection to the publisher, is restarted after wal_retrieve_retry_interval, and fails again until the cause is fixed.", subscriptionWhere(f)),
-					fmt.Sprintf("Read the subscriber's log for the apply worker's error. For a conflicting row, fix the row on the subscriber, or skip the transaction with ALTER SUBSCRIPTION %s SKIP (lsn = ...) once its changes are known to be unwanted.", name),
+				out = append(out, subscriptionFinding(id, id, f, subscriptionArgs(f),
 					map[string]any{"subscription": f.Key, "apply_errors": f.Labels["apply_errors"]}))
 				continue
 			}
@@ -85,10 +79,16 @@ func init() {
 				continue
 			}
 			silent := s.Now.Sub(receipt)
-			out = append(out, subscriptionFinding(id, SeverityWarning, f,
-				fmt.Sprintf("Subscription %s has heard nothing from its publisher for %s", f.Key, formatSilence(silent)),
-				fmt.Sprintf("The apply worker of %s last received a message from the publisher at %s. The publisher sends a keepalive at least every half wal_sender_timeout when it has nothing else to send, so the connection is stuck or the publisher's walsender is not running.", subscriptionWhere(f), receipt.UTC().Format("2006-01-02 15:04 MST")),
-				fmt.Sprintf("Check the publisher's walsender for slot %s (pg_stat_replication) and the network between the two. ALTER SUBSCRIPTION %s DISABLE; then ENABLE; restarts the worker.", f.Labels["slot_name"], name),
+			args := subscriptionArgs(f)
+			args["receipt"] = receipt.UTC().Format("2006-01-02 15:04 MST")
+			args["slot_name"] = f.Labels["slot_name"]
+			args["silence_long"] = silent >= time.Hour
+			args["silence_minutes"] = int(silent.Minutes())
+			args["silence"] = ""
+			if silent >= time.Hour {
+				args["silence"] = formatCatalogDuration(silent)
+			}
+			out = append(out, subscriptionFinding(id, id+".silent", f, args,
 				map[string]any{"subscription": f.Key, "last_msg_receipt_at": f.Labels["last_msg_receipt_at"]}))
 		}
 		return out
@@ -103,17 +103,12 @@ func init() {
 			if apply <= 0 && sync <= 0 {
 				continue
 			}
-			var what []string
-			if apply > 0 {
-				what = append(what, "applying changes")
-			}
-			if sync > 0 {
-				what = append(what, "copying tables or sequences")
-			}
-			out = append(out, subscriptionFinding(id, SeverityWarning, f,
-				fmt.Sprintf("Subscription %s is failing", f.Key),
-				fmt.Sprintf("The workers of %s failed while %s since the previous scrape (%s apply and %s sync errors in all, since the statistics were last reset); each failure stops the worker until it is restarted.", subscriptionWhere(f), strings.Join(what, " and "), f.Labels["apply_errors"], f.Labels["sync_errors"]),
-				"Read the subscriber's log for the error: most are a row that conflicts with one already on the subscriber, a missing table or column, or a permission the subscription owner lacks.",
+			args := subscriptionArgs(f)
+			args["has_apply"] = apply > 0
+			args["has_sync"] = sync > 0
+			args["apply_errors"] = f.Labels["apply_errors"]
+			args["sync_errors"] = f.Labels["sync_errors"]
+			out = append(out, subscriptionFinding(id, id, f, args,
 				map[string]any{"subscription": f.Key, "apply_errors_per_second": apply, "sync_errors_per_second": sync}))
 		}
 		return out
@@ -128,21 +123,11 @@ func init() {
 				continue
 			}
 			out = append(out, Finding{RuleID: id, Severity: SeverityInfo, State: StateOpen, Scope: ScopeInstance, ObjectName: "slot:" + slot,
-				Title:       fmt.Sprintf("Logical slot %s spills decoding to disk", slot),
-				Detail:      fmt.Sprintf("Decoding for slot %s writes %s/s of transactions to disk, because they outgrow logical_decoding_work_mem before they commit. Spilled changes are written and read back, which slows replication and adds I/O on this server.", slot, formatSpill(spills[labels])),
-				Remediation: "Raise logical_decoding_work_mem (64MB by default; ALTER SYSTEM SET logical_decoding_work_mem = '256MB'; SELECT pg_reload_conf();), or have the subscription stream large transactions (ALTER SUBSCRIPTION ... SET (streaming = parallel)).",
-				Evidence:    map[string]any{"slot_name": slot, "spill_bytes_per_second": spills[labels]},
-			})
+				Evidence: map[string]any{"slot_name": slot, "spill_bytes_per_second": spills[labels]},
+			}.say(id, i18n.Args{"slot": slot, "spill": formatSpill(spills[labels])}))
 		}
 		return out
 	}}})
-}
-
-func formatSilence(d time.Duration) string {
-	if d < time.Hour {
-		return plural(int(d.Minutes()), "minute")
-	}
-	return formatCatalogDuration(d)
 }
 
 func formatSpill(bytesPerSecond float64) string {

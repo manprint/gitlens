@@ -1,6 +1,9 @@
 package check
 
 import (
+	"fmt"
+	"math/rand"
+	"sort"
 	"testing"
 	"time"
 
@@ -107,4 +110,82 @@ func TestScopedSelectors_PrunesIdleScopes(t *testing.T) {
 	if transientStillThere {
 		t.Errorf("idle scope was not pruned (%d scopes retained)", n)
 	}
+}
+
+// TestScopedSelectors_PrefilterKeepsTheSelection: index_stats and table_stats
+// read from PostgreSQL only the top prefilterLimit rows of each ranking plus
+// the retained keys. Under a workload that reshuffles every ranking on every
+// cycle, those narrowed candidates must yield the very selection, and the
+// same truncation flag, as the full candidate list.
+func TestScopedSelectors_PrefilterKeepsTheSelection(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewSource(7))
+	narrowed := newScopedSelectors(cardinality.Options{TopN: 20})
+	full := cardinality.NewSelector(cardinality.Options{TopN: 20})
+	target := scopeTarget(uuid.New(), "app", clock.System())
+	all := make([]cardinality.Candidate, 5000)
+	for i := range all {
+		all[i].Key = fmt.Sprintf("public.k%05d", i)
+	}
+	for cycle := uint64(1); cycle <= 40; cycle++ {
+		for i := range all {
+			// Few distinct values, so ties at every rank exercise the key order.
+			all[i].Primary = float64(rng.Intn(400))
+			all[i].Secondary = float64(rng.Intn(400))
+		}
+		in := sqlPrefilter(all, narrowed.prefilterLimit(), narrowed.retained(target))
+		rng.Shuffle(len(in), func(i, j int) { in[i], in[j] = in[j], in[i] })
+		selector, scopeCycle := narrowed.next(target)
+		if scopeCycle != cycle {
+			t.Fatalf("scope cycle = %d, want %d", scopeCycle, cycle)
+		}
+		got, gotTruncated := selector.Select(scopeCycle, in)
+		selector.Forget(scopeCycle)
+		want, wantTruncated := full.Select(cycle, all)
+		full.Forget(cycle)
+		if fmt.Sprint(candidateKeys(got)) != fmt.Sprint(candidateKeys(want)) || gotTruncated != wantTruncated {
+			t.Fatalf("cycle %d: prefiltered selection %v (truncated %v), full selection %v (truncated %v)",
+				cycle, candidateKeys(got), gotTruncated, candidateKeys(want), wantTruncated)
+		}
+	}
+}
+
+// sqlPrefilter is the candidate narrowing indexStatsQuery and tableStatsQuery
+// do in SQL: the top limit by each ranking, score descending then key in byte
+// order (COLLATE "C"), and every retained key.
+func sqlPrefilter(all []cardinality.Candidate, limit int, retained []string) []cardinality.Candidate {
+	picked := make(map[string]bool)
+	for _, score := range []func(cardinality.Candidate) float64{
+		func(c cardinality.Candidate) float64 { return c.Primary },
+		func(c cardinality.Candidate) float64 { return c.Secondary },
+	} {
+		ranked := append([]cardinality.Candidate(nil), all...)
+		sort.Slice(ranked, func(i, j int) bool {
+			if score(ranked[i]) != score(ranked[j]) {
+				return score(ranked[i]) > score(ranked[j])
+			}
+			return ranked[i].Key < ranked[j].Key
+		})
+		for _, c := range ranked[:min(limit, len(ranked))] {
+			picked[c.Key] = true
+		}
+	}
+	for _, k := range retained {
+		picked[k] = true
+	}
+	var out []cardinality.Candidate
+	for _, c := range all {
+		if picked[c.Key] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func candidateKeys(cs []cardinality.Candidate) []string {
+	keys := make([]string, len(cs))
+	for i, c := range cs {
+		keys[i] = c.Key
+	}
+	return keys
 }

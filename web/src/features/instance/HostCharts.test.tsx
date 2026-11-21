@@ -4,13 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { EChartsOption } from 'echarts'
 
+import { messages as english } from '@/i18n/messages/en'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { INSTANCE_ID } from '@/test/fixture-helpers'
 import { never } from '@/test/msw/handlers'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/render'
 
-import { FILESYSTEM_HINT, HostCharts, NO_SWAP_TEXT } from './HostCharts'
+import { HostCharts } from './HostCharts'
+
+const FILESYSTEM_HINT = english['instance.host.chart.filesystemHint']
+const NO_SWAP_TEXT = english['instance.host.chart.noSwap']
 
 const chartMock = vi.hoisted(() => ({ options: [] as EChartsOption[] }))
 
@@ -29,7 +33,6 @@ const points = (...values: (number | null)[]) =>
 const GIB = 1024 ** 3
 const VALUES: Record<string, (number | null)[]> = {
   host_cpu_used_ratio: [0.2, 0.5, null],
-  host_cpu_count: [8, 8, 8],
   host_load1: [1, 2, 3],
   host_load5: [1, 1, 2],
   host_load15: [1, 1, 1],
@@ -114,51 +117,16 @@ describe('HostCharts', () => {
     expect(option.yAxis).toMatchObject({ min: 0, max: 100 })
   })
 
-  it('HOSTCH-005 draws a CPU count reference line on the load chart', async () => {
+  it('HOSTCH-005 draws only the load lines: no CPU count line outside the legend', async () => {
     await renderCharts()
 
-    const option = optionWith('Load, 1 min', (series) => series.length === 4)
-    expect(option.series.map(({ name }) => name)).toEqual([
-      'Load, 1 min',
-      'Load, 5 min',
-      'Load, 15 min',
-      'CPU count',
-    ])
-    // The line sits on its own empty series, which the legend does not list.
-    expect(option.series[3]?.data).toEqual([])
-    expect(option.series[3]?.markLine?.data).toEqual([{ name: 'CPU count', yAxis: 8 }])
-    expect((option.legend as { data: string[] }).data).toEqual([
-      'Load, 1 min',
-      'Load, 5 min',
-      'Load, 15 min',
-    ])
-    // The axis top is a round tick that always leaves room for the reference line.
-    const max = (option.yAxis as { max: (extent: { max: number }) => number }).max
-    expect(max({ max: 3 })).toBe(10)
-    expect(max({ max: 20 })).toBe(25)
-  })
-
-  it('HOSTCH-005 keeps the load chart when only the CPU count query fails', async () => {
-    server.use(
-      http.get(metricsUrl, ({ request }) => {
-        const metric = new URL(request.url).searchParams.get('metric') ?? ''
-        if (metric === 'host_cpu_count') return HttpResponse.json({ error: 'x' }, { status: 500 })
-        return HttpResponse.json({ series: points(...(VALUES[metric] ?? [])) })
-      }),
-    )
-    renderWithProviders(<HostCharts diskMeasured instanceId={INSTANCE_ID} swapAbsent={false} />, {
-      route: `/instances/${INSTANCE_ID}?range=1h`,
-    })
-    await settle()
-
-    const load = screen.getByRole('region', { name: /^Load average/ })
-    expect(within(load).queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
     const option = optionWith('Load, 1 min')
     expect(option.series.map(({ name }) => name)).toEqual([
       'Load, 1 min',
       'Load, 5 min',
       'Load, 15 min',
     ])
+    expect(option.series.every((series) => series.markLine === undefined)).toBe(true)
   })
 
   it('shows every card loading until its queries answer', async () => {

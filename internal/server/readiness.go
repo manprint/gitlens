@@ -23,8 +23,9 @@ const readinessTTL = 30 * time.Second
 // readinessWindow bounds the facts and series a report reads.
 const readinessWindow = "24 hours"
 
-// readinessCache keeps the last report of each instance for readinessTTL. The
-// zero value is ready to use; ttl and now are overridden by tests.
+// readinessCache keeps the last evaluator input of each instance for
+// readinessTTL; the report is evaluated per request, in the request's language.
+// The zero value is ready to use; ttl and now are overridden by tests.
 type readinessCache struct {
 	mu      sync.Mutex
 	entries map[uuid.UUID]readinessEntry
@@ -33,8 +34,8 @@ type readinessCache struct {
 }
 
 type readinessEntry struct {
-	report readiness.Report
-	at     time.Time
+	in readiness.Input
+	at time.Time
 }
 
 func (c *readinessCache) clock() time.Time {
@@ -51,23 +52,31 @@ func (c *readinessCache) lifetime() time.Duration {
 	return readinessTTL
 }
 
-func (c *readinessCache) get(id uuid.UUID) (readiness.Report, bool) {
+func (c *readinessCache) get(id uuid.UUID) (readiness.Input, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[id]
 	if !ok || c.clock().Sub(e.at) >= c.lifetime() {
-		return readiness.Report{}, false
+		return readiness.Input{}, false
 	}
-	return e.report, true
+	return e.in, true
 }
 
-func (c *readinessCache) put(id uuid.UUID, r readiness.Report) {
+func (c *readinessCache) put(id uuid.UUID, in readiness.Input) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
 		c.entries = map[uuid.UUID]readinessEntry{}
 	}
-	c.entries[id] = readinessEntry{report: r, at: c.clock()}
+	now := c.clock()
+	// An expired input is never read again: drop it, so a deleted instance
+	// leaves nothing behind.
+	for key, e := range c.entries {
+		if now.Sub(e.at) >= c.lifetime() {
+			delete(c.entries, key)
+		}
+	}
+	c.entries[id] = readinessEntry{in: in, at: now}
 }
 
 // errReadinessNotFound marks an instance the server does not know.
@@ -88,7 +97,7 @@ func (a *API) handleReadiness(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "storage unavailable", "the database pool is not available")
 		return
 	}
-	report, err := a.readinessReport(r.Context(), id)
+	report, err := a.readinessReport(r.Context(), id, requestLocale(r))
 	switch {
 	case errors.Is(err, errReadinessNotFound):
 		writeError(w, http.StatusNotFound, "instance not found", id.String())
@@ -144,7 +153,7 @@ func (a *API) handleReadinessSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := readinessSummaryResponse{Instances: []readinessSummaryInstance{}}
 	for _, id := range ids {
-		report, err := a.readinessReport(ctx, id)
+		report, err := a.readinessReport(ctx, id, "")
 		if errors.Is(err, errReadinessNotFound) {
 			continue // removed while the summary ran
 		}
@@ -165,20 +174,20 @@ func (a *API) handleReadinessSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// readinessReport is the report of one instance, from the cache when it is
-// younger than the TTL.
-func (a *API) readinessReport(ctx context.Context, id uuid.UUID) (readiness.Report, error) {
-	if report, ok := a.readinessCache.get(id); ok {
-		return report, nil
+// readinessReport is the report of one instance in locale ("" is English),
+// from the cached input when it is younger than the TTL.
+func (a *API) readinessReport(ctx context.Context, id uuid.UUID, locale string) (readiness.Report, error) {
+	in, ok := a.readinessCache.get(id)
+	if !ok {
+		var err error
+		if in, err = a.readinessInput(ctx, id); err != nil {
+			return readiness.Report{}, err
+		}
+		in.Now = a.readinessCache.clock().UTC()
+		a.readinessCache.put(id, in)
 	}
-	in, err := a.readinessInput(ctx, id)
-	if err != nil {
-		return readiness.Report{}, err
-	}
-	in.Now = a.readinessCache.clock().UTC()
-	report := readiness.Evaluate(in)
-	a.readinessCache.put(id, report)
-	return report, nil
+	in.Locale = locale
+	return readiness.Evaluate(in), nil
 }
 
 // readinessInput assembles the evaluator's input from the latest facts and

@@ -1,4 +1,5 @@
 import { NativeSelect } from '@/components/ui/native-select'
+import { useT } from '@/i18n/react'
 import { instanceLabel, type NamedInstance } from '@/lib/names'
 
 import type { PickableInstance } from './usePickedInstance'
@@ -14,10 +15,11 @@ export function InstancePicker<T extends PickableInstance & NamedInstance>({
   onPick: (id: string) => void
   picked: T | undefined
 }) {
+  const t = useT()
   if (instances.length < 2) return null
   return (
     <label className="flex items-center gap-2 text-sm">
-      <span className="text-muted-foreground">Instance</span>
+      <span className="text-muted-foreground">{t('settings.picker.instance')}</span>
       <NativeSelect
         aria-label={label}
         className="min-[1600px]:h-8"

@@ -22,10 +22,14 @@ type UIConfig struct {
 	Password     string
 	SessionTTL   time.Duration
 	CookieSecure string // "auto" | "true" | "false"
+	// TimeZone (PGLENS_TZ, IANA) and Language (PGLENS_LANG) are the console
+	// defaults the session endpoint hands the browser; empty reads as UTC and en.
+	TimeZone string
+	Language string
 }
 
 func (c UIConfig) String() string {
-	return fmt.Sprintf("UIConfig{Enabled:%t Password:[redacted] SessionTTL:%s CookieSecure:%s}", c.Enabled, c.SessionTTL, c.CookieSecure)
+	return fmt.Sprintf("UIConfig{Enabled:%t Password:[redacted] SessionTTL:%s CookieSecure:%s TimeZone:%s Language:%s}", c.Enabled, c.SessionTTL, c.CookieSecure, c.TimeZone, c.Language)
 }
 
 // LoadBootstrapToken resolves the agent bearer token from

@@ -20,6 +20,7 @@ import {
   type DataTableProps,
   type DataTableToolbar,
 } from '@/components/layout/DataTable'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { EmptyState, ErrorState, Unknown } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
@@ -30,7 +31,9 @@ import {
   formatPercent,
   formatRate,
   formatTimestamp,
+  TIMESTAMP_COLUMN_WIDTH,
 } from '@/lib/format'
+import { useT, type Translate } from '@/i18n/react'
 import { NativeSelect } from '@/components/ui/native-select'
 
 import { DENSE_TABLE } from './denseTable'
@@ -77,18 +80,21 @@ function DatabaseFilter({
   value: string
   onChange: (value: string) => void
 }) {
+  const t = useT()
   return (
     // A page control in the table's toolbar line; from 1600 px its name is
     // read out only, as the shared filters do (D26).
     <label className="flex flex-col gap-1 text-sm" htmlFor={id}>
-      <span className="font-medium min-[1600px]:sr-only">Database</span>
+      <span className="font-medium min-[1600px]:sr-only">
+        {t('instance.catalog.common.database')}
+      </span>
       <NativeSelect
         className="h-8 w-44"
         id={id}
         onChange={(event) => onChange(event.target.value)}
         value={value}
       >
-        <option value="all">All databases</option>
+        <option value="all">{t('instance.catalog.common.allDatabases')}</option>
         {databases.map((name) => (
           <option key={name} value={name}>
             {name}
@@ -111,11 +117,17 @@ function TruncatedNotice({
   what: string
   kept: string
 }) {
+  const t = useT()
   const names = truncated.filter((name) => database === 'all' || name === database)
   if (names.length === 0) return null
   return (
     <ToolbarNote status wrap>
-      {`${names.join(', ')} ${names.length === 1 ? 'has' : 'have'} more ${what} than the agent reports: ${kept}.`}
+      {t('instance.catalog.truncated', {
+        names: names.join(', '),
+        count: names.length,
+        what,
+        kept,
+      })}
     </ToolbarNote>
   )
 }
@@ -163,13 +175,21 @@ function CatalogTable<T extends RowData>({
 }
 
 /** A disabled internal trigger means its constraint is no longer enforced. */
-function triggerStateBadge(trigger: Trigger) {
+function triggerStateLabel(state: Trigger['state'], t: Translate): string {
+  if (state === 'enabled') return t('instance.catalog.common.enabled')
+  if (state === 'unknown') return t('instance.catalog.common.unknown')
+  return state
+}
+
+function triggerStateBadge(trigger: Trigger, t: Translate) {
   if (trigger.state === 'disabled') {
     return (
-      <Badge variant={trigger.kind === 'internal' ? 'destructive' : 'secondary'}>disabled</Badge>
+      <Badge variant={trigger.kind === 'internal' ? 'destructive' : 'secondary'}>
+        {t('instance.catalog.triggers.disabled')}
+      </Badge>
     )
   }
-  return <Badge variant="outline">{trigger.state}</Badge>
+  return <Badge variant="outline">{triggerStateLabel(trigger.state, t)}</Badge>
 }
 
 // Every tab has its Database select above the table: no database filter here.
@@ -181,25 +201,33 @@ const TRIGGER_TOOLBAR: DataTableToolbar<Trigger> = {
   ],
 }
 
-function triggerColumns(): DataTableProps<Trigger>['columns'] {
+function triggerColumns(t: Translate): DataTableProps<Trigger>['columns'] {
   return [
-    { accessorKey: 'datname', header: 'Database', meta: { width: '9rem', truncate: true } },
+    {
+      accessorKey: 'datname',
+      header: t('instance.catalog.common.database'),
+      meta: { width: '9rem', truncate: true },
+    },
     {
       id: 'table',
-      header: 'Table',
+      header: t('instance.catalog.common.table'),
       accessorFn: (trigger) => `${trigger.schemaname}.${trigger.relname}`,
       meta: { truncate: true },
     },
-    { accessorKey: 'name', header: 'Trigger', meta: { truncate: true } },
+    {
+      accessorKey: 'name',
+      header: t('instance.catalog.triggers.trigger'),
+      meta: { truncate: true },
+    },
     {
       accessorKey: 'state',
-      header: 'State',
+      header: t('instance.catalog.common.state'),
       meta: { width: '7.5rem' },
-      cell: ({ row }) => triggerStateBadge(row.original),
+      cell: ({ row }) => triggerStateBadge(row.original, t),
     },
     {
       id: 'enforces',
-      header: 'Enforces',
+      header: t('instance.catalog.triggers.enforces'),
       accessorFn: (trigger) =>
         trigger.kind === 'internal'
           ? `${trigger.constraint_type || 'constraint'} ${trigger.constraint}`.trim()
@@ -208,16 +236,20 @@ function triggerColumns(): DataTableProps<Trigger>['columns'] {
     },
     {
       id: 'fires',
-      header: 'Fires',
+      header: t('instance.catalog.triggers.fires'),
       accessorFn: (trigger) => `${trigger.timing} ${trigger.events} FOR EACH ${trigger.level}`,
       meta: { truncate: true },
     },
-    { accessorKey: 'function', header: 'Function', meta: { truncate: true } },
+    {
+      accessorKey: 'function',
+      header: t('instance.catalog.common.function'),
+      meta: { truncate: true },
+    },
     {
       accessorKey: 'changed_at',
-      header: 'State since',
-      meta: { width: '13rem' },
-      cell: ({ row }) => formatTimestamp(row.original.changed_at, 'UTC'),
+      header: t('instance.catalog.triggers.stateSince'),
+      meta: { width: TIMESTAMP_COLUMN_WIDTH },
+      cell: ({ row }) => formatTimestamp(row.original.changed_at),
     },
   ]
 }
@@ -229,17 +261,18 @@ function TriggersTab({ response }: { response: Schemas['TriggersResponse'] }) {
     () => filter.rows.filter((trigger) => !disabledOnly || trigger.state === 'disabled'),
     [disabledOnly, filter.rows],
   )
-  const columns = useMemo(() => triggerColumns(), [])
+  const t = useT()
+  const columns = useMemo(() => triggerColumns(t), [t])
   const emptyState =
     response.triggers.length === 0 ? (
       <EmptyState
-        title="No triggers reported"
-        description="The trigger inventory found no user triggers and no disabled constraint triggers."
+        title={t('instance.catalog.triggers.emptyTitle')}
+        description={t('instance.catalog.triggers.emptyDescription')}
       />
     ) : (
       <EmptyState
-        title="No triggers match these filters"
-        description="Try another database or show enabled triggers too."
+        title={t('instance.catalog.triggers.noMatchTitle')}
+        description={t('instance.catalog.triggers.noMatchDescription')}
       />
     )
 
@@ -259,7 +292,7 @@ function TriggersTab({ response }: { response: Schemas['TriggersResponse'] }) {
               onChange={(event) => setDisabledOnly(event.target.checked)}
               type="checkbox"
             />
-            <span>Disabled only</span>
+            <span>{t('instance.catalog.triggers.disabledOnly')}</span>
           </label>
         </>
       }
@@ -268,19 +301,19 @@ function TriggersTab({ response }: { response: Schemas['TriggersResponse'] }) {
           <TruncatedNotice
             truncated={response.truncated_databases}
             database={filter.database}
-            what="triggers"
-            kept="disabled triggers are listed first, enabled ones may be missing"
+            what={t('instance.catalog.noun.triggers')}
+            kept={t('instance.catalog.kept.triggers')}
           />
         </>
       }
       captionId="catalog.triggers"
-      ariaLabel="Triggers"
+      ariaLabel={t('instance.catalog.table.triggers')}
       tableId="triggers"
       toolbar={TRIGGER_TOOLBAR}
       columns={columns}
       data={rows}
       emptyState={emptyState}
-      scope="triggers"
+      scope={t('instance.catalog.noun.triggers')}
       total={response.triggers.length}
     />
   )
@@ -295,28 +328,42 @@ const FOREIGN_KEY_TOOLBAR: DataTableToolbar<Schemas['UnindexedForeignKey']> = {
   ],
 }
 
-function foreignKeyColumns(): DataTableProps<Schemas['UnindexedForeignKey']>['columns'] {
+function foreignKeyColumns(
+  t: Translate,
+): DataTableProps<Schemas['UnindexedForeignKey']>['columns'] {
   return [
-    { accessorKey: 'datname', header: 'Database', meta: { width: '9rem', truncate: true } },
+    {
+      accessorKey: 'datname',
+      header: t('instance.catalog.common.database'),
+      meta: { width: '9rem', truncate: true },
+    },
     {
       id: 'table',
-      header: 'Table',
+      header: t('instance.catalog.common.table'),
       accessorFn: (fk) => `${fk.schemaname}.${fk.relname}`,
       meta: { truncate: true },
     },
-    { accessorKey: 'constraint', header: 'Constraint', meta: { truncate: true } },
+    {
+      accessorKey: 'constraint',
+      header: t('instance.catalog.fk.constraint'),
+      meta: { truncate: true },
+    },
     {
       accessorKey: 'columns',
-      header: 'Columns',
+      header: t('instance.catalog.fk.columns'),
       meta: {
         truncate: true,
         title: titleOf<Schemas['UnindexedForeignKey']>((fk) => String(fk.columns)),
       },
     },
-    { accessorKey: 'referenced', header: 'References', meta: { truncate: true } },
+    {
+      accessorKey: 'referenced',
+      header: t('instance.catalog.fk.references'),
+      meta: { truncate: true },
+    },
     {
       accessorKey: 'table_bytes',
-      header: 'Table size',
+      header: t('instance.catalog.fk.tableSize'),
       meta: { width: '9.5rem' },
       cell: ({ row }) => formatBytes(row.original.table_bytes),
     },
@@ -329,7 +376,8 @@ function UnindexedForeignKeysTab({
   response: Schemas['UnindexedForeignKeysResponse']
 }) {
   const filter = useDatabaseFilter(response.foreign_keys)
-  const columns = useMemo(() => foreignKeyColumns(), [])
+  const t = useT()
+  const columns = useMemo(() => foreignKeyColumns(t), [t])
 
   return (
     <CatalogTable
@@ -345,64 +393,85 @@ function UnindexedForeignKeysTab({
       }
       notes={
         <>
-          <ToolbarNote>{`Deleting a referenced row, or updating its key, scans the whole referencing table when no index leads with the foreign key's columns.`}</ToolbarNote>
+          <ToolbarNote>{t('instance.catalog.fk.note')}</ToolbarNote>
           <TruncatedNotice
             truncated={response.truncated_databases}
             database={filter.database}
-            what="unindexed foreign keys"
-            kept="the largest tables are listed"
+            what={t('instance.catalog.noun.unindexedForeignKeys')}
+            kept={t('instance.catalog.kept.foreignKeys')}
           />
         </>
       }
       captionId="catalog.foreign-keys"
-      ariaLabel="Unindexed foreign keys"
+      ariaLabel={t('instance.catalog.table.unindexedForeignKeys')}
       tableId="unindexed-foreign-keys"
       toolbar={FOREIGN_KEY_TOOLBAR}
       columns={columns}
       data={filter.rows}
       emptyState={
         <EmptyState
-          title="Every foreign key has an index"
-          description="No foreign key without an index leading with its columns was reported."
+          title={t('instance.catalog.fk.emptyTitle')}
+          description={t('instance.catalog.fk.emptyDescription')}
         />
       }
-      scope="foreign keys"
+      scope={t('instance.catalog.noun.foreignKeys')}
       total={response.foreign_keys.length}
     />
   )
 }
 
-const EXTENSION_TOOLBAR: DataTableToolbar<Schemas['Extension']> = {
-  searchFields: [(extension) => extension.name, (extension) => extension.schema],
-  filters: [
-    { id: 'schema', label: 'Schema', kind: 'select', accessor: (extension) => extension.schema },
-  ],
+function extensionToolbar(t: Translate): DataTableToolbar<Schemas['Extension']> {
+  return {
+    searchFields: [(extension) => extension.name, (extension) => extension.schema],
+    filters: [
+      {
+        id: 'schema',
+        label: t('instance.catalog.common.schema'),
+        kind: 'select',
+        accessor: (extension) => extension.schema,
+      },
+    ],
+  }
 }
 
-function extensionColumns(): DataTableProps<Schemas['Extension']>['columns'] {
+function extensionColumns(t: Translate): DataTableProps<Schemas['Extension']>['columns'] {
   return [
-    { accessorKey: 'datname', header: 'Database', meta: { width: '9rem', truncate: true } },
-    { accessorKey: 'name', header: 'Extension', meta: { truncate: true } },
-    { accessorKey: 'schema', header: 'Schema', meta: { width: '9rem', truncate: true } },
-    { accessorKey: 'version', header: 'Installed', meta: { width: '9rem', truncate: true } },
+    {
+      accessorKey: 'datname',
+      header: t('instance.catalog.common.database'),
+      meta: { width: '9rem', truncate: true },
+    },
+    { accessorKey: 'name', header: t('instance.catalog.ext.extension'), meta: { truncate: true } },
+    {
+      accessorKey: 'schema',
+      header: t('instance.catalog.common.schema'),
+      meta: { width: '9rem', truncate: true },
+    },
+    {
+      accessorKey: 'version',
+      header: t('instance.catalog.ext.installed'),
+      meta: { width: '9rem', truncate: true },
+    },
     {
       accessorKey: 'default_version',
-      header: 'Packages',
+      header: t('instance.catalog.ext.packages'),
       meta: { width: '11rem', help: 'catalog.extension-packages' },
       cell: ({ row }) =>
-        row.original.default_version || <Unknown reason="The packages no longer carry it." />,
+        row.original.default_version || (
+          <Unknown reason={t('instance.catalog.ext.packagesMissing')} />
+        ),
     },
     {
       accessorKey: 'upgrade',
-      header: 'Update',
+      header: t('instance.catalog.ext.update'),
       meta: { width: '10.5rem', help: 'catalog.extension-update' },
       cell: ({ row }) =>
         row.original.upgrade === 'available' ? (
-          <Badge variant="secondary">available</Badge>
+          <Badge variant="secondary">{t('instance.catalog.ext.available')}</Badge>
         ) : row.original.upgrade === 'unknown' ? (
-          <Unknown reason="The versions cannot be compared." />
+          <Unknown reason={t('instance.catalog.ext.versionsIncomparable')} />
         ) : (
-          'up to date'
+          t('instance.catalog.ext.upToDate')
         ),
     },
   ]
@@ -410,7 +479,9 @@ function extensionColumns(): DataTableProps<Schemas['Extension']>['columns'] {
 
 function ExtensionsTab({ response }: { response: Schemas['ExtensionsResponse'] }) {
   const filter = useDatabaseFilter(response.extensions)
-  const columns = useMemo(() => extensionColumns(), [])
+  const t = useT()
+  const columns = useMemo(() => extensionColumns(t), [t])
+  const toolbar = useMemo(() => extensionToolbar(t), [t])
 
   return (
     <CatalogTable
@@ -429,75 +500,89 @@ function ExtensionsTab({ response }: { response: Schemas['ExtensionsResponse'] }
           <TruncatedNotice
             truncated={response.truncated_databases}
             database={filter.database}
-            what="extensions"
-            kept="the first ones by name are listed"
+            what={t('instance.catalog.noun.extensions')}
+            kept={t('instance.catalog.kept.extensions')}
           />
         </>
       }
       captionId="catalog.extensions"
-      ariaLabel="Extensions"
+      ariaLabel={t('instance.catalog.table.extensions')}
       tableId="extensions"
-      toolbar={EXTENSION_TOOLBAR}
+      toolbar={toolbar}
       columns={columns}
       data={filter.rows}
       emptyState={
         <EmptyState
-          title="No extensions reported"
-          description="The extension inventory has not reported for any database yet."
+          title={t('instance.catalog.ext.emptyTitle')}
+          description={t('instance.catalog.ext.emptyDescription')}
         />
       }
-      scope="extensions"
+      scope={t('instance.catalog.noun.extensions')}
       total={response.extensions.length}
     />
   )
 }
 
-function sridCell(column: SpatialColumn): ReactNode {
+function sridCell(column: SpatialColumn, t: Translate): ReactNode {
   if (column.srid === null) {
-    return <Unknown reason="Declared without a typmod: each value carries its own SRID." />
+    return <Unknown reason={t('instance.catalog.spatial.noTypmod')} />
   }
   if (column.srid_known === false) {
     return (
       <span className="inline-flex items-center gap-1">
         {column.srid}
-        <Badge variant="secondary">{column.srid === 0 ? 'unknown' : 'undefined'}</Badge>
+        <Badge variant="secondary">
+          {column.srid === 0
+            ? t('instance.catalog.common.unknown')
+            : t('instance.catalog.spatial.undefined')}
+        </Badge>
       </span>
     )
   }
   return column.srid
 }
 
-const SPATIAL_TOOLBAR: DataTableToolbar<SpatialColumn> = {
-  searchFields: [(column) => `${column.schemaname}.${column.relname}`, (column) => column.column],
-  filters: [
-    {
-      id: 'type',
-      label: 'Type',
-      kind: 'select',
-      accessor: (column) => `${column.type}(${column.subtype})`,
-    },
-    {
-      id: 'index',
-      label: 'Spatial index',
-      kind: 'select',
-      accessor: (column) => column.index_method || 'missing',
-    },
-  ],
+function spatialToolbar(t: Translate): DataTableToolbar<SpatialColumn> {
+  return {
+    searchFields: [(column) => `${column.schemaname}.${column.relname}`, (column) => column.column],
+    filters: [
+      {
+        id: 'type',
+        label: t('instance.catalog.common.type'),
+        kind: 'select',
+        accessor: (column) => `${column.type}(${column.subtype})`,
+      },
+      {
+        id: 'index',
+        label: t('instance.catalog.common.spatialIndex'),
+        kind: 'select',
+        accessor: (column) => column.index_method || 'missing',
+      },
+    ],
+  }
 }
 
-function spatialColumns(): DataTableProps<SpatialColumn>['columns'] {
+function spatialColumns(t: Translate): DataTableProps<SpatialColumn>['columns'] {
   return [
-    { accessorKey: 'datname', header: 'Database', meta: { width: '9rem', truncate: true } },
+    {
+      accessorKey: 'datname',
+      header: t('instance.catalog.common.database'),
+      meta: { width: '9rem', truncate: true },
+    },
     {
       id: 'table',
-      header: 'Table',
+      header: t('instance.catalog.common.table'),
       accessorFn: (column) => `${column.schemaname}.${column.relname}`,
       meta: { truncate: true },
     },
-    { accessorKey: 'column', header: 'Column', meta: { truncate: true } },
+    {
+      accessorKey: 'column',
+      header: t('instance.catalog.common.column'),
+      meta: { truncate: true },
+    },
     {
       id: 'declared',
-      header: 'Type',
+      header: t('instance.catalog.common.type'),
       accessorFn: (column) => `${column.type}(${column.subtype})`,
       meta: { truncate: true },
     },
@@ -505,22 +590,22 @@ function spatialColumns(): DataTableProps<SpatialColumn>['columns'] {
       accessorKey: 'srid',
       header: 'SRID',
       meta: { width: '8rem' },
-      cell: ({ row }) => sridCell(row.original),
+      cell: ({ row }) => sridCell(row.original, t),
     },
     {
       accessorKey: 'index_method',
-      header: 'Spatial index',
+      header: t('instance.catalog.common.spatialIndex'),
       meta: { width: '11rem' },
       cell: ({ row }) =>
         row.original.index_method ? (
           row.original.index_method
         ) : (
-          <Badge variant="secondary">missing</Badge>
+          <Badge variant="secondary">{t('instance.catalog.spatial.missing')}</Badge>
         ),
     },
     {
       accessorKey: 'rows',
-      header: 'Rows (est.)',
+      header: t('instance.catalog.common.rowsEstimate'),
       cell: ({ row }) => formatCount(row.original.rows),
       meta: { width: '10rem' },
     },
@@ -535,7 +620,9 @@ function PostGISTab({
   extensions: Schemas['ExtensionsResponse'] | undefined
 }) {
   const filter = useDatabaseFilter(spatial.columns)
-  const columns = useMemo(() => spatialColumns(), [])
+  const t = useT()
+  const columns = useMemo(() => spatialColumns(t), [t])
+  const toolbar = useMemo(() => spatialToolbar(t), [t])
   const postgis = useMemo(
     () =>
       (extensions?.extensions ?? []).filter(
@@ -564,13 +651,18 @@ function PostGISTab({
             // From 1600 px the versions are one truncated line of the toolbar (D26).
             <ul
               className="text-sm min-[1600px]:min-w-0 min-[1600px]:shrink min-[1600px]:grow min-[1600px]:basis-0 min-[1600px]:self-center min-[1600px]:truncate"
-              aria-label="PostGIS versions"
+              aria-label={t('instance.catalog.spatial.versionsAria')}
             >
               {postgis.map((extension) => (
                 <li key={extension.datname} className="min-[1600px]:mr-3 min-[1600px]:inline">
-                  {extension.datname}: PostGIS {extension.version}
+                  {t('instance.catalog.spatial.versionLine', {
+                    datname: extension.datname,
+                    version: extension.version,
+                  })}
                   {extension.upgrade === 'available'
-                    ? ` (packages carry ${extension.default_version})`
+                    ? t('instance.catalog.spatial.packagesCarry', {
+                        version: String(extension.default_version),
+                      })
                     : null}
                 </li>
               ))}
@@ -579,24 +671,24 @@ function PostGISTab({
           <TruncatedNotice
             truncated={spatial.truncated_databases}
             database={filter.database}
-            what="spatial columns"
-            kept="unindexed columns of the largest tables are listed first"
+            what={t('instance.catalog.noun.spatialColumns')}
+            kept={t('instance.catalog.kept.spatialColumns')}
           />
         </>
       }
       captionId="catalog.spatial-columns"
-      ariaLabel="Spatial columns"
+      ariaLabel={t('instance.catalog.table.spatialColumns')}
       tableId="spatial-columns"
-      toolbar={SPATIAL_TOOLBAR}
+      toolbar={toolbar}
       columns={columns}
       data={filter.rows}
       emptyState={
         <EmptyState
-          title="No spatial columns reported"
-          description="No monitored database with PostGIS has geometry or geography columns."
+          title={t('instance.catalog.spatial.emptyTitle')}
+          description={t('instance.catalog.spatial.emptyDescription')}
         />
       }
-      scope="spatial columns"
+      scope={t('instance.catalog.noun.spatialColumns')}
       total={spatial.columns.length}
     />
   )
@@ -610,14 +702,12 @@ function sequenceAtRisk(sequence: Sequence): boolean {
   return sequence.exhausts && (sequence.used_ratio ?? 0) >= SEQUENCE_WARN_RATIO
 }
 
-function sequenceUsedCell(sequence: Sequence): ReactNode {
+function sequenceUsedCell(sequence: Sequence, t: Translate): ReactNode {
   switch (sequence.state) {
     case 'hidden':
-      return (
-        <Unknown reason="The monitoring role has no SELECT on this sequence: grant it, or run the agent at tier 1." />
-      )
+      return <Unknown reason={t('instance.catalog.seq.unknownHidden')} />
     case 'unread':
-      return <Unknown reason="Reading the sequence waited too long for a lock." />
+      return <Unknown reason={t('instance.catalog.seq.unknownUnread')} />
     case 'unused':
     case 'used':
       break
@@ -632,23 +722,34 @@ function sequenceUsedCell(sequence: Sequence): ReactNode {
   )
 }
 
-const SEQUENCE_TOOLBAR: DataTableToolbar<Sequence> = {
-  searchFields: [
-    (sequence) => `${sequence.schemaname}.${sequence.name}`,
-    (sequence) =>
-      sequence.column ? `${sequence.table_schema}.${sequence.table}.${sequence.column}` : null,
-  ],
-  filters: [
-    { id: 'type', label: 'Type', kind: 'select', accessor: (sequence) => sequence.data_type },
-  ],
+function sequenceToolbar(t: Translate): DataTableToolbar<Sequence> {
+  return {
+    searchFields: [
+      (sequence) => `${sequence.schemaname}.${sequence.name}`,
+      (sequence) =>
+        sequence.column ? `${sequence.table_schema}.${sequence.table}.${sequence.column}` : null,
+    ],
+    filters: [
+      {
+        id: 'type',
+        label: t('instance.catalog.common.type'),
+        kind: 'select',
+        accessor: (sequence) => sequence.data_type,
+      },
+    ],
+  }
 }
 
-function sequenceColumns(): DataTableProps<Sequence>['columns'] {
+function sequenceColumns(t: Translate): DataTableProps<Sequence>['columns'] {
   return [
-    { accessorKey: 'datname', header: 'Database', meta: { width: '9rem', truncate: true } },
+    {
+      accessorKey: 'datname',
+      header: t('instance.catalog.common.database'),
+      meta: { width: '9rem', truncate: true },
+    },
     {
       id: 'sequence',
-      header: 'Sequence',
+      header: t('instance.catalog.seq.sequence'),
       accessorFn: (sequence) => `${sequence.schemaname}.${sequence.name}`,
       meta: { width: '20rem', truncate: true },
       cell: ({ row }) => (
@@ -658,16 +759,20 @@ function sequenceColumns(): DataTableProps<Sequence>['columns'] {
           </span>
           {row.original.cycle ? (
             <Badge className="shrink-0" variant="outline">
-              cycles
+              {t('instance.catalog.seq.cycles')}
             </Badge>
           ) : null}
         </span>
       ),
     },
-    { accessorKey: 'data_type', header: 'Type', meta: { width: '7.5rem' } },
+    {
+      accessorKey: 'data_type',
+      header: t('instance.catalog.common.type'),
+      meta: { width: '7.5rem' },
+    },
     {
       id: 'column',
-      header: 'Feeds',
+      header: t('instance.catalog.seq.feeds'),
       meta: {
         truncate: true,
         title: titleOf<Sequence>((sequence) =>
@@ -682,48 +787,49 @@ function sequenceColumns(): DataTableProps<Sequence>['columns'] {
           : '',
       cell: ({ getValue, row }) => {
         const shown = getValue<string>()
-        if (!shown) return <span className="text-muted-foreground">no column</span>
+        if (!shown)
+          return <span className="text-muted-foreground">{t('instance.catalog.seq.noColumn')}</span>
         const more = row.original.columns > 1 ? ` +${row.original.columns - 1}` : ''
         return `${shown}${more}`
       },
     },
     {
       id: 'last_value',
-      header: 'Last value',
+      header: t('instance.catalog.seq.lastValue'),
       meta: { width: '12.5rem' },
       accessorFn: (sequence) => sequence.last_value,
       cell: ({ row }) =>
         row.original.last_value !== null ? (
           formatIntegerString(row.original.last_value)
         ) : row.original.state === 'unused' ? (
-          <span className="text-muted-foreground">never called</span>
+          <span className="text-muted-foreground">{t('instance.catalog.seq.neverCalled')}</span>
         ) : (
-          <Unknown reason="Not readable." />
+          <Unknown reason={t('instance.catalog.seq.notReadable')} />
         ),
     },
     {
       accessorKey: 'limit',
-      header: 'Limit',
+      header: t('instance.catalog.seq.limit'),
       meta: { width: '18.5rem', help: 'catalog.sequence-limit' },
       cell: ({ row }) => (
         <span className="inline-flex items-center gap-1">
           {formatIntegerString(row.original.limit)}
           {row.original.limit_source === 'column' ? (
-            <Badge variant="secondary">column type</Badge>
+            <Badge variant="secondary">{t('instance.catalog.seq.columnType')}</Badge>
           ) : null}
         </span>
       ),
     },
     {
       id: 'used',
-      header: 'Used',
+      header: t('instance.catalog.seq.used'),
       meta: { width: '9.5rem', help: 'catalog.sequence-used' },
       accessorFn: (sequence) => sequence.used_ratio,
-      cell: ({ row }) => sequenceUsedCell(row.original),
+      cell: ({ row }) => sequenceUsedCell(row.original, t),
     },
     {
       id: 'remaining',
-      header: 'Remaining',
+      header: t('instance.catalog.seq.remaining'),
       meta: { width: '12.5rem' },
       accessorFn: (sequence) => sequence.remaining,
       cell: ({ row }) =>
@@ -746,7 +852,9 @@ function compareSequences(left: Sequence, right: Sequence): number {
 function SequencesTab({ response }: { response: Schemas['SequencesResponse'] }) {
   const sorted = useMemo(() => [...response.sequences].sort(compareSequences), [response])
   const filter = useDatabaseFilter(sorted)
-  const columns = useMemo(() => sequenceColumns(), [])
+  const t = useT()
+  const columns = useMemo(() => sequenceColumns(t), [t])
+  const toolbar = useMemo(() => sequenceToolbar(t), [t])
   const hidden = filter.rows.filter((sequence) => sequence.state === 'hidden').length
 
   return (
@@ -763,33 +871,31 @@ function SequencesTab({ response }: { response: Schemas['SequencesResponse'] }) 
       }
       notes={
         <>
-          <ToolbarNote>{`A sequence runs out at the nearer of its own bound and its column's bound. pglens only reads sequences, never advances them.`}</ToolbarNote>
+          <ToolbarNote>{t('instance.catalog.seq.note')}</ToolbarNote>
           {hidden > 0 ? (
-            <ToolbarNote
-              status
-            >{`The values of ${hidden} ${hidden === 1 ? 'sequence are' : 'sequences are'} not readable by the monitoring role: grant it SELECT on them (never USAGE, which allows nextval), or run the agent at tier 1.`}</ToolbarNote>
+            <ToolbarNote status>{t('instance.catalog.seq.hidden', { count: hidden })}</ToolbarNote>
           ) : null}
           <TruncatedNotice
             truncated={response.truncated_databases}
             database={filter.database}
-            what="sequences"
-            kept="those closest to their limit are listed"
+            what={t('instance.catalog.noun.sequences')}
+            kept={t('instance.catalog.kept.sequences')}
           />
         </>
       }
       captionId="catalog.sequences"
-      ariaLabel="Sequences"
+      ariaLabel={t('instance.catalog.table.sequences')}
       tableId="sequences"
-      toolbar={SEQUENCE_TOOLBAR}
+      toolbar={toolbar}
       columns={columns}
       data={filter.rows}
       emptyState={
         <EmptyState
-          title="No sequences reported"
-          description="The sequence check has not reported a sequence for any database yet."
+          title={t('instance.catalog.seq.emptyTitle')}
+          description={t('instance.catalog.seq.emptyDescription')}
         />
       }
-      scope="sequences"
+      scope={t('instance.catalog.noun.sequences')}
       total={response.sequences.length}
     />
   )
@@ -821,16 +927,17 @@ function partitionNeedsAttention(table: PartitionedTable, now: Date): boolean {
   )
 }
 
-function coveredCell(table: PartitionedTable, now: Date): ReactNode {
+function coveredCell(table: PartitionedTable, now: Date, t: Translate): ReactNode {
   if (table.covered_until === null) return null
-  if (table.covered_until === 'unbounded') return 'no end (MAXVALUE)'
+  if (table.covered_until === 'unbounded') return t('instance.catalog.part.noEnd')
   const ahead = partitionAhead(table, now)
-  const shown = formatTimestamp(table.covered_until, 'UTC')
+  const shown = formatTimestamp(table.covered_until)
   if (ahead === null || ahead >= PARTITION_HORIZON_MS) return shown
   if (ahead < -PARTITION_LAPSED_MS) {
     return (
       <span>
-        {shown} <span className="text-muted-foreground">(ended)</span>
+        {shown}{' '}
+        <span className="text-muted-foreground">{t('instance.catalog.part.endedParen')}</span>
       </span>
     )
   }
@@ -838,7 +945,7 @@ function coveredCell(table: PartitionedTable, now: Date): ReactNode {
     <span className="inline-flex items-center gap-1">
       {shown}
       <Badge variant={ahead <= 0 && table.default_partition === null ? 'destructive' : 'secondary'}>
-        {ahead <= 0 ? 'ended' : 'ends soon'}
+        {ahead <= 0 ? t('instance.catalog.part.ended') : t('instance.catalog.part.endsSoon')}
       </Badge>
     </span>
   )
@@ -848,65 +955,79 @@ const PARTITION_TOOLBAR: DataTableToolbar<PartitionedTable> = {
   searchFields: [(table) => `${table.schemaname}.${table.relname}`, (table) => table.partition_key],
 }
 
-function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'] {
+function partitionColumns(now: Date, t: Translate): DataTableProps<PartitionedTable>['columns'] {
   return [
-    { accessorKey: 'datname', header: 'Database', meta: { width: '9rem', truncate: true } },
+    {
+      accessorKey: 'datname',
+      header: t('instance.catalog.common.database'),
+      meta: { width: '9rem', truncate: true },
+    },
     {
       id: 'table',
-      header: 'Table',
+      header: t('instance.catalog.common.table'),
       accessorFn: (table) => `${table.schemaname}.${table.relname}`,
       meta: { truncate: true },
     },
-    { accessorKey: 'partition_key', header: 'Key', meta: { truncate: true } },
+    {
+      accessorKey: 'partition_key',
+      header: t('instance.catalog.part.key'),
+      meta: { truncate: true },
+    },
     {
       accessorKey: 'partitions',
-      header: 'Partitions',
+      header: t('instance.catalog.part.partitions'),
       meta: { width: '8.5rem' },
       cell: ({ row }) =>
         row.original.depth > 1
-          ? `${formatCount(row.original.partitions)} in ${row.original.depth} levels`
+          ? t('instance.catalog.part.levels', {
+              count: formatCount(row.original.partitions),
+              depth: row.original.depth,
+            })
           : formatCount(row.original.partitions),
     },
     {
       accessorKey: 'bytes',
-      header: 'Size (est.)',
+      header: t('instance.catalog.part.sizeEstimate'),
       meta: { width: '8rem' },
       cell: ({ row }) => formatBytes(row.original.bytes),
     },
     {
       accessorKey: 'rows',
-      header: 'Rows (est.)',
+      header: t('instance.catalog.common.rowsEstimate'),
       cell: ({ row }) => formatCount(row.original.rows),
       meta: { width: '8.75rem' },
     },
     {
       id: 'default',
-      header: 'Default partition',
+      header: t('instance.catalog.part.defaultPartition'),
       accessorFn: (table) => table.default_rows,
       meta: {
         width: '12rem',
         truncate: true,
         title: titleOf<PartitionedTable>((table) =>
           table.default_partition === null
-            ? 'none'
-            : `${table.default_partition}${(table.default_rows ?? 0) > 0 ? ` (${formatCount(table.default_rows ?? 0)} rows)` : ''}`,
+            ? t('instance.catalog.part.none')
+            : `${table.default_partition}${(table.default_rows ?? 0) > 0 ? ` (${t('instance.catalog.part.rowsCount', { count: formatCount(table.default_rows ?? 0) })})` : ''}`,
         ),
       },
       cell: ({ row }) => {
         const { default_partition: name, default_rows: rows } = row.original
-        if (name === null) return <span className="text-muted-foreground">none</span>
+        if (name === null)
+          return <span className="text-muted-foreground">{t('instance.catalog.part.none')}</span>
         if ((rows ?? 0) <= 0) return name
         return (
           <span className="inline-flex items-center gap-1">
             {name}
-            <Badge variant="secondary">{formatCount(rows ?? 0)} rows</Badge>
+            <Badge variant="secondary">
+              {t('instance.catalog.part.rowsCount', { count: formatCount(rows ?? 0) })}
+            </Badge>
           </span>
         )
       },
     },
     {
       id: 'invalid',
-      header: 'Invalid indexes',
+      header: t('instance.catalog.part.invalidIndexes'),
       accessorFn: (table) => table.invalid_indexes.length,
       meta: {
         width: '10.5rem',
@@ -920,27 +1041,29 @@ function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'
     },
     {
       id: 'analyzed',
-      header: 'Analyzed',
+      header: t('instance.catalog.part.analyzed'),
       accessorFn: (table) => table.analyzed_at,
       meta: {
         width: '9rem',
         truncate: true,
         title: titleOf<PartitionedTable>((table) =>
-          table.analyzed_at === null ? 'never' : formatTimestamp(table.analyzed_at, 'UTC'),
+          table.analyzed_at === null
+            ? t('instance.catalog.part.never')
+            : formatTimestamp(table.analyzed_at),
         ),
       },
       cell: ({ row }) =>
         row.original.analyzed_at !== null ? (
-          formatTimestamp(row.original.analyzed_at, 'UTC')
+          formatTimestamp(row.original.analyzed_at)
         ) : row.original.rows >= PARTITION_ANALYZE_ROWS ? (
-          <Badge variant="secondary">never</Badge>
+          <Badge variant="secondary">{t('instance.catalog.part.never')}</Badge>
         ) : (
-          <span className="text-muted-foreground">never</span>
+          <span className="text-muted-foreground">{t('instance.catalog.part.never')}</span>
         ),
     },
     {
       id: 'covered',
-      header: 'Partitions reach',
+      header: t('instance.catalog.part.reach'),
       accessorFn: (table) => table.covered_until,
       meta: {
         help: 'catalog.partitions-reach',
@@ -950,11 +1073,11 @@ function partitionColumns(now: Date): DataTableProps<PartitionedTable>['columns'
           table.covered_until === null
             ? ''
             : table.covered_until === 'unbounded'
-              ? 'no end (MAXVALUE)'
-              : formatTimestamp(table.covered_until, 'UTC'),
+              ? t('instance.catalog.part.noEnd')
+              : formatTimestamp(table.covered_until),
         ),
       },
-      cell: ({ row }) => coveredCell(row.original, now),
+      cell: ({ row }) => coveredCell(row.original, now, t),
     },
   ]
 }
@@ -967,7 +1090,8 @@ function PartitionsTab({
   now: Date
 }) {
   const filter = useDatabaseFilter(response.tables)
-  const columns = useMemo(() => partitionColumns(now), [now])
+  const t = useT()
+  const columns = useMemo(() => partitionColumns(now, t), [now, t])
 
   return (
     <CatalogTable
@@ -983,30 +1107,30 @@ function PartitionsTab({
       }
       notes={
         <>
-          <ToolbarNote>{`Each partitioned table with its whole tree. Sizes and rows are the planner's estimates, so reading them locks no partition.`}</ToolbarNote>
+          <ToolbarNote>{t('instance.catalog.part.note')}</ToolbarNote>
           <TruncatedNotice
             truncated={response.truncated_databases}
             database={filter.database}
-            what="partitioned tables"
-            kept="the largest are listed"
+            what={t('instance.catalog.noun.partitionedTables')}
+            kept={t('instance.catalog.kept.partitionedTables')}
           />
         </>
       }
       // Ten sortable columns fit 1600 px only with the dense cells (D26).
       dense
       captionId="catalog.partitions"
-      ariaLabel="Partitioned tables"
+      ariaLabel={t('instance.catalog.table.partitionedTables')}
       tableId="partitioned-tables"
       toolbar={PARTITION_TOOLBAR}
       columns={columns}
       data={filter.rows}
       emptyState={
         <EmptyState
-          title="No partitioned tables reported"
-          description="No monitored database has a partitioned table."
+          title={t('instance.catalog.part.emptyTitle')}
+          description={t('instance.catalog.part.emptyDescription')}
         />
       }
-      scope="partitioned tables"
+      scope={t('instance.catalog.noun.partitionedTables')}
       total={response.tables.length}
     />
   )
@@ -1024,37 +1148,50 @@ function functionName(fn: { schemaname: string; name: string; arguments: string 
 
 const FUNCTION_TOOLBAR: DataTableToolbar<FunctionStat> = { searchFields: [functionName] }
 
-function functionColumns(): DataTableProps<FunctionStat>['columns'] {
+function functionColumns(t: Translate): DataTableProps<FunctionStat>['columns'] {
   return [
-    { accessorKey: 'datname', header: 'Database', meta: { width: '9rem', truncate: true } },
-    { id: 'function', header: 'Function', accessorFn: functionName, meta: { truncate: true } },
-    { accessorKey: 'language', header: 'Language', meta: { width: '9.25rem' } },
+    {
+      accessorKey: 'datname',
+      header: t('instance.catalog.common.database'),
+      meta: { width: '9rem', truncate: true },
+    },
+    {
+      id: 'function',
+      header: t('instance.catalog.common.function'),
+      accessorFn: functionName,
+      meta: { truncate: true },
+    },
+    {
+      accessorKey: 'language',
+      header: t('instance.catalog.fn.language'),
+      meta: { width: '9.25rem' },
+    },
     {
       accessorKey: 'calls_per_second',
-      header: 'Calls',
+      header: t('instance.catalog.fn.calls'),
       meta: { width: '7.5rem' },
       cell: ({ row }) => formatRate(row.original.calls_per_second),
     },
     {
       accessorKey: 'self_ms_per_second',
-      header: 'Own time',
+      header: t('instance.catalog.fn.ownTime'),
       meta: { width: '11rem', help: 'catalog.function-own-time' },
       cell: ({ row }) => `${formatMilliseconds(row.original.self_ms_per_second)}/s`,
     },
     {
       accessorKey: 'total_ms_per_second',
-      header: 'Total time',
+      header: t('instance.catalog.fn.totalTime'),
       meta: { width: '9.75rem' },
       cell: ({ row }) => `${formatMilliseconds(row.original.total_ms_per_second)}/s`,
     },
     {
       id: 'mean',
-      header: 'Mean per call',
+      header: t('instance.catalog.fn.meanPerCall'),
       meta: { width: '11rem' },
       accessorFn: (fn) => fn.mean_ms,
       cell: ({ row }) =>
         row.original.mean_ms === null ? (
-          <span className="text-muted-foreground">not called</span>
+          <span className="text-muted-foreground">{t('instance.catalog.fn.notCalled')}</span>
         ) : (
           formatMilliseconds(row.original.mean_ms)
         ),
@@ -1064,7 +1201,8 @@ function functionColumns(): DataTableProps<FunctionStat>['columns'] {
 
 function FunctionsTab({ response }: { response: Schemas['FunctionsResponse'] }) {
   const filter = useDatabaseFilter(response.functions)
-  const columns = useMemo(() => functionColumns(), [])
+  const t = useT()
+  const columns = useMemo(() => functionColumns(t), [t])
   const untracked = response.databases
     .filter(
       (db) =>
@@ -1089,28 +1227,27 @@ function FunctionsTab({ response }: { response: Schemas['FunctionsResponse'] }) 
       }
       notes={
         <>
-          <ToolbarNote>{`The tracked functions with the most own time and the most calls, averaged over the last ${minutes} minutes.`}</ToolbarNote>
+          <ToolbarNote>{t('instance.catalog.fn.note', { minutes })}</ToolbarNote>
           {untracked.length > 0 ? (
-            <ToolbarNote
-              status
-              wrap
-            >{`Function calls are not tracked in ${untracked.join(', ')}: track_functions is none. Set it to pl to track functions written in a procedural language; pglens never changes it.`}</ToolbarNote>
+            <ToolbarNote status wrap>
+              {t('instance.catalog.fn.untracked', { names: untracked.join(', ') })}
+            </ToolbarNote>
           ) : null}
         </>
       }
       captionId="catalog.functions"
-      ariaLabel="Functions"
+      ariaLabel={t('instance.catalog.table.functions')}
       tableId="functions"
       toolbar={FUNCTION_TOOLBAR}
       columns={columns}
       data={filter.rows}
       emptyState={
         <EmptyState
-          title="No function calls reported"
-          description="No tracked function was called in the window, or track_functions is none."
+          title={t('instance.catalog.fn.emptyTitle')}
+          description={t('instance.catalog.fn.emptyDescription')}
         />
       }
-      scope="functions"
+      scope={t('instance.catalog.noun.functions')}
       total={response.functions.length}
     />
   )
@@ -1125,24 +1262,30 @@ const SECURITY_DEFINER_TOOLBAR: DataTableToolbar<SecurityDefinerFunction> = {
   searchFields: [functionName, (fn) => fn.owner],
 }
 
-function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['columns'] {
+function securityDefinerColumns(t: Translate): DataTableProps<SecurityDefinerFunction>['columns'] {
   return [
-    { accessorKey: 'datname', header: 'Database', meta: { width: '9rem', truncate: true } },
+    {
+      accessorKey: 'datname',
+      header: t('instance.catalog.common.database'),
+      meta: { width: '9rem', truncate: true },
+    },
     {
       id: 'function',
-      header: 'Function',
+      header: t('instance.catalog.common.function'),
       accessorFn: functionName,
       meta: { truncate: true, title: titleOf<SecurityDefinerFunction>(functionName) },
       cell: ({ row }) => (
         <span className="inline-flex items-center gap-1">
           {functionName(row.original)}
-          {row.original.kind === 'procedure' ? <Badge variant="outline">procedure</Badge> : null}
+          {row.original.kind === 'procedure' ? (
+            <Badge variant="outline">{t('instance.catalog.sd.procedure')}</Badge>
+          ) : null}
         </span>
       ),
     },
     {
       accessorKey: 'owner',
-      header: 'Runs as',
+      header: t('instance.catalog.sd.runsAs'),
       meta: {
         width: '12rem',
         truncate: true,
@@ -1151,7 +1294,9 @@ function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['colu
       cell: ({ row }) => (
         <span className="inline-flex items-center gap-1">
           {row.original.owner}
-          {row.original.owner_superuser ? <Badge variant="secondary">superuser</Badge> : null}
+          {row.original.owner_superuser ? (
+            <Badge variant="secondary">{t('instance.catalog.sd.superuser')}</Badge>
+          ) : null}
         </span>
       ),
     },
@@ -1163,7 +1308,7 @@ function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['colu
         width: '14rem',
         truncate: true,
         title: titleOf<SecurityDefinerFunction>((fn) =>
-          fn.search_path === null ? "caller's" : fn.search_path || '""',
+          fn.search_path === null ? t('instance.catalog.sd.callerPath') : fn.search_path || '""',
         ),
       },
       cell: ({ row }) => {
@@ -1171,7 +1316,7 @@ function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['colu
         if (fn.search_path === null) {
           return (
             <Badge variant={securityDefinerExposed(fn) ? 'destructive' : 'secondary'}>
-              caller&apos;s
+              {t('instance.catalog.sd.callerPath')}
             </Badge>
           )
         }
@@ -1179,7 +1324,9 @@ function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['colu
           <span className="inline-flex items-center gap-1">
             <code className="text-xs">{fn.search_path === '' ? '""' : fn.search_path}</code>
             {fn.pg_temp_last ? null : (
-              <span className="text-muted-foreground text-xs">(pg_temp first)</span>
+              <span className="text-muted-foreground text-xs">
+                {t('instance.catalog.sd.pgTempFirst')}
+              </span>
             )}
           </span>
         )
@@ -1187,10 +1334,13 @@ function securityDefinerColumns(): DataTableProps<SecurityDefinerFunction>['colu
     },
     {
       id: 'public',
-      header: 'Executable by',
+      header: t('instance.catalog.sd.executableBy'),
       meta: { width: '11.5rem' },
       accessorFn: (fn) => (fn.public_execute ? 1 : 0),
-      cell: ({ row }) => (row.original.public_execute ? 'every role (PUBLIC)' : 'granted roles'),
+      cell: ({ row }) =>
+        row.original.public_execute
+          ? t('instance.catalog.sd.everyRole')
+          : t('instance.catalog.sd.grantedRoles'),
     },
   ]
 }
@@ -1201,7 +1351,8 @@ function SecurityDefinerTab({
   response: Schemas['SecurityDefinerFunctionsResponse']
 }) {
   const filter = useDatabaseFilter(response.functions)
-  const columns = useMemo(() => securityDefinerColumns(), [])
+  const t = useT()
+  const columns = useMemo(() => securityDefinerColumns(t), [t])
 
   return (
     <CatalogTable
@@ -1217,28 +1368,28 @@ function SecurityDefinerTab({
       }
       notes={
         <>
-          <ToolbarNote>{`These functions run with their owner's privileges. One that does not pin search_path finds the objects its body names through the caller's, so a caller can substitute their own.`}</ToolbarNote>
+          <ToolbarNote>{t('instance.catalog.sd.note')}</ToolbarNote>
           <TruncatedNotice
             truncated={response.truncated_databases}
             database={filter.database}
-            what="SECURITY DEFINER functions"
-            kept="those without a pinned search_path are listed first"
+            what={t('instance.catalog.noun.securityDefiner')}
+            kept={t('instance.catalog.kept.securityDefiner')}
           />
         </>
       }
       captionId="catalog.security-definer"
-      ariaLabel="SECURITY DEFINER functions"
+      ariaLabel={t('instance.catalog.table.securityDefiner')}
       tableId="security-definer-functions"
       toolbar={SECURITY_DEFINER_TOOLBAR}
       columns={columns}
       data={filter.rows}
       emptyState={
         <EmptyState
-          title="No SECURITY DEFINER functions reported"
-          description="No monitored database defines one outside its extensions."
+          title={t('instance.catalog.sd.emptyTitle')}
+          description={t('instance.catalog.sd.emptyDescription')}
         />
       }
-      scope="functions"
+      scope={t('instance.catalog.noun.functions')}
       total={response.functions.length}
     />
   )
@@ -1251,6 +1402,7 @@ interface CatalogTabStateProps<T> {
 }
 
 function CatalogTabState<T>({ query, label, children }: CatalogTabStateProps<T>) {
+  const t = useT()
   if (query.error && !query.data) {
     return (
       <ErrorState
@@ -1262,8 +1414,12 @@ function CatalogTabState<T>({ query, label, children }: CatalogTabStateProps<T>)
   }
   if (query.isPending || query.data === undefined) {
     return (
-      <section aria-busy="true" aria-label={`Loading ${label}`} role="status">
-        Loading {label}…
+      <section
+        aria-busy="true"
+        aria-label={t('instance.catalog.tabs.loadingAria', { label })}
+        role="status"
+      >
+        {t('instance.catalog.tabs.loading', { label })}
       </section>
     )
   }
@@ -1285,6 +1441,7 @@ function TabCount({ count, label }: { count: number; label: string }) {
 }
 
 export function CatalogSection({ instanceId }: CatalogSectionProps) {
+  const t = useT()
   const triggersQuery = useInstanceTriggers(instanceId)
   const foreignKeysQuery = useInstanceUnindexedForeignKeys(instanceId)
   const extensionsQuery = useInstanceExtensions(instanceId)
@@ -1315,7 +1472,8 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       id: 'triggers',
       label: (
         <>
-          Triggers <TabCount count={disabledTriggers} label="disabled" />
+          {t('instance.catalog.tabs.triggers')}{' '}
+          <TabCount count={disabledTriggers} label={t('instance.catalog.triggers.disabled')} />
         </>
       ),
     },
@@ -1323,7 +1481,8 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       id: 'sequences',
       label: (
         <>
-          Sequences <TabCount count={sequencesAtRisk} label="near their limit" />
+          {t('instance.catalog.tabs.sequences')}{' '}
+          <TabCount count={sequencesAtRisk} label={t('instance.catalog.tab.nearLimit')} />
         </>
       ),
     },
@@ -1331,17 +1490,18 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       id: 'partitions',
       label: (
         <>
-          Partitions <TabCount count={partitionIssues} label="need attention" />
+          {t('instance.catalog.tabs.partitions')}{' '}
+          <TabCount count={partitionIssues} label={t('instance.catalog.tab.needAttention')} />
         </>
       ),
     },
-    { id: 'functions', label: 'Functions' },
+    { id: 'functions', label: t('instance.catalog.tabs.functions') },
     {
       id: 'security-definer',
       label: (
         <>
-          Security definer{' '}
-          <TabCount count={unpinnedFunctions} label="without a pinned search_path" />
+          {t('instance.catalog.tabs.securityDefiner')}{' '}
+          <TabCount count={unpinnedFunctions} label={t('instance.catalog.tab.unpinned')} />
         </>
       ),
     },
@@ -1349,8 +1509,11 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       id: 'foreign-keys',
       label: (
         <>
-          Unindexed foreign keys{' '}
-          <TabCount count={foreignKeysQuery.data?.foreign_keys.length ?? 0} label="reported" />
+          {t('instance.catalog.tabs.foreignKeys')}{' '}
+          <TabCount
+            count={foreignKeysQuery.data?.foreign_keys.length ?? 0}
+            label={t('instance.catalog.tab.reported')}
+          />
         </>
       ),
     },
@@ -1358,7 +1521,8 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       id: 'extensions',
       label: (
         <>
-          Extensions <TabCount count={upgradableExtensions} label="with an update" />
+          {t('instance.catalog.tabs.extensions')}{' '}
+          <TabCount count={upgradableExtensions} label={t('instance.catalog.tab.withUpdate')} />
         </>
       ),
     },
@@ -1366,7 +1530,8 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
       id: 'postgis',
       label: (
         <>
-          PostGIS <TabCount count={unindexedSpatial} label="unindexed" />
+          {t('instance.catalog.tabs.postgis')}{' '}
+          <TabCount count={unindexedSpatial} label={t('instance.catalog.tab.unindexed')} />
         </>
       ),
     },
@@ -1377,47 +1542,64 @@ export function CatalogSection({ instanceId }: CatalogSectionProps) {
     <Tabs onValueChange={showView} value={view}>
       <InstancePanel
         id="catalog"
-        title="Schema objects"
+        title={t('instance.catalog.panel.title')}
         captionId="catalog.section"
-        actions={<InstanceViewTabs label="Schema object kinds" views={views} />}
+        actions={
+          <>
+            <InstanceViewTabs label={t('instance.catalog.panel.kinds')} views={views} />
+            <HelpLink
+              anchor="instance-overview#catalog"
+              label={t('instance.catalog.panel.title')}
+            />
+          </>
+        }
       >
         <TabsContent value="triggers">
-          <CatalogTabState query={triggersQuery} label="triggers">
+          <CatalogTabState query={triggersQuery} label={t('instance.catalog.noun.triggers')}>
             {(data) => <TriggersTab response={data} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="sequences">
-          <CatalogTabState query={sequencesQuery} label="sequences">
+          <CatalogTabState query={sequencesQuery} label={t('instance.catalog.noun.sequences')}>
             {(data) => <SequencesTab response={data} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="partitions">
-          <CatalogTabState query={partitionsQuery} label="partitioned tables">
+          <CatalogTabState
+            query={partitionsQuery}
+            label={t('instance.catalog.noun.partitionedTables')}
+          >
             {(data) => <PartitionsTab response={data} now={now} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="functions">
-          <CatalogTabState query={functionsQuery} label="functions">
+          <CatalogTabState query={functionsQuery} label={t('instance.catalog.noun.functions')}>
             {(data) => <FunctionsTab response={data} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="security-definer">
-          <CatalogTabState query={securityDefinerQuery} label="SECURITY DEFINER functions">
+          <CatalogTabState
+            query={securityDefinerQuery}
+            label={t('instance.catalog.noun.securityDefiner')}
+          >
             {(data) => <SecurityDefinerTab response={data} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="foreign-keys">
-          <CatalogTabState query={foreignKeysQuery} label="unindexed foreign keys">
+          <CatalogTabState
+            query={foreignKeysQuery}
+            label={t('instance.catalog.noun.unindexedForeignKeys')}
+          >
             {(data) => <UnindexedForeignKeysTab response={data} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="extensions">
-          <CatalogTabState query={extensionsQuery} label="extensions">
+          <CatalogTabState query={extensionsQuery} label={t('instance.catalog.noun.extensions')}>
             {(data) => <ExtensionsTab response={data} />}
           </CatalogTabState>
         </TabsContent>
         <TabsContent value="postgis">
-          <CatalogTabState query={spatialQuery} label="spatial columns">
+          <CatalogTabState query={spatialQuery} label={t('instance.catalog.noun.spatialColumns')}>
             {(data) => <PostGISTab spatial={data} extensions={extensionsQuery.data} />}
           </CatalogTabState>
         </TabsContent>

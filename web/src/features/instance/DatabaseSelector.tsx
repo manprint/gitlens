@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
+import { useT } from '@/i18n/react'
 import type { Schemas } from '@/api/types'
 import { Section } from '@/components/layout/Section'
 import { EmptyState } from '@/components/state'
@@ -13,11 +14,8 @@ interface DatabaseSelectorProps {
   notMonitoredCount: number
 }
 
-function formatDatabaseCount(count: number): string {
-  return `${count} database${count === 1 ? '' : 's'}`
-}
-
 export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelectorProps) {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   const partition = useMemo(() => partitionDatabases(databases), [databases])
   const fallbackDatabase = defaultDatabase(partition.monitored)
@@ -41,11 +39,11 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
   }
 
   return (
-    <Section title="Database scope" captionId="instance.database-scope">
+    <Section title={t('instance.dbsel.section')} captionId="instance.database-scope">
       {partition.monitored.length > 0 ? (
         <div className="mb-4 flex max-w-xl flex-col gap-1.5">
           <label className="text-sm font-medium" htmlFor="instance-database-selector">
-            Database
+            {t('instance.dbsel.label')}
           </label>
           <NativeSelect
             aria-describedby="instance-database-help"
@@ -61,20 +59,22 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
             ))}
           </NativeSelect>
           <p className="text-muted-foreground text-xs" id="instance-database-help">
-            The default is the most active monitored database when activity is available.
+            {t('instance.dbsel.default')}
           </p>
         </div>
       ) : (
         <EmptyState
-          title="No monitored databases"
-          description="This instance has no database available for per-database metrics."
+          title={t('instance.dbsel.noMonitored')}
+          description={t('instance.dbsel.noMonitoredDescription')}
         />
       )}
 
       {displayedNotMonitoredCount > 0 ? (
         <Callout role="status" variant="warning">
-          <strong>{formatDatabaseCount(displayedNotMonitoredCount)} not monitored.</strong> Hidden
-          databases are a blind spot in this instance’s metrics.
+          <strong>
+            {t('instance.dbsel.countNotMonitored', { count: displayedNotMonitoredCount })}
+          </strong>{' '}
+          {t('instance.dbsel.blindSpot')}
           {[...partition.skipped.entries()].length > 0 ? (
             <ul className="mt-2 list-disc pl-5">
               {[...partition.skipped.entries()].map(([reason, names]) => (
@@ -86,11 +86,13 @@ export function DatabaseSelector({ databases, notMonitoredCount }: DatabaseSelec
           ) : null}
           <p className="mt-2">
             {/* The README is a static file: a router link would render the not-found page. */}
-            Review the <a href="/README.md#agent-configuration">databases.max</a> budget and
+            {t('instance.dbsel.reviewBefore')}{' '}
+            <a href="/README.md#agent-configuration">databases.max</a>{' '}
+            {t('instance.dbsel.reviewMiddle')}
             <a className="ml-1" href="/README.md#agent-configuration">
-              include
+              {t('instance.dbsel.includeLink')}
             </a>{' '}
-            filter configuration.
+            {t('instance.dbsel.reviewAfter')}
           </p>
         </Callout>
       ) : null}

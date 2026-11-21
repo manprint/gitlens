@@ -173,7 +173,7 @@ func TestIntASH011_SignificanceWarning(t *testing.T) {
 	resp := ashResponse{}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	require.NotNil(t, resp.Warning)
-	require.Contains(t, *resp.Warning, "fewer than 60 samples")
+	require.Contains(t, *resp.Warning, "fewer than 60 sampling ticks")
 
 	// Case 2: ingest one more tick to reach 60
 	tsWindow := ts.Add(time.Duration(59) * time.Second)

@@ -89,6 +89,13 @@ make web-coverage-gate
 make web-budget
 ```
 
+Translations only (catalog parity, help skeleton, server texts per language;
+CI runs the same tests inside `make test` and `make web-coverage-gate`):
+
+```sh
+make i18n-check
+```
+
 These commands cover frontend formatting/linting, TypeScript checking, and the
 production asset build. The complete target list, including the integration and
 E2E suites, is under [Running the checks](#running-the-checks-1) further down;
@@ -345,13 +352,15 @@ and index size of the tracked relations); the nav also links the Host section.
 Query, table and index charts are instance-wide and count only the statements
 and relations the agent tracks (`top_n`), sampled every minute (statements) or
 every five minutes (tables and indexes). Every chart states its range and
-query step; empty buckets stay gaps, and a chart with too many of them for
-dashed markers names how many gaps or counter resets it holds.
+query step; empty buckets stay gaps (no sample, or a counter reset) with no
+marker on the chart, and the range line of a counter chart names how many
+gaps it holds.
 
 The **Host** section (`web/src/features/instance/HostCharts.tsx`) charts the
-agent's host readings over the selected range, sharing pointer and zoom:
-**CPU used (%)**, **Load average** (1, 5 and 15 minutes, with the CPU count
-marked), **Memory** and **Swap** (bytes), and **Filesystem** (used bytes and
+agent's host readings over the selected range, each with its own pointer and
+zoom: **CPU used (%)**, **Load average** (1, 5 and 15 minutes; compare it with
+the CPU count of the host readings), **Memory** and **Swap** (bytes), and
+**Filesystem** (used bytes and
 free %, of the PostgreSQL data directory). Filesystem needs the data directory
 mounted read-only at the same path in the agent container; without it a note
 replaces the chart. A host with no swap shows a note instead of the Swap chart.
@@ -518,7 +527,7 @@ Settings has seven tabs, in this order. `?tab=` in the URL names the open tab
 | Tab | Holds |
 |-----|-------|
 | Inventory | instances, permission tiers and available actions, agents, databases by instance (read-only) |
-| Preferences | theme, default time range, refresh interval and table page size of this browser |
+| Preferences | theme, default time range, refresh interval, table page size, time zone and language of this browser |
 | Data retention | days of history kept per metrics family |
 | Advisor rules | rule on/off switches and the two observation windows |
 | Notifications | state of the Slack, generic webhook and Google Chat channels, a write-only URL per channel, and a test send |
@@ -538,7 +547,18 @@ keep their faster refresh. A range
 or page size in a link still wins over the preference. Preferences are stored
 in the browser's local storage (`pglens.preferences`), apply at once to every
 open page, and are not sent to the server: other browsers and other users keep
-their own. Reset to defaults restores all four.
+their own. Reset to defaults restores all six.
+
+Time zone and Language default to the server's (`PGLENS_TZ`, `PGLENS_LANG`,
+read from `/api/v1/session`); This browser follows the browser's own zone or
+languages, or a fixed choice applies. Console times are shown in that zone;
+links, exports and the API stay in UTC. The language changes every page, the
+inline help, and the advisor findings and readiness texts the server renders
+for this browser (header `X-Pglens-Lang`); what is stored stays English, and
+vacuum, WAL, checkpoint, deadlock, ctid, xmin, `pg_*`, setting names and SQL
+stay English in every language. The language of alert notifications is set per
+channel on the Notifications tab (Server default follows `PGLENS_LANG`); the
+test message stays English.
 
 The Data retention tab shows how many days of history each metrics family
 keeps (`metrics`, `metrics_statements`, `metrics_ash`, `metrics_replication`,
@@ -712,6 +732,8 @@ probes and monitoring.
 | `PGLENS_ALERT_INTERVAL` | duration | `30s` | alert evaluation interval |
 | `PGLENS_ADVISOR_INTERVAL` | duration | `15m` | advisor finding evaluation interval |
 | `PGLENS_COMMAND_TTL` | duration | `5m` | lifetime of an on-demand command before expiry |
+| `PGLENS_LANG` | language code | `en` | default language of the console, of the server texts it shows (advisor findings, readiness) and of alert notifications; `it`, `it-IT` and `IT_it` all select Italian, a code with no catalog falls back to English. Languages: `en`, `it` (see [Adding a language](#adding-a-language)) |
+| `PGLENS_TZ` | IANA zone | `UTC` | time zone of notification times and the console's default zone (for example `Europe/Rome`); an unknown zone logs a warning and stays UTC |
 | `PGLENS_ALERT_SLACK_WEBHOOK_URL` | URL | unset | enables Slack notifications (preferred name) |
 | `PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` | path | unset | reads the Slack URL; takes precedence over the inline URL |
 | `PGLENS_SLACK_WEBHOOK_URL[_FILE]` | URL/path | unset | legacy Slack aliases, still accepted |
@@ -720,6 +742,42 @@ probes and monitoring.
 | `PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE` | path | unset | reads the Google Chat URL; takes precedence over the inline URL |
 
 The bootstrap token is a shared secret; this release has no token rotation, no mTLS, and no approval queue. Revocation is supported: `UPDATE agents SET revoked_at = now()` makes the next push return 401.
+
+### Adding a language
+
+A language is one code (`de`, `fr`, …) added in the same change to the console,
+the help, the server and the tests; English defines every key and the others
+follow it.
+
+1. Registry: add `{ "code", "name", "intl", "status" }` to
+   `web/src/i18n/locales.json` (`name` in the language itself, `intl` the BCP 47
+   tag for numbers and dates, `status` `beta` until reviewed, then `stable`).
+2. Console texts: copy `web/src/i18n/messages/en/` to `messages/<code>/` and
+   translate every area file, typed `Translation<typeof en>`; keep keys,
+   `{placeholders}` and ICU plural forms. The catalog loads lazily as chunk
+   `i18n-<code>` (budget 64 KiB gzip, `make web-budget`).
+3. Domain texts: `web/src/i18n/domain/<code>/` (captions, column hints, rule
+   sentences, glossary, units, events), shaped like `domain/it/`.
+4. Inline Help: `web/src/lib/help/topics/<code>/`, one file per topic plus
+   `index.ts`; add the code to `HELP_LANGS` (`web/src/lib/help/types.ts`) and
+   the chapter titles to `catalog.ts`. Keep the English skeleton: section ids,
+   blocks, SQL, `code`, links and `{{ui:key}}` marks. A language without a help
+   folder reads the English guide.
+5. Server: `internal/i18n/locales/<code>.json` (notifications),
+   `advisor_<rules file>.<code>.json` (findings) and `readiness.<code>.json`,
+   same keys and placeholders as English; a decimal-comma language also goes in
+   `decimalComma` (`internal/i18n/i18n.go`). `PGLENS_LANG=<code>` and the
+   notification channel languages accept it once the catalog exists.
+6. Terms: add the language to `docs/i18n/glossary.md`; vacuum, WAL,
+   checkpoint, deadlock, ctid, xmin, `pg_*`, setting names and SQL stay English.
+7. Tests: add cases to `web/src/i18n/testdata/format-cases.json` (run by vitest
+   and by Go), clear `web/node_modules/.vitest-cache` (new catalogs are found by
+   `import.meta.glob`), then run `make i18n-check`, the gates of
+   [Running the checks](#running-the-checks) and `make web-coverage-gate web-budget`.
+   They check key, placeholder and plural parity (I18N-001, `TestCatalogParity`),
+   the help skeleton (I18N-005/006, HELP-001…011) and the literal-text guard
+   (I18N-002). The live spec `web/e2e/i18n_it.spec.ts` (I18N-E2E-001) is the
+   model for a check of the new language on a running stack.
 
 ## On-demand operations
 
@@ -2657,7 +2715,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 
 **Wait-event analysis (ASH):**
 - **Statistical sampling, not exact tracing.** ASH samples once per second, not continuously. Queries shorter than approximately 1 second are under-represented in results. This is the same fundamental trade-off made by Oracle ASH and AWS Performance Insights — acceptable for identifying where the database spends time over hours or days, not suitable for microsecond-level analysis.
-- **Fewer than 60 samples is not statistically meaningful.** When a requested time range contains fewer than 60 total samples across all wait events, the API response includes a `warning` field to alert you that results may be unreliable. This is a built-in guard against drawing conclusions from too-small a sample set.
+- **Fewer than 60 sampling ticks is not statistically meaningful.** When a requested time range contains fewer than 60 sampling ticks (the agent samples once per second, and each tick yields one sample per non-idle backend), the API response includes a `warning` field to alert you that results may be unreliable. This is a built-in guard against drawing conclusions from too-small a sample set.
 - **At most 100 distinct wait keys per 10-second window.** When more than 100 unique combinations of (database, wait_event_type, wait_event, state, query) appear in a single 10-second window, the top 99 by sample count are kept individually and the remainder is folded into an `other` bucket. The total sample count is always conserved exactly (never underestimated), making this a safe operation for producing aggregate statistics.
 
 **Web interface:**

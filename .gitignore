@@ -50,6 +50,7 @@ internal/webui/dist/*
 /web/node_modules/
 /web/coverage/
 /web/*.tsbuildinfo
+web/src/node_modules/
 
 # hypopg and pg_hint_plan sources downloaded by test/pgext/build.sh
 test/pgext/src/

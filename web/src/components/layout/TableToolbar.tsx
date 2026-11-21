@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { TableState, TableStatePatch } from '@/hooks/useTableState'
 import type { FilterOption, FilterSpec } from '@/lib/tableControls'
+import { useT } from '@/i18n/react'
 
 export interface TableToolbarProps<T> {
   /** The table's name, used in the control labels (`Search <table>`, `Filter <table> by …`). */
@@ -42,35 +43,40 @@ export function TableToolbar<T>({
   onClear,
   extra,
 }: TableToolbarProps<T>) {
+  const t = useT()
   const setFilter = (id: string, value: string) =>
     onChange({ filters: { ...state.filters, [id]: value } })
 
   return (
     <div className="flex flex-wrap items-end gap-3 min-[1600px]:gap-x-2">
-      <div role="search" aria-label={`${label} search`} className="relative w-full max-w-xs">
+      <div
+        role="search"
+        aria-label={t('shell.table.searchRegion', { table: label })}
+        className="relative w-full max-w-xs"
+      >
         <Search
           aria-hidden="true"
           className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
         />
         <Input
-          aria-label={searchLabel ?? `Search ${label}`}
+          aria-label={searchLabel ?? t('shell.table.searchTable', { table: label })}
           className="h-8 pl-8 text-sm min-[1600px]:h-7"
           onChange={(event) => onChange({ q: event.target.value })}
-          placeholder="Search"
+          placeholder={t('shell.table.search')}
           type="search"
           value={state.q}
         />
       </div>
 
       {filters.map((spec) => {
-        const name = `Filter ${label} by ${spec.label}`
+        const name = t('shell.table.filterBy', { table: label, column: spec.label })
         const value = state.filters[spec.id] ?? ''
         const choices = options[spec.id] ?? spec.options ?? []
         if (spec.kind === 'min') {
           return (
             <div key={spec.id} className="text-muted-foreground flex flex-col gap-1 text-xs">
               <span aria-hidden="true" className="min-[1600px]:hidden">
-                {spec.label} at least
+                {t('shell.table.atLeast', { column: spec.label })}
               </span>
               <Input
                 aria-label={name}
@@ -129,7 +135,7 @@ export function TableToolbar<T>({
               onChange={(event) => setFilter(spec.id, event.target.value)}
               value={value}
             >
-              <option value="">{`${spec.label}: all`}</option>
+              <option value="">{t('shell.table.all', { column: spec.label })}</option>
               {choices.map((choice) => (
                 <option key={choice.value} value={choice.value}>
                   {choice.label}
@@ -145,11 +151,11 @@ export function TableToolbar<T>({
       {activeFilterCount > 0 ? (
         <div className="flex h-8 items-center gap-2 text-xs min-[1600px]:h-7">
           <span className="text-muted-foreground">
-            {activeFilterCount} {activeFilterCount === 1 ? 'filter' : 'filters'} active
+            {t('shell.table.filtersActive', { count: activeFilterCount })}
           </span>
           <Button onClick={onClear} size="xs" type="button" variant="ghost">
             <X aria-hidden="true" />
-            Clear filters
+            {t('shell.table.clearFilters')}
           </Button>
         </div>
       ) : null}

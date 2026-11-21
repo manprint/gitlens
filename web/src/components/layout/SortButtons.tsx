@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp } from 'lucide-react'
 
 import type { SortDirection } from '@/lib/tableControls'
+import { useT } from '@/i18n/react'
 import { cn } from '@/lib/utils'
 
 export interface SortButtonsProps {
@@ -13,8 +14,8 @@ export interface SortButtonsProps {
 }
 
 const DIRECTIONS = [
-  { dir: 'asc', name: 'ascending', Icon: ArrowUp },
-  { dir: 'desc', name: 'descending', Icon: ArrowDown },
+  { dir: 'asc', name: 'shell.table.sortAscending', Icon: ArrowUp },
+  { dir: 'desc', name: 'shell.table.sortDescending', Icon: ArrowDown },
 ] as const
 
 /**
@@ -22,6 +23,7 @@ const DIRECTIONS = [
  * carries `aria-sort`; pressing the active direction clears the sort.
  */
 export function SortButtons({ label, direction, onChange }: SortButtonsProps) {
+  const t = useT()
   return (
     <span className="inline-flex items-center align-middle">
       {DIRECTIONS.map(({ dir, name, Icon }) => {
@@ -30,7 +32,7 @@ export function SortButtons({ label, direction, onChange }: SortButtonsProps) {
           <button
             key={dir}
             type="button"
-            aria-label={`Sort ${label} ${name}`}
+            aria-label={t(name, { column: label })}
             aria-pressed={active}
             onClick={() => onChange(active ? null : dir)}
             className={cn(

@@ -4,13 +4,31 @@ export const MAX_RANGE_MS = 30 * 24 * 60 * 60 * 1_000
 export const RANGE_PRESETS = {
   '15m': { durationMs: 15 * 60 * 1_000, label: 'Last 15 minutes' },
   '1h': { durationMs: 60 * 60 * 1_000, label: 'Last hour' },
+  '2h': { durationMs: 2 * 60 * 60 * 1_000, label: 'Last 2 hours' },
+  '4h': { durationMs: 4 * 60 * 60 * 1_000, label: 'Last 4 hours' },
   '6h': { durationMs: 6 * 60 * 60 * 1_000, label: 'Last 6 hours' },
+  '8h': { durationMs: 8 * 60 * 60 * 1_000, label: 'Last 8 hours' },
   '24h': { durationMs: 24 * 60 * 60 * 1_000, label: 'Last 24 hours' },
+  '3d': { durationMs: 3 * 24 * 60 * 60 * 1_000, label: 'Last 3 days' },
   '7d': { durationMs: 7 * 24 * 60 * 60 * 1_000, label: 'Last 7 days' },
+  '14d': { durationMs: 14 * 24 * 60 * 60 * 1_000, label: 'Last 14 days' },
+  '30d': { durationMs: 30 * 24 * 60 * 60 * 1_000, label: 'Last 30 days' },
 } as const
 
 export type RangePreset = keyof typeof RANGE_PRESETS
-export const RANGE_PRESET_ORDER: readonly RangePreset[] = ['15m', '1h', '6h', '24h', '7d']
+export const RANGE_PRESET_ORDER: readonly RangePreset[] = [
+  '15m',
+  '1h',
+  '2h',
+  '4h',
+  '6h',
+  '8h',
+  '24h',
+  '3d',
+  '7d',
+  '14d',
+  '30d',
+]
 
 export const STEP_LADDER = [
   { milliseconds: 15_000, value: '15s' },
@@ -214,4 +232,11 @@ export function chooseStep(from: Date, to: Date, maxPoints = 1_000): string {
 
 export function stepMilliseconds(step: string): number {
   return STEP_LADDER.find((candidate) => candidate.value === step)?.milliseconds ?? 0
+}
+
+/** The catalog key of a range's label: its preset, or the custom range. */
+export function rangeLabelKey(
+  range: Pick<RelativeTimeRange, 'kind' | 'preset'> | Pick<AbsoluteTimeRange, 'kind'>,
+): `shell.range.${RangePreset}` | 'shell.range.custom' {
+  return range.kind === 'relative' ? `shell.range.${range.preset}` : 'shell.range.custom'
 }

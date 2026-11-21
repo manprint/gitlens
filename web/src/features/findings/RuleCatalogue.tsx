@@ -7,15 +7,17 @@ import {
   type DataTableToolbar,
 } from '@/components/layout/DataTable'
 import { EmptyState } from '@/components/state'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { Section } from '@/components/layout/Section'
 import { Badge } from '@/components/ui/badge'
+import { useT, type Translate } from '@/i18n/react'
 import { useKeepFocus } from '@/hooks/useKeepFocus'
 import type { AdvisorRule, FindingRecord } from '@/lib/findings'
 import { needsText, ruleText } from '@/lib/ruleText'
 import { NativeSelect } from '@/components/ui/native-select'
 
-import { scopeLabel } from './findingDisplay'
+import { scopeText, severityText } from './findingDisplay'
 
 const permissionTiers: readonly PermTier[] = ['T0', 'T1', 'T2']
 const tierRank: Record<PermTier, number> = { T0: 0, T1: 1, T2: 2 }
@@ -78,12 +80,12 @@ const RULE_TOOLBAR: DataTableToolbar<RuleCatalogueRow> = {
   searchFields: [(row) => row.ruleId, (row) => ruleText(row.ruleId) ?? '', (row) => row.needs],
 }
 
-function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
+function ruleColumns(t: Translate): DataTableProps<RuleCatalogueRow>['columns'] {
   return [
     // One line per rule from 1600 px (D26): the free-text columns truncate.
     {
       accessorKey: 'ruleId',
-      header: 'Rule',
+      header: t('findings.ruleCatalogue.rule'),
       // A disabled rule is not evaluated, so its counts stay at zero (11.4).
       cell: ({ row }) => (
         <>
@@ -95,40 +97,50 @@ function ruleColumns(): DataTableProps<RuleCatalogueRow>['columns'] {
             {row.original.ruleId}
           </span>
           {row.original.enabled ? null : (
-            <Badge className="ml-2" title="Disabled in Settings → Advisor rules" variant="outline">
-              Disabled
+            <Badge
+              className="ml-2"
+              title={t('findings.ruleCatalogue.disabledTitle')}
+              variant="outline"
+            >
+              {t('findings.ruleCatalogue.disabled')}
             </Badge>
           )}
         </>
       ),
       meta: { width: '40%', truncate: true, help: 'rules.rule' as const },
     },
-    { accessorKey: 'severity', header: 'Severity', enableHiding: false, meta: { width: '8rem' } },
+    {
+      accessorKey: 'severity',
+      header: t('findings.table.severity'),
+      enableHiding: false,
+      cell: ({ row }) => severityText(t, row.original.severity),
+      meta: { width: '8rem' },
+    },
     {
       accessorKey: 'scope',
-      header: 'Scope',
+      header: t('findings.ruleCatalogue.scope'),
       enableHiding: false,
-      cell: ({ row }) => scopeLabel(row.original.scope),
+      cell: ({ row }) => scopeText(t, row.original.scope),
       meta: { width: '8rem', help: 'findings.scope' as const },
     },
     {
       accessorKey: 'needs',
-      header: 'Needs',
+      header: t('findings.ruleCatalogue.needs'),
       meta: { truncate: true, help: 'rules.needs' as const },
     },
     {
       accessorKey: 'minTier',
-      header: 'Minimum tier',
+      header: t('findings.ruleCatalogue.minTier'),
       meta: { width: '9.5rem', help: 'settings.permission-tier' as const },
     },
     {
       accessorKey: 'firingInstances',
-      header: 'Firing instances',
+      header: t('findings.ruleCatalogue.firingInstances'),
       meta: { width: '11rem' },
     },
     {
       accessorKey: 'nonEvaluableInstances',
-      header: 'Cannot evaluate',
+      header: t('findings.ruleCatalogue.cannotEvaluate'),
       meta: { width: '13rem' },
     },
   ]
@@ -155,6 +167,7 @@ function filterOptions(values: readonly string[]): string[] {
 }
 
 export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
+  const t = useT()
   const [severity, setSeverity] = useState<FilterValue>('all')
   const [scope, setScope] = useState<FilterValue>('all')
   const [maxTier, setMaxTier] = useState<FilterValue>('all')
@@ -173,71 +186,74 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
         ),
     [findings, maxTier, rules, scope, severity],
   )
-  const columns = useMemo(() => ruleColumns(), [])
+  const columns = useMemo(() => ruleColumns(t), [t])
   const emptyState =
     rules.length === 0 ? (
       <EmptyState
-        description="The live advisor catalogue did not return any rules."
-        title="No advisor rules available"
+        description={t('findings.ruleCatalogue.emptyRulesDescription')}
+        title={t('findings.ruleCatalogue.emptyRulesTitle')}
       />
     ) : (
       <EmptyState
-        description="Try clearing one or more catalogue filters."
-        title="No rules match these filters"
+        description={t('findings.ruleCatalogue.noMatchDescription')}
+        title={t('findings.ruleCatalogue.noMatchTitle')}
       />
     )
 
   const filters = (
     <>
-      <CatalogueFilter label="Rule level">
+      <CatalogueFilter label={t('findings.ruleCatalogue.severityFilter')}>
         <NativeSelect
-          aria-label="Rule level"
+          aria-label={t('findings.ruleCatalogue.severityFilter')}
           className="h-8 px-2 text-sm"
           id="catalogue-severity"
           onChange={(event) => setSeverity(event.target.value)}
           value={severity}
         >
-          <option value="all">All severities</option>
+          <option value="all">{t('findings.ruleCatalogue.allSeverities')}</option>
           {severityOptions.map((value) => (
             <option key={value} value={value}>
-              {value}
+              {severityText(t, value)}
             </option>
           ))}
         </NativeSelect>
       </CatalogueFilter>
-      <CatalogueFilter label="Rule scope">
+      <CatalogueFilter label={t('findings.ruleCatalogue.scopeFilter')}>
         <NativeSelect
-          aria-label="Rule scope"
+          aria-label={t('findings.ruleCatalogue.scopeFilter')}
           className="h-8 px-2 text-sm"
           id="catalogue-scope"
           onChange={(event) => setScope(event.target.value)}
           value={scope}
         >
-          <option value="all">All scopes</option>
+          <option value="all">{t('findings.ruleCatalogue.allScopes')}</option>
           {scopeOptions.map((value) => (
             <option key={value} value={value}>
-              {value}
+              {scopeText(t, value)}
             </option>
           ))}
         </NativeSelect>
       </CatalogueFilter>
-      <CatalogueFilter label="Available at or below">
+      <CatalogueFilter label={t('findings.ruleCatalogue.tierFilter')}>
         <div className="flex items-center gap-1">
           <NativeSelect
-            aria-label="Available at or below"
+            aria-label={t('findings.ruleCatalogue.tierFilter')}
             className="h-8 px-2 text-sm"
             id="catalogue-tier"
             onChange={(event) => setMaxTier(event.target.value)}
             value={maxTier}
           >
-            <option value="all">All permission tiers</option>
+            <option value="all">{t('findings.ruleCatalogue.allTiers')}</option>
             {permissionTiers.map((tier) => (
               <option key={tier} value={tier}>
                 {tier}
               </option>
             ))}
           </NativeSelect>
-          <InfoHint id="findings.catalogue-tier" label="Available at or below filter" />
+          <InfoHint
+            id="findings.catalogue-tier"
+            label={t('findings.ruleCatalogue.tierFilterHint')}
+          />
         </div>
       </CatalogueFilter>
     </>
@@ -253,7 +269,13 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
   )
 
   return (
-    <Section title="Rule catalogue" captionId="findings.rule-catalogue">
+    <Section
+      actions={
+        <HelpLink anchor="findings#rule-catalogue" label={t('findings.ruleCatalogue.title')} />
+      }
+      captionId="findings.rule-catalogue"
+      title={t('findings.ruleCatalogue.title')}
+    >
       {empty ? (
         // The table hides its toolbar without rows, so the filters that
         // emptied it stay reachable here.
@@ -263,7 +285,7 @@ export function RuleCatalogue({ rules, findings }: RuleCatalogueProps) {
         </div>
       ) : (
         <DataTable
-          ariaLabel="Advisor rule catalogue"
+          ariaLabel={t('findings.ruleCatalogue.tableAriaLabel')}
           captionId="findings.rule-catalogue-table"
           tableId="advisor-rule-catalogue"
           toolbar={RULE_TOOLBAR}

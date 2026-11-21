@@ -9,12 +9,14 @@ const mocks = vi.hoisted(() => ({
   instance: vi.fn(),
   locks: vi.fn(),
   activity: vi.fn(),
+  events: vi.fn(() => ({ data: [], isPending: false, isError: false, refetch: vi.fn() })),
 }))
 
 vi.mock('@/api/queries', () => ({
   useInstance: mocks.instance,
   useLocks: mocks.locks,
   useInstanceActivity: mocks.activity,
+  useEvents: mocks.events,
 }))
 
 import { LocksPage } from './BlockingTree'

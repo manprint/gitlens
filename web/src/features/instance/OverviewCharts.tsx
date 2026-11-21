@@ -6,22 +6,21 @@ import { ChartCard, type ChartCardState } from '@/components/charts/ChartCard'
 import { ChartGroup } from '@/components/charts/ChartGroup'
 import {
   buildMetricOption,
-  MAX_RESET_LINES,
   withSecondaryAxis,
   type MetricUnit,
 } from '@/components/charts/metric.options'
 import { TimeSeriesChart, type TimeSeriesTableSeries } from '@/components/charts/TimeSeriesChart'
 import { useTimeRange } from '@/hooks/useTimeRange'
+import { useT } from '@/i18n/react'
 import { stepParam } from '@/lib/chartStep'
 import type { CaptionId } from '@/lib/captions'
-import { countGaps, countResets } from '@/lib/chartTime'
+import { countGaps } from '@/lib/chartTime'
 import { cacheHitRatioSeries, scaleSeries, type MetricSeriesPoint } from '@/lib/metrics'
 import { queryWindowOf, type QueryWindow } from '@/lib/timerange'
 
 import { ChartNav } from './ChartNav'
 import {
   cardStepSeconds,
-  OVERVIEW_CHART_GROUP,
   OVERVIEW_GROUPS,
   OVERVIEW_NAV_LINKS,
   type MetricCardSpec,
@@ -77,10 +76,9 @@ function CardFrame({
   option,
   annotateResets,
 }: CardFrameProps) {
-  const resets = annotateResets ? Math.max(0, ...series.map((item) => countResets(item.points))) : 0
-  // Too many null buckets for dashed lines: name the runs, a long outage is one gap.
-  const gaps =
-    resets > MAX_RESET_LINES ? Math.max(...series.map((item) => countGaps(item.points))) : 0
+  const t = useT()
+  // The chart draws no marker: the range line names the runs, a long outage is one gap.
+  const gaps = annotateResets ? Math.max(0, ...series.map((item) => countGaps(item.points))) : 0
   return (
     <ChartCard
       captionId={captionId}
@@ -90,15 +88,12 @@ function CardFrame({
       title={title}
       {...(unitHint === undefined ? {} : { unitHint })}
       {...(wide ? { wide } : {})}
-      {...(gaps > 0
-        ? { subtitle: gaps === 1 ? '1 gap or counter reset' : `${gaps} gaps or counter resets` }
-        : {})}
+      {...(gaps > 0 ? { subtitle: t('instance.overviewCharts.gaps', { count: gaps }) } : {})}
       {...(failure ? { error: failure.error, onRetry: failure.retry } : {})}
     >
       <TimeSeriesChart
         ariaLabel={title}
         dataTableLabel={`${title} data`}
-        group={OVERVIEW_CHART_GROUP}
         option={option}
         series={series}
       />
@@ -110,10 +105,8 @@ function chartOption(
   series: readonly TimeSeriesTableSeries[],
   units: readonly MetricUnit[],
   stepSeconds: number,
-  annotateResets: boolean,
 ): EChartsOption {
   const option = buildMetricOption(series, {
-    annotateResets,
     stepSeconds,
     ...(units[0] === undefined ? {} : { unit: units[0] }),
   })
@@ -143,6 +136,7 @@ function MetricChartCard({
   range: Range
   window: QueryWindow
 }) {
+  const t = useT()
   const stepSeconds = cardStepSeconds(card, range.from, range.to)
   const step = stepParam(stepSeconds)
   const queries = useQueryMetricsList(
@@ -155,7 +149,7 @@ function MetricChartCard({
     window,
   )
   const lines = card.metrics.map((line, index) => ({
-    name: line.label,
+    name: t(line.labelKey),
     points: queries[index] ? pointsOf(queries[index], card.perStep ? stepSeconds : undefined) : [],
     unit: line.unit ?? card.unit,
   }))
@@ -163,7 +157,7 @@ function MetricChartCard({
     card.derive === 'cache-hit-ratio'
       ? [
           {
-            name: card.title,
+            name: t(card.titleKey),
             points: cacheHitRatioSeries(lines[0]?.points ?? [], lines[1]?.points ?? []),
             unit: card.unit,
           },
@@ -181,14 +175,13 @@ function MetricChartCard({
         series,
         derived.map(({ unit }) => unit),
         stepSeconds,
-        annotateResets,
       )}
       range={range}
       series={series}
       state={cardState(queries, series)}
       stepSeconds={stepSeconds}
-      title={card.title}
-      unitHint={card.unitHint}
+      title={t(card.titleKey)}
+      unitHint={card.unitHintKey === undefined ? undefined : t(card.unitHintKey)}
       wide={card.wide}
     />
   )
@@ -205,6 +198,7 @@ function WorkloadChartCard({
   range: Range
   window: QueryWindow
 }) {
+  const t = useT()
   const requestedStep = cardStepSeconds(card, range.from, range.to)
   const query = useWorkloadSeries(
     instanceId,
@@ -217,8 +211,8 @@ function WorkloadChartCard({
   )
   // The server may raise the step (source sampling, 1000-bucket cap).
   const stepSeconds = query.data?.step_seconds ?? requestedStep
-  const series = card.series.map(({ series: name, label }) => ({
-    name: label,
+  const series = card.series.map(({ series: name, labelKey }) => ({
+    name: t(labelKey),
     points: (query.data?.series.find((item) => item.name === name)?.points ?? []).map(
       ({ ts, value }) => ({ ts, value: value ?? null }),
     ),
@@ -238,38 +232,37 @@ function WorkloadChartCard({
         series,
         card.series.map(({ unit }) => unit ?? card.unit),
         stepSeconds,
-        annotateResets,
       )}
       range={range}
       series={series}
       state={cardState([query], series)}
       stepSeconds={stepSeconds}
-      title={card.title}
-      unitHint={card.unitHint}
+      title={t(card.titleKey)}
+      unitHint={card.unitHintKey === undefined ? undefined : t(card.unitHintKey)}
       wide={card.wide}
     />
   )
 }
 
 /**
- * The Overview charts below the summary tiles: a separator, the sticky
- * anchor nav, then one group per subject (D4).
+ * The Overview charts below the summary tiles card: the sticky anchor nav,
+ * then one card per subject (D4), spaced like the other cards of the page.
  */
 export function OverviewCharts({ database, instanceId }: OverviewChartsProps) {
+  const t = useT()
   const { range } = useTimeRange()
   const window = queryWindowOf(range)
 
   return (
-    <div className="mt-12" data-testid="overview-charts">
-      <hr className="border-border mb-6" />
+    <div className="space-y-8 min-[1600px]:space-y-4" data-testid="overview-charts">
       <ChartNav links={OVERVIEW_NAV_LINKS} />
-      {OVERVIEW_GROUPS.map((group, index) => (
+      {OVERVIEW_GROUPS.map((group) => (
         <ChartGroup
-          className={index === 0 ? 'mt-6 scroll-mt-32' : 'mt-10 scroll-mt-32'}
-          description={group.description}
+          className="scroll-mt-32"
+          captionId={group.captionId}
           id={group.id}
           key={group.id}
-          title={group.title}
+          title={t(group.titleKey)}
         >
           {group.cards.map((card) =>
             card.source === 'metrics' ? (

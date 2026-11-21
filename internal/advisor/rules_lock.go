@@ -1,9 +1,10 @@
 package advisor
 
 import (
-	"fmt"
 	"slices"
 	"time"
+
+	"github.com/manprint/pglens/internal/i18n"
 )
 
 // lockLongWait is the wait from which a blocked session is reported. A
@@ -37,13 +38,12 @@ func init() {
 		}
 		root := lockRootBlocker(sample, waiter.PID)
 		wait := time.Duration(waiter.WaitDuration * float64(time.Second))
-		return []Finding{{RuleID: id, Severity: SeverityWarning, State: StateOpen, Scope: ScopeInstance,
-			Title: fmt.Sprintf("Session %d has waited %s for a lock", waiter.PID, formatLockWait(wait)),
-			Detail: fmt.Sprintf("Session %d has waited %s. Its blocking chain reaches session %d, and the sessions queued behind it wait too, so a wait this long holds up every session in the tree. The lock sample reports waits of %s or more.",
-				waiter.PID, formatLockWait(wait), root, formatLockWait(lockLongWait)),
-			Remediation: fmt.Sprintf("Open the Locks page and look at session %d: its state and transaction age show whether it is idle in transaction or still working. If its transaction can end, ask its owner to end it. If the work can be lost, cancel or terminate it there, and the waiting session proceeds.", root),
-			Evidence:    map[string]any{"waiting_pid": waiter.PID, "root_blocker_pid": root, "wait_seconds": waiter.WaitDuration},
-		}}
+		waitMinutes, waitSeconds := lockWaitParts(wait)
+		minMinutes, minSeconds := lockWaitParts(lockLongWait)
+		return []Finding{Finding{RuleID: id, Severity: SeverityWarning, State: StateOpen, Scope: ScopeInstance,
+			Evidence: map[string]any{"waiting_pid": waiter.PID, "root_blocker_pid": root, "wait_seconds": waiter.WaitDuration},
+		}.say("lock.long_wait", i18n.Args{"waiting_pid": waiter.PID, "root_pid": root,
+			"wait_minutes": waitMinutes, "wait_seconds": waitSeconds, "min_minutes": minMinutes, "min_seconds": minSeconds})}
 	}}})
 }
 
@@ -86,11 +86,9 @@ func sortedPIDs(pids []int32) []int32 {
 	return out
 }
 
-// formatLockWait renders a wait in whole seconds, or minutes and seconds.
-func formatLockWait(d time.Duration) string {
+// lockWaitParts splits a wait into the whole minutes and seconds the lock
+// messages name; the minutes are zero under a minute.
+func lockWaitParts(d time.Duration) (minutes, seconds int) {
 	whole := int(d.Seconds())
-	if whole < 60 {
-		return plural(whole, "second")
-	}
-	return plural(whole/60, "minute") + " " + plural(whole%60, "second")
+	return whole / 60, whole % 60
 }

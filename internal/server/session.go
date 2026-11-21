@@ -272,14 +272,19 @@ func registerSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore, limi
 					writeJSON(w, http.StatusOK, map[string]any{
 						"authenticated": true,
 						"expires_at":    expiresAt.Format(time.RFC3339Nano),
+						"time_zone":     consoleTimeZone(cfg),
+						"language":      consoleLanguage(cfg),
 					})
 					return
 				}
 			}
 		}
+		// The sign-in page reads the defaults too, before any session exists.
 		writeJSON(w, http.StatusUnauthorized, map[string]any{
 			"authenticated": false,
 			"configured":    cfg.Password != "",
+			"time_zone":     consoleTimeZone(cfg),
+			"language":      consoleLanguage(cfg),
 		})
 	})
 
@@ -292,6 +297,23 @@ func registerSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore, limi
 		http.SetCookie(w, sessionCookie(cfg, req, "", -1))
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+// consoleTimeZone is the zone the console shows times in unless the operator
+// picks another in Settings › Preferences.
+func consoleTimeZone(cfg UIConfig) string {
+	if cfg.TimeZone == "" {
+		return "UTC"
+	}
+	return cfg.TimeZone
+}
+
+// consoleLanguage is the console's default language.
+func consoleLanguage(cfg UIConfig) string {
+	if cfg.Language == "" {
+		return "en"
+	}
+	return cfg.Language
 }
 
 // loginLimiter refuses sign-ins that exceed a client address's attempt budget

@@ -1,6 +1,7 @@
+import { activeIntl } from '@/i18n/store'
 import { localizedNumber, UNKNOWN } from './shared'
 
-export function formatDuration(seconds: number | null, locale = 'en-US'): string {
+export function formatDuration(seconds: number | null, locale = activeIntl()): string {
   if (seconds === null || !Number.isFinite(seconds)) return UNKNOWN
   if (seconds === 0) return '0s'
 

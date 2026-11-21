@@ -1,9 +1,14 @@
 import type { ReactElement, ReactNode, ComponentType } from 'react'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, type RenderResult } from '@testing-library/react'
+import { render, type RenderOptions, type RenderResult } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router-dom'
+import {
+  createMemoryRouter,
+  MemoryRouter,
+  RouterProvider,
+  type RouteObject,
+} from 'react-router-dom'
 import { vi } from 'vitest'
 
 import { routes as applicationRoutes } from '@/routes'
@@ -45,7 +50,8 @@ function createTestQueryClient() {
   })
 }
 
-function renderRoutes(
+/** Render the given routes, for a page that reads its route parameters. */
+export function renderRoutes(
   routeObjects: RouteObject[],
   options: RenderWithProvidersOptions,
 ): TestRenderResult {
@@ -80,6 +86,17 @@ export function renderWithProviders(
  */
 export async function preloadLazyRoutes(): Promise<void> {
   await import('@/routes/pages')
+}
+
+/**
+ * Render a component under a memory router only, for one that holds a `Link`
+ * (HelpLink) but no route of its own. `rerender` keeps the same wrapper.
+ */
+export function renderInRouter(
+  ui: ReactElement,
+  options?: Omit<RenderOptions, 'wrapper'>,
+): RenderResult {
+  return render(ui, { wrapper: MemoryRouter, ...options })
 }
 
 /** Render the application's route registry at a controlled in-memory URL. */

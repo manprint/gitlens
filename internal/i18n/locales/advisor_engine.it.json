@@ -1,0 +1,8 @@
+{
+  "advisor.engine.rule_failed.title": "Regola dell’advisor fallita",
+  "advisor.engine.rule_failed.detail": "la valutazione della regola è andata in panic",
+  "advisor.engine.tier_unavailable.title": "Livello di permessi insufficiente",
+  "advisor.engine.tier_unavailable.detail": "la regola dell’advisor richiede un livello di permessi più alto",
+  "advisor.engine.input_unavailable.title": "Input dell’advisor non disponibile",
+  "advisor.engine.input_unavailable.detail": "l’input richiesto dall’advisor non è disponibile: {reason}"
+}

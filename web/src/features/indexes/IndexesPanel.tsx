@@ -5,6 +5,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useAdvisorWindows } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { CopyButton } from '@/components/layout/CopyButton'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { SqlText } from '@/components/layout/SqlText'
@@ -14,15 +15,9 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
 import { useFocusMissing } from '@/hooks/useSearch'
+import { useT, type Translate } from '@/i18n/react'
 import type { CaptionId } from '@/lib/captions'
-import {
-  formatBytes,
-  formatCount,
-  formatCountOf,
-  formatPercent,
-  formatRate,
-  formatRelative,
-} from '@/lib/format'
+import { formatBytes, formatCount, formatPercent, formatRate, formatRelative } from '@/lib/format'
 import {
   foreignKeyGaps,
   groupByTable,
@@ -38,9 +33,10 @@ import {
 } from '@/lib/indexAnalysis'
 import { UNUSED_INDEX_MIN_BYTES, windowPhrase } from '@/lib/indexCleanup'
 import { summariseColumns } from '@/lib/indexDefinition'
+import { FLAG_GUIDE, flagTitle, guideText, type FlagLabel } from '@/lib/indexGuide'
 
 import { IndexDetail } from './IndexDetail'
-import { NO_INDEX_STATS } from './emptyText'
+import { noIndexStats } from './emptyText'
 import { CELL_BADGE, IndexPanel, PanelNote, type PanelStat } from './IndexPanel'
 import {
   DEFAULT_INDEX_VIEW,
@@ -53,100 +49,131 @@ import {
 type Finding = Schemas['Finding']
 
 /** Kinds of an index for the Kind filter: a partial unique index is both unique and partial. */
-const INDEX_KINDS: readonly {
+function indexKinds(t: Translate): readonly {
   value: string
   label: string
   matches: (row: IndexRow) => boolean
-}[] = [
-  { value: 'primary', label: 'Primary', matches: (row) => row.primary },
-  { value: 'unique', label: 'Unique', matches: (row) => row.unique && !row.primary },
-  { value: 'partial', label: 'Partial', matches: (row) => row.parsed.predicate !== null },
-  {
-    value: 'plain',
-    label: 'Plain',
-    matches: (row) => !row.unique && !row.primary && row.parsed.predicate === null,
-  },
-]
+}[] {
+  return [
+    { value: 'primary', label: t('indexes.panel.kindPrimary'), matches: (row) => row.primary },
+    {
+      value: 'unique',
+      label: t('indexes.panel.kindUnique'),
+      matches: (row) => row.unique && !row.primary,
+    },
+    {
+      value: 'partial',
+      label: t('indexes.panel.kindPartial'),
+      matches: (row) => row.parsed.predicate !== null,
+    },
+    {
+      value: 'plain',
+      label: t('indexes.panel.kindPlain'),
+      matches: (row) => !row.unique && !row.primary && row.parsed.predicate === null,
+    },
+  ]
+}
 
-const ADVISOR_FLAGS: readonly { value: RowFilter; label: string }[] = [
-  { value: 'attention', label: 'Needs attention' },
-  { value: 'unused', label: 'Unused candidates' },
-  { value: 'duplicate', label: 'Duplicate / redundant' },
-]
+function advisorFlagOptions(t: Translate): readonly { value: RowFilter; label: string }[] {
+  return [
+    { value: 'attention', label: t('indexes.panel.advisorNeedsAttention') },
+    { value: 'unused', label: t('indexes.panel.advisorUnused') },
+    { value: 'duplicate', label: t('indexes.panel.advisorDuplicate') },
+  ]
+}
 
 // The page's Database select scopes the rows already: no database filter (tables inventory).
-const INDEX_TOOLBAR: TableToolbarSpec<IndexRow> = {
-  searchLabel: 'Search indexes',
-  searchFields: [
-    (row) => row.name,
-    (row) => row.table,
-    (row) => row.schema,
-    (row) => row.datname,
-    (row) => row.parsed.method,
-    (row) => row.parsed.columns.map((column) => column.text).join(', '),
-    (row) => row.parsed.include.map((column) => column.text).join(', '),
-    (row) => row.definition,
-    // The advisor's reason: the title of each finding the index carries.
-    (row) =>
-      [row.unusedFinding, row.redundantFinding, row.invalidFinding, row.divergenceFinding]
-        .map((finding) => finding?.title ?? '')
-        .join(' '),
-  ],
-  filters: [
-    {
-      id: 'state',
-      label: 'State',
-      kind: 'select',
-      options: [
-        { value: 'valid', label: 'Valid' },
-        { value: 'invalid', label: 'Invalid' },
-      ],
-      accessor: (row) => (matchesFilter(row, 'invalid') ? 'invalid' : 'valid'),
-    },
-    {
-      id: 'kind',
-      label: 'Kind',
-      kind: 'select',
-      options: INDEX_KINDS.map(({ value, label }) => ({ value, label })),
-      accessor: (row) => INDEX_KINDS.find((kind) => kind.matches(row))?.value,
-      predicate: (row, value) =>
-        INDEX_KINDS.find((kind) => kind.value === value)?.matches(row) ?? false,
-    },
-    {
-      id: 'advisor',
-      label: 'Advisor flag',
-      kind: 'select',
-      options: ADVISOR_FLAGS,
-      accessor: () => null,
-      predicate: (row, value) => matchesFilter(row, value as RowFilter),
-    },
-  ],
+function indexToolbarSpec(t: Translate): TableToolbarSpec<IndexRow> {
+  const kinds = indexKinds(t)
+  return {
+    searchLabel: t('indexes.panel.searchIndexes'),
+    searchFields: [
+      (row) => row.name,
+      (row) => row.table,
+      (row) => row.schema,
+      (row) => row.datname,
+      (row) => row.parsed.method,
+      (row) => row.parsed.columns.map((column) => column.text).join(', '),
+      (row) => row.parsed.include.map((column) => column.text).join(', '),
+      (row) => row.definition,
+      // The advisor's reason: the title of each finding the index carries.
+      (row) =>
+        [row.unusedFinding, row.redundantFinding, row.invalidFinding, row.divergenceFinding]
+          .map((finding) => finding?.title ?? '')
+          .join(' '),
+    ],
+    filters: [
+      {
+        id: 'state',
+        label: t('indexes.panel.filterState'),
+        kind: 'select',
+        options: [
+          { value: 'valid', label: t('indexes.panel.stateValid') },
+          { value: 'invalid', label: t('indexes.panel.stateInvalid') },
+        ],
+        accessor: (row) => (matchesFilter(row, 'invalid') ? 'invalid' : 'valid'),
+      },
+      {
+        id: 'kind',
+        label: t('indexes.panel.filterKind'),
+        kind: 'select',
+        options: kinds.map(({ value, label }) => ({ value, label })),
+        accessor: (row) => kinds.find((kind) => kind.matches(row))?.value,
+        predicate: (row, value) =>
+          kinds.find((kind) => kind.value === value)?.matches(row) ?? false,
+      },
+      {
+        id: 'advisor',
+        label: t('indexes.panel.filterAdvisor'),
+        kind: 'select',
+        options: advisorFlagOptions(t),
+        accessor: () => null,
+        predicate: (row, value) => matchesFilter(row, value as RowFilter),
+      },
+    ],
+  }
 }
 
-const FINDINGS_TOOLBAR: TableToolbarSpec<Finding> = {
-  searchLabel: 'Search index findings',
-  searchFields: [
-    (finding) => finding.rule_id,
-    (finding) => finding.title,
-    (finding) => finding.object_name,
-    (finding) => finding.datname,
-    (finding) => finding.detail,
-  ],
-  filters: [{ id: 'rule', label: 'Rule', kind: 'select', accessor: (finding) => finding.rule_id }],
+function findingsToolbarSpec(t: Translate): TableToolbarSpec<Finding> {
+  return {
+    searchLabel: t('indexes.panel.searchFindings'),
+    searchFields: [
+      (finding) => finding.rule_id,
+      (finding) => finding.title,
+      (finding) => finding.object_name,
+      (finding) => finding.datname,
+      (finding) => finding.detail,
+    ],
+    filters: [
+      {
+        id: 'rule',
+        label: t('indexes.panel.filterRule'),
+        kind: 'select',
+        accessor: (finding) => finding.rule_id,
+      },
+    ],
+  }
 }
 
-const GAPS_TOOLBAR: TableToolbarSpec<ForeignKeyGap> = {
-  searchLabel: 'Search foreign keys',
-  searchFields: [
-    (gap) => gap.table,
-    (gap) => gap.constraint,
-    (gap) => gap.columns,
-    (gap) => gap.referenced,
-    (gap) => gap.datname,
-  ],
-  filters: [
-    { id: 'severity', label: 'Severity', kind: 'select', accessor: (gap) => gap.finding.severity },
-  ],
+function gapsToolbarSpec(t: Translate): TableToolbarSpec<ForeignKeyGap> {
+  return {
+    searchLabel: t('indexes.panel.searchForeignKeys'),
+    searchFields: [
+      (gap) => gap.table,
+      (gap) => gap.constraint,
+      (gap) => gap.columns,
+      (gap) => gap.referenced,
+      (gap) => gap.datname,
+    ],
+    filters: [
+      {
+        id: 'severity',
+        label: t('indexes.panel.filterSeverity'),
+        kind: 'select',
+        accessor: (gap) => gap.finding.severity,
+      },
+    ],
+  }
 }
 
 type SortKey = 'name' | 'table' | 'bytes' | 'scanRate' | 'lastScan'
@@ -171,6 +198,7 @@ function sortValue(row: IndexRow, key: SortKey): string | number | null {
  * first. From 1600 px every row is one line: widths, and free text truncated (D26).
  */
 function indexColumns(
+  t: Translate,
   showDatabase: boolean,
   now: Date,
   unusedWindow: string,
@@ -178,18 +206,18 @@ function indexColumns(
   return [
     {
       id: 'name',
-      header: 'Index',
+      header: t('indexes.panel.colIndex'),
       sortValue: (row) => sortValue(row, 'name'),
-      className: 'font-medium break-all',
+      className: 'font-medium break-all max-[1599px]:min-w-48',
       width: '16rem',
       truncate: (row) => row.name,
       cell: (row) => row.name,
     },
     {
       id: 'table',
-      header: 'Table',
+      header: t('indexes.panel.colTable'),
       sortValue: (row) => sortValue(row, 'table'),
-      className: 'break-all',
+      className: 'break-all max-[1599px]:min-w-48',
       width: '16rem',
       truncate: (row) => `${showDatabase ? `${row.datname} · ` : ''}${row.schema}.${row.table}`,
       cell: (row) => (
@@ -204,7 +232,7 @@ function indexColumns(
     },
     {
       id: 'columns',
-      header: 'Columns',
+      header: t('indexes.panel.colColumns'),
       truncate: (row) => (row.parsed.columns.length === 0 ? '—' : summariseColumns(row.parsed)),
       cell: (row) => (
         <code className="font-mono text-xs break-words">
@@ -212,36 +240,41 @@ function indexColumns(
         </code>
       ),
     },
-    { id: 'method', header: 'Method', width: '5rem', cell: (row) => row.parsed.method ?? '—' },
+    {
+      id: 'method',
+      header: t('indexes.panel.colMethod'),
+      width: '5rem',
+      cell: (row) => row.parsed.method ?? '—',
+    },
     {
       id: 'flags',
-      header: 'Flags',
+      header: t('indexes.panel.colFlags'),
       help: 'indexes.flags-column',
       width: '15rem',
       cell: (row) => <RowBadges row={row} unusedWindow={unusedWindow} />,
     },
     {
       id: 'bytes',
-      header: 'Size',
+      header: t('indexes.panel.colSize'),
       sortValue: (row) => sortValue(row, 'bytes'),
       firstDirection: 'desc',
       className: 'whitespace-nowrap',
       width: '6rem',
-      cell: (row) => (row.bytes === null ? 'Unknown' : formatBytes(row.bytes)),
+      cell: (row) => (row.bytes === null ? t('indexes.panel.unknown') : formatBytes(row.bytes)),
     },
     {
       id: 'scanRate',
-      header: 'Scans',
+      header: t('indexes.panel.colScans'),
       help: 'indexes.scans',
       sortValue: (row) => sortValue(row, 'scanRate'),
       firstDirection: 'desc',
       className: 'whitespace-nowrap',
       width: '9rem',
-      cell: (row) => scansText(row),
+      cell: (row) => scansText(t, row),
     },
     {
       id: 'cache',
-      header: 'Cache hit',
+      header: t('indexes.panel.colCacheHit'),
       help: 'indexes.cache-hit',
       className: 'whitespace-nowrap',
       width: '6.5rem',
@@ -249,14 +282,14 @@ function indexColumns(
     },
     {
       id: 'lastScan',
-      header: 'Last scan',
+      header: t('indexes.panel.colLastScan'),
       help: 'indexes.last-scan',
       sortValue: (row) => sortValue(row, 'lastScan'),
       firstDirection: 'desc',
       className: 'whitespace-nowrap',
       width: '12rem',
-      truncate: (row) => lastScanText(row, now),
-      cell: (row) => lastScanText(row, now),
+      truncate: (row) => lastScanText(t, row, now),
+      cell: (row) => lastScanText(t, row, now),
     },
   ]
 }
@@ -266,19 +299,23 @@ function indexColumns(
  * scanned since the reset (the Flags column says "never scanned"), so say that
  * here instead of "Unknown".
  */
-function scansText(row: IndexRow): string {
+function scansText(t: Translate, row: IndexRow): string {
   if (row.scanRate !== null) return formatRate(row.scanRate)
-  return row.lastScanStatus === 'never_since_reset' ? 'None since reset' : 'Unknown'
+  return row.lastScanStatus === 'never_since_reset'
+    ? t('indexes.panel.scansNoneSinceReset')
+    : t('indexes.panel.unknown')
 }
 
-function lastScanText(row: IndexRow, now: Date): string {
+function lastScanText(t: Translate, row: IndexRow, now: Date): string {
   switch (row.lastScanStatus) {
     case 'scanned':
-      return row.lastScanAt === null ? 'Unknown' : formatRelative(row.lastScanAt, now)
+      return row.lastScanAt === null
+        ? t('indexes.panel.unknown')
+        : formatRelative(row.lastScanAt, now)
     case 'never_since_reset':
-      return 'Never since stats reset'
+      return t('indexes.panel.lastScanNever')
     case 'not_available':
-      return 'Not available'
+      return t('indexes.panel.notAvailable')
   }
 }
 
@@ -288,8 +325,8 @@ function lastScanText(row: IndexRow, now: Date): string {
  * from the statistics alone (no scan since a reset at least that old, or a
  * last scan older than the window), without waiting for pglens history.
  */
-function unusedRuleText(unusedWindow: string): string {
-  return `The advisor calls an index unused after ${unusedWindow} without a scan: from the pglens history or, on PostgreSQL 16 and later, from the statistics when there is no scan since a reset that long ago or the last scan is older.`
+function unusedRuleText(t: Translate, unusedWindow: string): string {
+  return t('indexes.panel.unusedRule', { window: unusedWindow })
 }
 
 /**
@@ -297,12 +334,15 @@ function unusedRuleText(unusedWindow: string): string {
  * UNUSED_INDEX_MIN_BYTES or less (nor a primary key or a unique index, which
  * get no such flag), so for a small one the hint promises no verdict.
  */
-function neverScannedHint(row: IndexRow, unusedWindow: string): string {
-  const counter = 'No scan since the statistics were reset.'
+function neverScannedHint(t: Translate, row: IndexRow, unusedWindow: string): string {
+  const counter = t('indexes.panel.neverCounter')
   if (row.bytes !== null && row.bytes <= UNUSED_INDEX_MIN_BYTES) {
-    return `${counter} The advisor never judges indexes of ${formatBytes(UNUSED_INDEX_MIN_BYTES)} or less, so this is the raw counter, not a verdict.`
+    const small = t('indexes.panel.neverSmallIndex', {
+      size: formatBytes(UNUSED_INDEX_MIN_BYTES),
+    })
+    return `${counter} ${small}`
   }
-  return `${counter} ${unusedRuleText(unusedWindow)}`
+  return `${counter} ${unusedRuleText(t, unusedWindow)}`
 }
 
 /**
@@ -310,40 +350,39 @@ function neverScannedHint(row: IndexRow, unusedWindow: string): string {
  * advisor's reason (`internal/advisor/rules_relation.go`); a reason this page
  * does not know is shown as the advisor wrote it.
  */
-function blockedReasonText(reason: string): string {
+function blockedReasonText(t: Translate, reason: string): string {
   if (reason.includes('longer than the kept index metrics history')) {
-    return `The ${reason.replace(/^the /, '')}: the pglens history never covers the window, so waiting does not settle the check, though on PostgreSQL 16 and later the statistics still can. Shorten the window or keep index metrics longer.`
+    return t('indexes.panel.blockedWindow', { reason: reason.replace(/^the /, '') })
   }
-  if (reason.startsWith('standby scans unknown')) {
-    return 'Standby scans unknown: no standby of the cluster has sent a snapshot, so a scan there cannot be ruled out. The check concludes once the standbys report.'
-  }
-  if (reason === '') return 'The advisor gave no reason.'
+  if (reason.startsWith('standby scans unknown')) return t('indexes.panel.blockedStandby')
+  if (reason === '') return t('indexes.panel.blockedNoReason')
   return `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`
 }
 
+interface RowFlag {
+  label: FlagLabel
+  variant: BadgeVariant
+  /** What the flag means for this index and what to do, for the badge tooltip. */
+  title: string
+}
+
 /**
- * The flags of an index, by name, for the badge strip's `title`;
- * `unusedWindow` names the unused-index window in the "never scanned" hint.
+ * The flags of an index, problems first so that they stay visible on the one
+ * line the strip has from 1600 px; `unusedWindow` names the unused-index
+ * window in the "never scanned" hint.
  */
-function rowFlags(
-  row: IndexRow,
-  unusedWindow: string,
-): { label: string; variant: BadgeVariant; title?: string }[] {
-  const flags: { label: string; variant: BadgeVariant; title?: string }[] = []
-  if (row.primary) flags.push({ label: 'primary', variant: 'secondary' })
-  if (row.unique && !row.primary) flags.push({ label: 'unique', variant: 'secondary' })
-  if (row.parsed.predicate !== null) flags.push({ label: 'partial', variant: 'outline' })
-  if (row.parsed.columns.some((column) => column.expression)) {
-    flags.push({ label: 'expression', variant: 'outline' })
-  }
-  if (row.parsed.include.length > 0) flags.push({ label: 'include', variant: 'outline' })
-  if (!row.valid || row.invalidFinding !== null) {
-    flags.push({ label: 'invalid', variant: 'destructive' })
-  }
-  if (row.unusedFinding !== null) flags.push({ label: 'unused', variant: 'warning' })
-  if (row.duplicateOf.length > 0) flags.push({ label: 'duplicate', variant: 'warning' })
-  if (row.redundantFinding !== null) flags.push({ label: 'redundant prefix', variant: 'warning' })
-  if (row.divergenceFinding !== null) flags.push({ label: 'diverges', variant: 'warning' })
+function rowFlags(t: Translate, row: IndexRow, unusedWindow: string): RowFlag[] {
+  const flag = (label: FlagLabel, variant: BadgeVariant): RowFlag => ({
+    label,
+    variant,
+    title: flagTitle(label),
+  })
+  const flags: RowFlag[] = []
+  if (!row.valid || row.invalidFinding !== null) flags.push(flag('invalid', 'destructive'))
+  if (row.unusedFinding !== null) flags.push(flag('unused', 'warning'))
+  if (row.duplicateOf.length > 0) flags.push(flag('duplicate', 'warning'))
+  if (row.redundantFinding !== null) flags.push(flag('redundant prefix', 'warning'))
+  if (row.divergenceFinding !== null) flags.push(flag('diverges', 'warning'))
   if (
     row.unusedFinding === null &&
     row.lastScanStatus === 'never_since_reset' &&
@@ -351,41 +390,130 @@ function rowFlags(
     !row.unique
   ) {
     flags.push({
+      // FlagLabel token, not display text: the badge shows flagText().
+      // eslint-disable-next-line pglens/no-literal-string
       label: 'never scanned',
       variant: 'outline',
-      title: neverScannedHint(row, unusedWindow),
+      title: `${neverScannedHint(t, row, unusedWindow)} ${t('indexes.panel.whatToDo')} ${guideText(FLAG_GUIDE['never scanned'].action)}`,
     })
   }
+  if (row.primary) flags.push(flag('primary', 'secondary'))
+  if (row.unique && !row.primary) flags.push(flag('unique', 'secondary'))
+  if (row.parsed.predicate !== null) flags.push(flag('partial', 'outline'))
+  if (row.parsed.columns.some((column) => column.expression))
+    flags.push(flag('expression', 'outline'))
+  if (row.parsed.include.length > 0) flags.push(flag('include', 'outline'))
   return flags
+}
+
+function flagText(t: Translate, label: FlagLabel): string {
+  switch (label) {
+    case 'invalid':
+      return t('indexes.panel.flagInvalid')
+    case 'unused':
+      return t('indexes.panel.flagUnused')
+    case 'duplicate':
+      return t('indexes.panel.flagDuplicate')
+    case 'redundant prefix':
+      return t('indexes.panel.flagRedundantPrefix')
+    case 'diverges':
+      return t('indexes.panel.flagDiverges')
+    case 'never scanned':
+      return t('indexes.panel.flagNeverScanned')
+    case 'primary':
+      return t('indexes.panel.flagPrimary')
+    case 'unique':
+      return t('indexes.panel.flagUnique')
+    case 'partial':
+      return t('indexes.panel.flagPartial')
+    case 'expression':
+      return t('indexes.panel.flagExpression')
+    case 'include':
+      return t('indexes.panel.flagInclude')
+  }
+}
+
+function severityText(t: Translate, severity: string): string {
+  if (severity === 'critical') return t('indexes.panel.severityCritical')
+  if (severity === 'warning') return t('indexes.panel.severityWarning')
+  if (severity === 'info') return t('indexes.panel.severityInfo')
+  return severity
 }
 
 type BadgeVariant = 'secondary' | 'outline' | 'destructive' | 'warning'
 
 /** The badges wrap below 1600 px; from 1600 px they stay on one line, the list in the `title`. */
 function RowBadges({ row, unusedWindow }: { row: IndexRow; unusedWindow: string }) {
-  const flags = rowFlags(row, unusedWindow)
+  const t = useT()
+  const flags = rowFlags(t, row, unusedWindow)
   return (
     <div
       // From 1600 px one line high: a badge that does not fit wraps out of sight whole,
       // never cut in half; the title lists every flag.
       className="flex flex-wrap gap-1 min-[1600px]:max-h-5 min-[1600px]:overflow-hidden"
-      title={flags.length === 0 ? undefined : flags.map((flag) => flag.label).join(', ')}
+      title={
+        flags.length === 0
+          ? undefined
+          : t('indexes.panel.flagsTitle', {
+              flags: flags.map((flag) => flagText(t, flag.label)).join(', '),
+            })
+      }
     >
       {flags.map((flag) => (
-        <Badge
-          key={flag.label}
-          className={CELL_BADGE}
-          variant={flag.variant}
-          {...(flag.title === undefined ? {} : { title: flag.title })}
-        >
-          {flag.label}
+        <Badge key={flag.label} className={CELL_BADGE} title={flag.title} variant={flag.variant}>
+          {flagText(t, flag.label)}
         </Badge>
       ))}
     </div>
   )
 }
 
-function Detail({ row, instanceId }: { row: IndexRow; instanceId: string }) {
+/** Every flag of the row with its meaning and the action, in the row details. */
+function FlagNotes({ row, unusedWindow }: { row: IndexRow; unusedWindow: string }) {
+  const t = useT()
+  const flags = rowFlags(t, row, unusedWindow)
+  if (flags.length === 0) return null
+  return (
+    <section aria-label={t('indexes.panel.flagsSection')} className="space-y-2">
+      <div className="flex items-center gap-3">
+        <h4 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+          {t('indexes.panel.flagsSection')}
+        </h4>
+        <HelpLink anchor="indexes#flags" label={t('indexes.panel.indexFlags')} />
+      </div>
+      <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+        {flags.map((flag) => (
+          <div key={flag.label} className="contents">
+            <dt>
+              <Badge className={CELL_BADGE} variant={flag.variant}>
+                {flagText(t, flag.label)}
+              </Badge>
+            </dt>
+            <dd>
+              {flag.label === 'never scanned'
+                ? neverScannedHint(t, row, unusedWindow)
+                : guideText(FLAG_GUIDE[flag.label].meaning)}{' '}
+              <span className="font-medium">{t('indexes.panel.whatToDo')}</span>{' '}
+              {guideText(FLAG_GUIDE[flag.label].action)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+function Detail({
+  row,
+  instanceId,
+  unusedWindow,
+}: {
+  row: IndexRow
+  instanceId: string
+  unusedWindow: string
+}) {
+  const t = useT()
+
   const findings = [
     row.invalidFinding,
     row.unusedFinding,
@@ -397,10 +525,12 @@ function Detail({ row, instanceId }: { row: IndexRow; instanceId: string }) {
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-2">
           <h4 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            Columns
+            {t('indexes.panel.colColumns')}
           </h4>
           {row.parsed.columns.length === 0 ? (
-            <p className="text-muted-foreground text-sm">The definition could not be read.</p>
+            <p className="text-muted-foreground text-sm">
+              {t('indexes.panel.definitionUnreadable')}
+            </p>
           ) : (
             <ol className="space-y-1 text-sm">
               {row.parsed.columns.map((column, index) => (
@@ -409,7 +539,9 @@ function Detail({ row, instanceId }: { row: IndexRow; instanceId: string }) {
                     {index + 1}
                   </span>
                   <code className="font-mono">{column.text}</code>
-                  {column.expression ? <Badge variant="outline">expression</Badge> : null}
+                  {column.expression ? (
+                    <Badge variant="outline">{t('indexes.panel.flagExpression')}</Badge>
+                  ) : null}
                   {column.modifiers ? (
                     <span className="text-muted-foreground text-xs">{column.modifiers}</span>
                   ) : null}
@@ -419,7 +551,7 @@ function Detail({ row, instanceId }: { row: IndexRow; instanceId: string }) {
           )}
           {row.parsed.include.length > 0 ? (
             <p className="text-sm">
-              <span className="text-muted-foreground">Included: </span>
+              <span className="text-muted-foreground">{t('indexes.panel.included')} </span>
               <code className="font-mono">
                 {row.parsed.include.map((column) => column.text).join(', ')}
               </code>
@@ -427,31 +559,39 @@ function Detail({ row, instanceId }: { row: IndexRow; instanceId: string }) {
           ) : null}
         </div>
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-          <dt className="text-muted-foreground">Access method</dt>
-          <dd>{row.parsed.method ?? 'unknown'}</dd>
-          <dt className="text-muted-foreground">Predicate</dt>
+          <dt className="text-muted-foreground">{t('indexes.panel.accessMethod')}</dt>
+          <dd>{row.parsed.method ?? t('indexes.panel.unknownMethod')}</dd>
+          <dt className="text-muted-foreground">{t('indexes.panel.predicate')}</dt>
           <dd>
             {row.parsed.predicate === null ? (
-              'none (covers every row)'
+              t('indexes.panel.noneCoversEveryRow')
             ) : (
               <code className="font-mono">{row.parsed.predicate}</code>
             )}
           </dd>
           {row.parsed.options ? (
             <>
-              <dt className="text-muted-foreground">Storage options</dt>
+              <dt className="text-muted-foreground">{t('indexes.panel.storageOptions')}</dt>
               <dd>
                 <code className="font-mono">{row.parsed.options}</code>
               </dd>
             </>
           ) : null}
-          <dt className="text-muted-foreground">Tuples read</dt>
-          <dd>{row.tupleReadRate === null ? 'Unknown' : `${formatRate(row.tupleReadRate)}`}</dd>
-          <dt className="text-muted-foreground">Tuples fetched</dt>
-          <dd>{row.tupleFetchRate === null ? 'Unknown' : `${formatRate(row.tupleFetchRate)}`}</dd>
+          <dt className="text-muted-foreground">{t('indexes.panel.tuplesRead')}</dt>
+          <dd>
+            {row.tupleReadRate === null
+              ? t('indexes.panel.unknown')
+              : `${formatRate(row.tupleReadRate)}`}
+          </dd>
+          <dt className="text-muted-foreground">{t('indexes.panel.tuplesFetched')}</dt>
+          <dd>
+            {row.tupleFetchRate === null
+              ? t('indexes.panel.unknown')
+              : `${formatRate(row.tupleFetchRate)}`}
+          </dd>
           {row.duplicateOf.length > 0 ? (
             <>
-              <dt className="text-muted-foreground">Same definition as</dt>
+              <dt className="text-muted-foreground">{t('indexes.panel.sameDefinitionAs')}</dt>
               <dd>
                 <code className="font-mono">{row.duplicateOf.join(', ')}</code>
               </dd>
@@ -466,10 +606,12 @@ function Detail({ row, instanceId }: { row: IndexRow; instanceId: string }) {
             <SqlText sql={row.definition} />
           </div>
           <div className="flex justify-end border-t px-1.5 py-0.5">
-            <CopyButton subject="index definition" text={row.definition} />
+            <CopyButton subject={t('indexes.panel.indexDefinition')} text={row.definition} />
           </div>
         </div>
       ) : null}
+
+      <FlagNotes row={row} unusedWindow={unusedWindow} />
 
       <IndexDetail instanceId={instanceId} row={row} />
 
@@ -501,6 +643,7 @@ function Breakdown({
   captionId: CaptionId
   entries: readonly { label: string; count: number; bytes: number }[]
 }) {
+  const t = useT()
   return (
     <section
       aria-label={title}
@@ -517,8 +660,11 @@ function Breakdown({
           <li key={entry.label} className="flex items-baseline justify-between gap-3">
             <span className="truncate font-medium">{entry.label}</span>
             <span className="text-muted-foreground shrink-0 tabular-nums">
-              {formatCount(entry.count)} {entry.count === 1 ? 'index' : 'indexes'} ·{' '}
-              {formatBytes(entry.bytes)}
+              {t('indexes.panel.indexCount', {
+                count: entry.count,
+                shown: formatCount(entry.count),
+              })}{' '}
+              · {formatBytes(entry.bytes)}
             </span>
           </li>
         ))}
@@ -527,118 +673,126 @@ function Breakdown({
   )
 }
 
-const FINDING_COLUMNS: readonly SimpleColumn<Finding>[] = [
-  {
-    id: 'rule',
-    header: 'Rule',
-    sortValue: (finding) => finding.rule_id,
-    width: '13rem',
-    cell: (finding) => (
-      <Badge
-        className={CELL_BADGE}
-        variant={finding.severity === 'critical' ? 'destructive' : 'warning'}
-      >
-        {finding.rule_id}
-      </Badge>
-    ),
-  },
-  {
-    id: 'database',
-    header: 'Database',
-    sortValue: (finding) => finding.datname ?? null,
-    width: '9rem',
-    truncate: (finding) => finding.datname ?? '—',
-    cell: (finding) => finding.datname ?? '—',
-  },
-  {
-    id: 'object',
-    header: 'Object',
-    sortValue: (finding) => finding.object_name ?? null,
-    width: '18rem',
-    truncate: (finding) => finding.object_name ?? '—',
-    cell: (finding) => <code className="font-mono text-xs">{finding.object_name ?? '—'}</code>,
-  },
-  {
-    id: 'title',
-    header: 'Finding',
-    className: 'font-medium',
-    truncate: (finding) => finding.title,
-    cell: (finding) => finding.title,
-  },
-]
+function findingColumns(t: Translate): readonly SimpleColumn<Finding>[] {
+  return [
+    {
+      id: 'rule',
+      header: t('indexes.panel.filterRule'),
+      sortValue: (finding) => finding.rule_id,
+      width: '13rem',
+      cell: (finding) => (
+        <Badge
+          className={CELL_BADGE}
+          variant={finding.severity === 'critical' ? 'destructive' : 'warning'}
+        >
+          {finding.rule_id}
+        </Badge>
+      ),
+    },
+    {
+      id: 'database',
+      header: t('indexes.panel.colDatabase'),
+      sortValue: (finding) => finding.datname ?? null,
+      width: '9rem',
+      truncate: (finding) => finding.datname ?? '—',
+      cell: (finding) => finding.datname ?? '—',
+    },
+    {
+      id: 'object',
+      header: t('indexes.panel.colObject'),
+      sortValue: (finding) => finding.object_name ?? null,
+      width: '18rem',
+      truncate: (finding) => finding.object_name ?? '—',
+      cell: (finding) => <code className="font-mono text-xs">{finding.object_name ?? '—'}</code>,
+    },
+    {
+      id: 'title',
+      header: t('indexes.panel.colFinding'),
+      className: 'font-medium',
+      truncate: (finding) => finding.title,
+      cell: (finding) => finding.title,
+    },
+  ]
+}
 
 function FindingDetail({ finding }: { finding: Finding }) {
+  const t = useT()
+
   return (
     <div className="space-y-1 px-4 py-2 text-sm">
       {finding.detail ? <p className="text-muted-foreground">{finding.detail}</p> : null}
       {finding.remediation ? <p>{finding.remediation}</p> : null}
       {!finding.detail && !finding.remediation ? (
-        <p className="text-muted-foreground">The advisor gave no further detail.</p>
+        <p className="text-muted-foreground">{t('indexes.panel.noFurtherDetail')}</p>
       ) : null}
     </div>
   )
 }
 
-const GAP_COLUMNS: readonly SimpleColumn<ForeignKeyGap>[] = [
-  {
-    id: 'severity',
-    header: 'Severity',
-    help: 'indexes.fk-severity-column',
-    sortValue: (gap) => gap.finding.severity,
-    width: '7rem',
-    cell: (gap) => (
-      <Badge
-        className={CELL_BADGE}
-        variant={gap.finding.severity === 'info' ? 'outline' : 'warning'}
-      >
-        {gap.finding.severity}
-      </Badge>
-    ),
-  },
-  {
-    id: 'database',
-    header: 'Database',
-    sortValue: (gap) => gap.datname,
-    width: '9rem',
-    truncate: (gap) => gap.datname || '—',
-    cell: (gap) => gap.datname || '—',
-  },
-  {
-    id: 'table',
-    header: 'Table',
-    sortValue: (gap) => gap.table,
-    width: '16rem',
-    truncate: (gap) => gap.table,
-    cell: (gap) => <code className="font-mono">{gap.table}</code>,
-  },
-  {
-    id: 'columns',
-    header: 'Columns',
-    help: 'indexes.fk-columns',
-    width: '14rem',
-    truncate: (gap) => gap.columns,
-    cell: (gap) => <code className="font-mono text-xs">({gap.columns})</code>,
-  },
-  {
-    id: 'referenced',
-    header: 'References',
-    help: 'indexes.fk-references',
-    sortValue: (gap) => gap.referenced,
-    width: '16rem',
-    truncate: (gap) => gap.referenced,
-    cell: (gap) => gap.referenced,
-  },
-  {
-    id: 'remediation',
-    header: 'Remediation',
-    truncate: (gap) => gap.finding.remediation ?? '',
-    cell: (gap) => <span className="text-muted-foreground">{gap.finding.remediation ?? '—'}</span>,
-  },
-]
+function gapColumns(t: Translate): readonly SimpleColumn<ForeignKeyGap>[] {
+  return [
+    {
+      id: 'severity',
+      header: t('indexes.panel.filterSeverity'),
+      help: 'indexes.fk-severity-column',
+      sortValue: (gap) => gap.finding.severity,
+      width: '7rem',
+      cell: (gap) => (
+        <Badge
+          className={CELL_BADGE}
+          variant={gap.finding.severity === 'info' ? 'outline' : 'warning'}
+        >
+          {severityText(t, gap.finding.severity)}
+        </Badge>
+      ),
+    },
+    {
+      id: 'database',
+      header: t('indexes.panel.colDatabase'),
+      sortValue: (gap) => gap.datname,
+      width: '9rem',
+      truncate: (gap) => gap.datname || '—',
+      cell: (gap) => gap.datname || '—',
+    },
+    {
+      id: 'table',
+      header: t('indexes.panel.colTable'),
+      sortValue: (gap) => gap.table,
+      width: '16rem',
+      truncate: (gap) => gap.table,
+      cell: (gap) => <code className="font-mono">{gap.table}</code>,
+    },
+    {
+      id: 'columns',
+      header: t('indexes.panel.colColumns'),
+      help: 'indexes.fk-columns',
+      width: '14rem',
+      truncate: (gap) => gap.columns,
+      cell: (gap) => <code className="font-mono text-xs">({gap.columns})</code>,
+    },
+    {
+      id: 'referenced',
+      header: t('indexes.panel.colReferences'),
+      help: 'indexes.fk-references',
+      sortValue: (gap) => gap.referenced,
+      width: '16rem',
+      truncate: (gap) => gap.referenced,
+      cell: (gap) => gap.referenced,
+    },
+    {
+      id: 'remediation',
+      header: t('indexes.panel.colRemediation'),
+      truncate: (gap) => gap.finding.remediation ?? '',
+      cell: (gap) => (
+        <span className="text-muted-foreground">{gap.finding.remediation ?? '—'}</span>
+      ),
+    },
+  ]
+}
 
 /** The sentence that gives a tile's figure its noun; a zero says nothing was found (D31). */
-function explained(count: number, what: string): string {
-  return count === 0 ? `none found: ${what}` : what
+function explained(t: Translate, count: number, what: string): string {
+  return count === 0 ? t('indexes.panel.noneFound', { what }) : what
 }
 
 const VIEW_CAPTION: Record<IndexView, CaptionId> = {
@@ -649,11 +803,13 @@ const VIEW_CAPTION: Record<IndexView, CaptionId> = {
 }
 
 /** The badges of a view that need a word of explanation, behind an ⓘ in the header. */
-const VIEW_BADGE_HINT: Record<IndexView, ReactNode> = {
-  inventory: <InfoHint id="indexes.flags" label="index flags" />,
-  summary: null,
-  findings: <InfoHint id="indexes.finding-rule" label="rule badge" />,
-  'foreign-keys': <InfoHint id="indexes.fk-severity" label="foreign key severity" />,
+function viewBadgeHint(t: Translate): Record<IndexView, ReactNode> {
+  return {
+    inventory: <InfoHint id="indexes.flags" label={t('indexes.panel.indexFlags')} />,
+    summary: null,
+    findings: <InfoHint id="indexes.finding-rule" label={t('indexes.panel.ruleBadge')} />,
+    'foreign-keys': <InfoHint id="indexes.fk-severity" label={t('indexes.panel.fkSeverity')} />,
+  }
 }
 
 interface IndexesPanelProps {
@@ -694,10 +850,11 @@ export function IndexesPanel({
   findingsPending,
   database,
   dataUpdatedAt,
-  emptyDescription = NO_INDEX_STATS,
+  emptyDescription = noIndexStats(),
   focusKey,
   onFocusDone,
 }: IndexesPanelProps) {
+  const t = useT()
   const [searchParams, setSearchParams] = useSearchParams()
   const view = readIndexView(searchParams.get(INDEX_VIEW_PARAM))
   // A search hit is a row of the inventory (D20): that view opens to show it.
@@ -775,8 +932,8 @@ export function IndexesPanel({
     windowsQuery.data?.find((window) => window.key === 'window.unused_index')?.seconds ?? null
   const unusedWindow = windowPhrase(configuredWindow)
   const columns = useMemo(
-    () => indexColumns(showDatabase, new Date(dataUpdatedAt), unusedWindow),
-    [showDatabase, dataUpdatedAt, unusedWindow],
+    () => indexColumns(t, showDatabase, new Date(dataUpdatedAt), unusedWindow),
+    [t, showDatabase, dataUpdatedAt, unusedWindow],
   )
 
   function setView(value: string) {
@@ -788,33 +945,50 @@ export function IndexesPanel({
   }
 
   const stats: PanelStat[] = [
-    { label: 'Indexes reported', value: formatCount(summary.total), unit: 'indexes' },
-    { label: 'Total size', value: formatBytes(summary.bytes) },
     {
-      label: 'Indexes needing attention',
+      label: t('indexes.panel.statIndexesReported'),
+      value: formatCount(summary.total),
+      unit: 'indexes',
+    },
+    { label: t('indexes.panel.statTotalSize'), value: formatBytes(summary.bytes) },
+    {
+      label: t('indexes.panel.statNeedAttention'),
       value: formatCount(attention),
       unit: 'indexes',
-      detail: `of ${formatCount(summary.total)} ${summary.total === 1 ? 'index' : 'indexes'} reported`,
+      detail: t('indexes.panel.statOfReported', {
+        count: summary.total,
+        shown: formatCount(summary.total),
+      }),
     },
     {
-      label: 'Never-scanned indexes',
+      label: t('indexes.panel.statNeverScanned'),
       value: formatCount(summary.neverScanned),
       unit: 'indexes',
       ...(summary.neverScanned > 0
-        ? { detail: `${formatBytes(summary.neverScannedBytes)} in size` }
+        ? {
+            detail: t('indexes.panel.statNeverSize', {
+              size: formatBytes(summary.neverScannedBytes),
+            }),
+          }
         : {}),
     },
   ]
 
-  const incompleteText = `The list is incomplete. The agent reports only its busiest and largest indexes per database (checks.index_stats.top_n, 50 by default)${reported >= limit ? `, and this page shows at most ${limit}` : ''}. The counts cover the ${formatCountOf(reported, 'index', 'indexes')} reported, not every index of the server. Raise top_n in the agent configuration to see more.`
-  const pendingHeadline = `Unused-index check pending for ${formatCount(unusedPending)} ${unusedPending === 1 ? 'index' : 'indexes'}.`
-  const pendingText = `${unusedRuleText(unusedWindow)} Until the advisor has a verdict, "never scanned" is the raw statistic: no scan since the statistics were last reset.`
-  const blockedHeadline = `Unused-index check inconclusive for ${formatCount(unusedBlocked)} ${unusedBlocked === 1 ? 'index' : 'indexes'}.`
+  const incompleteText = `${t('indexes.panel.incompleteLead')} ${t('indexes.panel.incompleteIntro')}checks.index_stats.top_n${t('indexes.panel.incompleteDefault')}${reported >= limit ? t('indexes.panel.incompleteLimit', { limit }) : ''}${t('indexes.panel.incompleteCounts', { count: reported, shown: formatCount(reported) })}top_n${t('indexes.panel.incompleteEnd')}`
+  const pendingHeadline = t('indexes.panel.pendingHeadline', {
+    count: unusedPending,
+    shown: formatCount(unusedPending),
+  })
+  const pendingText = `${unusedRuleText(t, unusedWindow)} ${t('indexes.panel.pendingVerdict')}`
+  const blockedHeadline = t('indexes.panel.blockedHeadline', {
+    count: unusedBlocked,
+    shown: formatCount(unusedBlocked),
+  })
   const blockedText = unusedCheck.blocked
     .map((group) =>
       unusedCheck.blocked.length === 1
-        ? blockedReasonText(group.reason)
-        : `${formatCount(group.count)}: ${blockedReasonText(group.reason)}`,
+        ? blockedReasonText(t, group.reason)
+        : `${formatCount(group.count)}: ${blockedReasonText(t, group.reason)}`,
     )
     .join(' ')
   const notes =
@@ -822,11 +996,14 @@ export function IndexesPanel({
       <>
         {incomplete ? (
           <PanelNote title={incompleteText} tone="warning">
-            <strong>The list is incomplete.</strong> The agent reports only its busiest and largest
-            indexes per database (<code>checks.index_stats.top_n</code>, 50 by default)
-            {reported >= limit ? `, and this page shows at most ${limit}` : ''}. The counts cover
-            the {formatCountOf(reported, 'index', 'indexes')} reported, not every index of the
-            server. Raise <code>top_n</code> in the agent configuration to see more.
+            <strong>{t('indexes.panel.incompleteLead')}</strong>{' '}
+            {t('indexes.panel.incompleteIntro')}
+            <code>checks.index_stats.top_n</code>
+            {t('indexes.panel.incompleteDefault')}
+            {reported >= limit ? t('indexes.panel.incompleteLimit', { limit }) : ''}
+            {t('indexes.panel.incompleteCounts', { count: reported, shown: formatCount(reported) })}
+            <code>top_n</code>
+            {t('indexes.panel.incompleteEnd')}
           </PanelNote>
         ) : null}
         {unusedPending > 0 ? (
@@ -844,22 +1021,31 @@ export function IndexesPanel({
 
   const heading: Record<IndexView, { title: string; description: string }> = {
     inventory: {
-      title: 'Index inventory',
-      description: `${formatCountOf(rows.length, 'index', 'indexes')}. Scan figures are per-second rates.`,
+      title: t('indexes.panel.headInventory'),
+      description: t('indexes.panel.headInventoryDesc', {
+        count: rows.length,
+        shown: formatCount(rows.length),
+      }),
     },
     summary: {
-      title: 'Index summary',
-      description:
-        'What the indexes in scope are made of: kinds, access methods, databases and top tables.',
+      title: t('indexes.panel.headSummary'),
+      description: t('indexes.panel.headSummaryDesc'),
     },
     findings: {
       // Short titles keep the header line within 1920 px beside the figures and the actions.
-      title: 'Index findings',
-      description: `${formatCount(counts.unused)} unused · ${formatCount(counts.duplicate)} duplicate · ${formatCount(counts.redundant)} redundant · ${formatCount(counts.invalid)} invalid · ${formatCount(counts.divergence)} diverging · ${formatCount(gaps.length)} foreign keys`,
+      title: t('indexes.panel.headFindings'),
+      description: t('indexes.panel.headFindingsDesc', {
+        unused: formatCount(counts.unused),
+        duplicate: formatCount(counts.duplicate),
+        redundant: formatCount(counts.redundant),
+        invalid: formatCount(counts.invalid),
+        diverging: formatCount(counts.divergence),
+        foreignKeys: formatCount(gaps.length),
+      }),
     },
     'foreign-keys': {
-      title: 'Unindexed foreign keys',
-      description: 'Deleting or re-keying a referenced row scans the referencing table.',
+      title: t('indexes.panel.headFk'),
+      description: t('indexes.panel.headFkDesc'),
     },
   }
 
@@ -871,21 +1057,27 @@ export function IndexesPanel({
   const content: Record<IndexView, () => ReactNode> = {
     inventory: () =>
       rows.length === 0 ? (
-        <EmptyState description={emptyDescription} title="No indexes to show" />
+        <EmptyState description={emptyDescription} title={t('indexes.panel.noIndexesToShow')} />
       ) : (
         <SimpleTable
-          ariaLabel="Indexes"
+          ariaLabel={t('indexes.panel.tableIndexes')}
           captionId="indexes.inventory-table"
           columns={columns}
           defaultSort={{ id: 'bytes', desc: true }}
-          detailLabel={(row, expanded) => `${expanded ? 'Hide' : 'Show'} details of ${row.name}`}
+          detailLabel={(row, expanded) =>
+            expanded
+              ? t('indexes.panel.hideDetails', { name: row.name })
+              : t('indexes.panel.showDetails', { name: row.name })
+          }
           emptyState={null}
-          renderDetail={(row) => <Detail instanceId={instanceId} row={row} />}
+          renderDetail={(row) => (
+            <Detail instanceId={instanceId} row={row} unusedWindow={unusedWindow} />
+          )}
           rowKey={(row) => row.key}
           rows={rows}
-          scope="indexes"
+          scope={t('indexes.panel.scopeIndexes')}
           tableId="indexes"
-          toolbar={INDEX_TOOLBAR}
+          toolbar={indexToolbarSpec(t)}
           focusKey={focusKey}
           {...(onFocusDone === undefined ? {} : { onFocusDone })}
         />
@@ -895,94 +1087,94 @@ export function IndexesPanel({
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MetricTile
             captionId="indexes.summary-primary"
-            detail={explained(summary.primary, 'indexes that back a primary key')}
-            label="Primary key indexes"
+            detail={explained(t, summary.primary, t('indexes.panel.whatPrimary'))}
+            label={t('indexes.panel.labelPrimary')}
             unit="indexes"
             value={formatCount(summary.primary)}
           />
           <MetricTile
             captionId="indexes.summary-unique"
-            detail={explained(summary.unique, 'unique indexes that are not a primary key')}
-            label="Unique indexes"
+            detail={explained(t, summary.unique, t('indexes.panel.whatUnique'))}
+            label={t('indexes.panel.labelUnique')}
             unit="indexes"
             value={formatCount(summary.unique)}
           />
           <MetricTile
             captionId="indexes.summary-partial"
-            detail={explained(
-              summary.partial,
-              'indexes that cover only the rows a predicate selects',
-            )}
-            label="Partial indexes"
+            detail={explained(t, summary.partial, t('indexes.panel.whatPartial'))}
+            label={t('indexes.panel.labelPartial')}
             unit="indexes"
             value={formatCount(summary.partial)}
           />
           <MetricTile
             captionId="indexes.summary-expression"
-            detail={explained(summary.expression, 'indexes with a key built from an expression')}
-            label="Expression indexes"
+            detail={explained(t, summary.expression, t('indexes.panel.whatExpression'))}
+            label={t('indexes.panel.labelExpression')}
             unit="indexes"
             value={formatCount(summary.expression)}
           />
           <MetricTile
             captionId="indexes.summary-composite"
-            detail={explained(summary.composite, 'indexes with more than one key column')}
-            label="Composite indexes"
+            detail={explained(t, summary.composite, t('indexes.panel.whatComposite'))}
+            label={t('indexes.panel.labelComposite')}
             unit="indexes"
             value={formatCount(summary.composite)}
           />
           <MetricTile
             captionId="indexes.summary-invalid"
-            detail={explained(summary.invalid, 'indexes PostgreSQL marks invalid')}
-            label="Invalid indexes"
+            detail={explained(t, summary.invalid, t('indexes.panel.whatInvalid'))}
+            label={t('indexes.panel.labelInvalid')}
             unit="indexes"
             value={formatCount(summary.invalid)}
             {...(summary.invalid > 0
-              ? { status: { tone: 'crit' as const, text: 'Rebuild or drop' } }
+              ? { status: { tone: 'crit' as const, text: t('indexes.panel.statusRebuild') } }
               : {})}
           />
           <MetricTile
             captionId="index.duplicate"
             detail={
               findingsPending
-                ? 'the advisor findings are loading'
+                ? t('indexes.panel.loadingLower')
                 : counts.duplicate === 0
-                  ? explained(0, 'groups of indexes with identical definitions')
-                  : `in ${formatCount(counts.duplicate)} ${counts.duplicate === 1 ? 'group' : 'groups'} with identical definitions`
+                  ? explained(t, 0, t('indexes.panel.whatDuplicate'))
+                  : t('indexes.panel.duplicateIn', {
+                      count: counts.duplicate,
+                      shown: formatCount(counts.duplicate),
+                    })
             }
-            label="Exact duplicate indexes"
+            label={t('indexes.panel.labelDuplicate')}
             unit="indexes"
             value={findingsPending ? null : formatCount(counts.duplicateIndexes)}
             {...(!findingsPending && counts.duplicate > 0
-              ? { status: { tone: 'warn' as const, text: 'Review before dropping' } }
+              ? { status: { tone: 'warn' as const, text: t('indexes.panel.statusReview') } }
               : {})}
           />
           <MetricTile
             captionId="index.redundant-prefix"
             detail={
               findingsPending
-                ? 'the advisor findings are loading'
-                : explained(counts.redundant, 'indexes whose columns lead a longer index')
+                ? t('indexes.panel.loadingLower')
+                : explained(t, counts.redundant, t('indexes.panel.whatRedundant'))
             }
-            label="Redundant prefix indexes"
+            label={t('indexes.panel.labelRedundant')}
             unit="indexes"
             value={findingsPending ? null : formatCount(counts.redundant)}
             {...(!findingsPending && counts.redundant > 0
-              ? { status: { tone: 'neutral' as const, text: 'Check the longer index first' } }
+              ? { status: { tone: 'neutral' as const, text: t('indexes.panel.statusCheckLonger') } }
               : {})}
           />
           <MetricTile
             captionId="indexes.foreign-keys"
             detail={
               findingsPending
-                ? 'the advisor findings are loading'
-                : explained(gaps.length, 'foreign keys that no index leads with')
+                ? t('indexes.panel.loadingLower')
+                : explained(t, gaps.length, t('indexes.panel.whatForeignKeys'))
             }
-            label="Foreign keys without an index"
+            label={t('indexes.panel.labelFkWithout')}
             unit="foreign keys"
             value={findingsPending ? null : formatCount(gaps.length)}
             {...(!findingsPending && gaps.length > 0
-              ? { status: { tone: 'warn' as const, text: 'Deletes scan the referencing table' } }
+              ? { status: { tone: 'warn' as const, text: t('indexes.panel.statusDeletes') } }
               : {})}
           />
         </div>
@@ -990,17 +1182,17 @@ export function IndexesPanel({
           <div className="grid gap-4 lg:grid-cols-3">
             <Breakdown
               captionId="indexes.breakdown-method"
-              title="By access method"
+              title={t('indexes.panel.breakdownMethod')}
               entries={summary.byMethod}
             />
             <Breakdown
               captionId="indexes.breakdown-database"
-              title="By database"
+              title={t('indexes.panel.breakdownDatabase')}
               entries={summary.byDatabase}
             />
             <Breakdown
               captionId="indexes.breakdown-tables"
-              title="Tables with the most indexes"
+              title={t('indexes.panel.breakdownTables')}
               entries={tables.map((group) => ({
                 label: `${group.schema}.${group.table}`,
                 count: group.indexes.length,
@@ -1015,50 +1207,46 @@ export function IndexesPanel({
       listedFindings.length === 0 ? (
         <EmptyState
           description={
-            findingsPending
-              ? 'The advisor findings are loading.'
-              : 'The advisor has no open finding on these indexes.'
+            findingsPending ? t('indexes.panel.loading') : t('indexes.panel.noOpenFinding')
           }
-          title="No open findings"
+          title={t('indexes.panel.noOpenFindings')}
         />
       ) : (
         <SimpleTable
-          ariaLabel="Index findings by index"
+          ariaLabel={t('indexes.panel.findingsTableLabel')}
           captionId="indexes.findings-table"
-          columns={FINDING_COLUMNS}
+          columns={findingColumns(t)}
           detailLabel={(finding, expanded) =>
-            `${expanded ? 'Hide' : 'Show'} the detail of ${finding.title}`
+            expanded
+              ? t('indexes.panel.hideFinding', { title: finding.title })
+              : t('indexes.panel.showFinding', { title: finding.title })
           }
           emptyState={null}
           renderDetail={(finding) => <FindingDetail finding={finding} />}
           rowKey={(finding) => finding.finding_id}
           rows={listedFindings}
-          scope="findings"
+          scope={t('indexes.panel.scopeFindings')}
           tableId="index-findings"
-          toolbar={FINDINGS_TOOLBAR}
+          toolbar={findingsToolbarSpec(t)}
         />
       ),
     'foreign-keys': () =>
       gaps.length === 0 ? (
         <EmptyState
-          description={
-            findingsPending
-              ? 'The advisor findings are loading.'
-              : 'The advisor found no foreign key without a covering index.'
-          }
-          title="No missing foreign-key index"
+          description={findingsPending ? t('indexes.panel.loading') : t('indexes.panel.fkNone')}
+          title={t('indexes.panel.noMissingFk')}
         />
       ) : (
         <SimpleTable
-          ariaLabel="Foreign keys without an index"
+          ariaLabel={t('indexes.panel.labelFkWithout')}
           captionId="indexes.foreign-keys-table"
-          columns={GAP_COLUMNS}
+          columns={gapColumns(t)}
           emptyState={null}
           rowKey={(gap) => gap.finding.finding_id}
           rows={gaps}
-          scope="foreign keys"
+          scope={t('indexes.panel.scopeForeignKeys')}
           tableId="fk-gaps"
-          toolbar={GAPS_TOOLBAR}
+          toolbar={gapsToolbarSpec(t)}
         />
       ),
   }
@@ -1068,6 +1256,7 @@ export function IndexesPanel({
       <IndexPanel
         actions={
           <>
+            <HelpLink anchor="indexes#inventory" label={t('indexes.panel.helpIndexesTab')} />
             {view === 'findings' ? (
               // From 1600 px "Open" leaves the line and stays in the link's name, so
               // the findings view's header line still fits at 1920 px (bug-HDR).
@@ -1076,18 +1265,19 @@ export function IndexesPanel({
                 data-testid="index-findings-link"
                 to="/findings"
               >
-                <span className="min-[1600px]:sr-only">Open</span> Findings
+                <span className="min-[1600px]:sr-only">{t('indexes.panel.open')}</span>{' '}
+                {t('indexes.panel.findingsLink')}
                 <ArrowRight
                   aria-hidden="true"
                   className="ml-0.5 inline size-3.5 align-[-0.125em]"
                 />
               </Link>
             ) : null}
-            {VIEW_BADGE_HINT[view]}
-            <TabsList aria-label="Index views" className="min-[1600px]:h-8!">
+            {viewBadgeHint(t)[view]}
+            <TabsList aria-label={t('indexes.panel.viewsLabel')} className="min-[1600px]:h-8!">
               {INDEX_VIEWS.map((option) => (
                 <TabsTrigger key={option.id} className="min-[1600px]:py-0.5" value={option.id}>
-                  {option.label}
+                  {t(option.labelKey)}
                   {counted[option.id] === undefined ? null : (
                     <span className="text-muted-foreground text-xs tabular-nums">
                       {formatCount(counted[option.id] ?? 0)}

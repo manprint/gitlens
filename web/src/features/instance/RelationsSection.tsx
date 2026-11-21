@@ -6,6 +6,7 @@ import { useCreateCommand } from '@/api/commands'
 import { qk } from '@/api/keys'
 import { useInstanceBloat, useInstanceIndexes, useInstanceTables } from '@/api/queries'
 import type { PermTier, Schemas } from '@/api/types'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { EmptyState, ErrorState, NotPermitted, Unknown } from '@/components/state'
 import {
@@ -13,10 +14,19 @@ import {
   describeCommandState,
   isTerminalCommandState,
 } from '@/lib/commands'
-import { formatBytes, formatCount, formatPercent, formatRate, formatTimestamp } from '@/lib/format'
+import {
+  formatBytes,
+  formatCount,
+  formatPercent,
+  formatRate,
+  formatTimestamp,
+  TIMESTAMP_COLUMN_WIDTH,
+} from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT, type Translate } from '@/i18n/react'
 import type { CaptionId, ColumnHelpId } from '@/lib/captions'
 import { StandbyStatsNote } from '@/components/StandbyStatsNote'
 
@@ -33,14 +43,14 @@ type RelationItem = RelationResponse['items'][number]
 
 interface RelationColumn {
   key: string
-  label: string
-  render: (item: RelationItem) => ReactNode
+  labelKey: MessageKey
+  render: (item: RelationItem, t: Translate) => ReactNode
   /** Absent for action columns, which have nothing to sort by. */
   sortValue?: (item: RelationItem) => string | number | null
   /** Column width from 1600 px (D26). */
   width?: string
   /** A free-text column: one line from 1600 px, the full text in its title. */
-  truncate?: (item: RelationItem) => string
+  truncate?: (item: RelationItem, t: Translate) => string
 }
 
 interface RelationQueryState {
@@ -75,8 +85,8 @@ function relationName(item: RelationItem): string | null {
   return schema ? `${schema}.${relation}` : relation
 }
 
-function relationCell(item: RelationItem): ReactNode {
-  return relationName(item) ?? <Unknown reason="The relation name was not reported." />
+function relationCell(item: RelationItem, t: Translate): ReactNode {
+  return relationName(item) ?? <Unknown reason={t('instance.relations.missing.relationName')} />
 }
 
 function textCell(item: RelationItem, key: string): ReactNode {
@@ -99,9 +109,13 @@ function percentCell(item: RelationItem, key: string): ReactNode {
   return formatPercent(value, 1) ?? <Unknown />
 }
 
-function booleanCell(item: RelationItem, key: string): ReactNode {
+function booleanCell(item: RelationItem, key: string, t: Translate): ReactNode {
   const value = booleanValue(item, key)
-  return value === null ? <Unknown /> : value ? 'yes' : 'no'
+  return value === null ? (
+    <Unknown />
+  ) : (
+    t(value ? 'instance.relations.value.yes' : 'instance.relations.value.no')
+  )
 }
 
 function rateCell(item: RelationItem, key: string): ReactNode {
@@ -111,7 +125,7 @@ function rateCell(item: RelationItem, key: string): ReactNode {
 
 function timestampCell(item: RelationItem): ReactNode {
   const value = stringValue(item, 'ts')
-  return value ? formatTimestamp(value, 'UTC') : <Unknown />
+  return value ? formatTimestamp(value) : <Unknown />
 }
 
 function timeValue(item: RelationItem, key: string): { iso: string; ms: number } | null {
@@ -137,28 +151,35 @@ function latestMaintenance(
   return manual ? { ...manual, auto: false } : null
 }
 
+function maintenanceStamp(latest: { iso: string; auto: boolean }, t: Translate): string {
+  return t('instance.relations.maintenance.stamp', {
+    time: formatTimestamp(latest.iso),
+    kind: t(
+      latest.auto ? 'instance.relations.maintenance.auto' : 'instance.relations.maintenance.manual',
+    ),
+  })
+}
+
 function maintenanceColumn(
   key: string,
-  label: string,
+  labelKey: MessageKey,
   manualKey: string,
   autoKey: string,
-  never: string,
+  neverKey: MessageKey,
 ): RelationColumn {
   return {
     key,
-    label,
-    render: (item) => {
+    labelKey,
+    render: (item, t) => {
       const latest = latestMaintenance(item, manualKey, autoKey)
-      if (!latest) return <Unknown reason={never} />
-      return `${formatTimestamp(latest.iso, 'UTC')} (${latest.auto ? 'auto' : 'manual'})`
+      if (!latest) return <Unknown reason={t(neverKey)} />
+      return maintenanceStamp(latest, t)
     },
     sortValue: (item) => latestMaintenance(item, manualKey, autoKey)?.ms ?? null,
     width: '7rem',
-    truncate: (item) => {
+    truncate: (item, t) => {
       const latest = latestMaintenance(item, manualKey, autoKey)
-      return latest
-        ? `${formatTimestamp(latest.iso, 'UTC')} (${latest.auto ? 'auto' : 'manual'})`
-        : ''
+      return latest ? maintenanceStamp(latest, t) : ''
     },
   }
 }
@@ -173,35 +194,29 @@ function textOf(value: string | null): string {
   return value ?? ''
 }
 
-/** URL prefix of each relation list (tables inventory). */
-const RELATION_TABLE_IDS: Record<string, string> = {
-  Tables: 'relations-tables',
-  Indexes: 'relations-indexes',
-  'Table bloat estimates': 'relations-table-bloat',
-  'Index bloat estimates': 'relations-index-bloat',
-}
-
 // The four lists are already split by relation kind: no kind filter (tables inventory, §8).
-const RELATION_TOOLBAR: TableToolbarSpec<RelationItem> = {
-  searchFields: [
-    (item) => relationName(item),
-    (item) => stringValue(item, 'indexrelname'),
-    (item) => stringValue(item, 'datname'),
-  ],
-  filters: [
-    {
-      id: 'database',
-      label: 'Database',
-      kind: 'select',
-      accessor: (item) => stringValue(item, 'datname'),
-    },
-    {
-      id: 'schema',
-      label: 'Schema',
-      kind: 'select',
-      accessor: (item) => stringValue(item, 'schemaname'),
-    },
-  ],
+function relationToolbar(t: Translate): TableToolbarSpec<RelationItem> {
+  return {
+    searchFields: [
+      (item) => relationName(item),
+      (item) => stringValue(item, 'indexrelname'),
+      (item) => stringValue(item, 'datname'),
+    ],
+    filters: [
+      {
+        id: 'database',
+        label: t('instance.relations.col.database'),
+        kind: 'select',
+        accessor: (item) => stringValue(item, 'datname'),
+      },
+      {
+        id: 'schema',
+        label: t('instance.relations.filter.schema'),
+        kind: 'select',
+        accessor: (item) => stringValue(item, 'schemaname'),
+      },
+    ],
+  }
 }
 
 function relationKey(item: RelationItem): string {
@@ -231,29 +246,37 @@ const COLUMN_HELP: Record<string, ColumnHelpId> = {
 
 function SortableRelationTable({
   caption,
+  noun,
+  tableId,
   captionId,
   items,
   columns,
 }: {
   caption: string
+  noun: string
+  tableId: string
   captionId: CaptionId
   items: RelationItem[]
   columns: RelationColumn[]
 }) {
+  const t = useT()
+  const toolbar = useMemo(() => relationToolbar(t), [t])
   const simpleColumns = useMemo(
     () =>
       columns.map<SimpleColumn<RelationItem>>((column, index) => ({
         id: column.key,
-        header: column.label,
+        header: t(column.labelKey),
         ...(column.sortValue ? { sortValue: column.sortValue } : {}),
         rowHeader: index === 0,
         className: index === 0 ? 'font-normal' : '',
-        cell: column.render,
+        cell: (item) => column.render(item, t),
         ...(COLUMN_HELP[column.key] === undefined ? {} : { help: COLUMN_HELP[column.key] }),
         ...(column.width === undefined ? {} : { width: column.width }),
-        ...(column.truncate === undefined ? {} : { truncate: column.truncate }),
+        ...(column.truncate === undefined
+          ? {}
+          : { truncate: (item: RelationItem) => column.truncate?.(item, t) ?? '' }),
       })),
-    [columns],
+    [columns, t],
   )
   const firstKey = columns[0]?.key
   // The first column, descending, as before the URL held the order.
@@ -263,14 +286,14 @@ function SortableRelationTable({
       captionId={captionId}
       columns={simpleColumns}
       emptyState={null}
-      headerToggleName={(column) => `Sort ${caption} by ${column.header}`}
+      headerToggleName={(column) =>
+        t('instance.relations.sortBy', { list: caption, column: column.header })
+      }
       rowKey={relationKey}
       rows={items}
-      scope="relations"
-      tableId={
-        RELATION_TABLE_IDS[caption] ?? `relations-${caption.toLowerCase().replaceAll(' ', '-')}`
-      }
-      toolbar={RELATION_TOOLBAR}
+      scope={noun}
+      tableId={tableId}
+      toolbar={toolbar}
       // Eleven sortable columns fit 1600 px only with the dense cells (D26).
       className={DENSE_TABLE}
       {...(firstKey === undefined ? {} : { defaultSort: { id: firstKey, desc: true } })}
@@ -280,7 +303,7 @@ function SortableRelationTable({
 
 const RELATION_COLUMN: RelationColumn = {
   key: 'relation',
-  label: 'Relation',
+  labelKey: 'instance.relations.col.relation',
   render: relationCell,
   sortValue: (item) => relationName(item),
   truncate: (item) => textOf(relationName(item)),
@@ -290,7 +313,7 @@ const RELATION_COLUMN: RelationColumn = {
 // can appear once per database; the database tells the rows apart.
 const DATABASE_COLUMN: RelationColumn = {
   key: 'database',
-  label: 'Database',
+  labelKey: 'instance.relations.col.database',
   render: (item) => textCell(item, 'datname'),
   sortValue: (item) => stringValue(item, 'datname'),
   width: '6.5rem',
@@ -299,22 +322,27 @@ const DATABASE_COLUMN: RelationColumn = {
 
 const OBSERVED_COLUMN: RelationColumn = {
   key: 'observed',
-  label: 'Observed',
+  labelKey: 'instance.relations.col.observed',
   render: timestampCell,
   sortValue: (item) => stringValue(item, 'ts'),
-  width: '11.5rem',
+  width: TIMESTAMP_COLUMN_WIDTH,
   truncate: (item) => {
     const value = stringValue(item, 'ts')
-    return value ? formatTimestamp(value, 'UTC') : ''
+    return value ? formatTimestamp(value) : ''
   },
 }
 
-function booleanColumn(key: string, label: string, field: string, width: string): RelationColumn {
+function booleanColumn(
+  key: string,
+  labelKey: MessageKey,
+  field: string,
+  width: string,
+): RelationColumn {
   return {
     key,
-    label,
+    labelKey,
     width,
-    render: (item) => booleanCell(item, field),
+    render: (item, t) => booleanCell(item, field, t),
     sortValue: (item) => {
       const value = booleanValue(item, field)
       return value === null ? null : value ? 1 : 0
@@ -330,59 +358,59 @@ const TABLE_COLUMNS: RelationColumn[] = [
   DATABASE_COLUMN,
   {
     key: 'live_tuples',
-    label: 'Live tuples',
+    labelKey: 'instance.relations.col.liveTuples',
     render: (item) => countCell(item, 'n_live_tup'),
     sortValue: (item) => numberValue(item, 'n_live_tup'),
     width: '7rem',
   },
   {
     key: 'dead_tuples',
-    label: 'Dead tuples',
+    labelKey: 'instance.relations.col.deadTuples',
     render: (item) => countCell(item, 'n_dead_tup'),
     sortValue: (item) => numberValue(item, 'n_dead_tup'),
     width: '7rem',
   },
   {
     key: 'dead_ratio',
-    label: 'Dead ratio',
+    labelKey: 'instance.relations.col.deadRatio',
     render: (item) => percentCell(item, 'dead_ratio'),
     sortValue: (item) => numberValue(item, 'dead_ratio'),
     width: '7rem',
   },
   {
     key: 'size',
-    label: 'Size',
+    labelKey: 'instance.relations.col.size',
     render: (item) => bytesCell(item, 'total_bytes'),
     sortValue: (item) => numberValue(item, 'total_bytes'),
     width: '5.75rem',
   },
   {
     key: 'seq_scan_rate',
-    label: 'Sequential scans',
+    labelKey: 'instance.relations.col.seqScans',
     render: (item) => rateCell(item, 'seq_scan_rate'),
     sortValue: (item) => numberValue(item, 'seq_scan_rate'),
     width: '9.5rem',
   },
   {
     key: 'idx_scan_rate',
-    label: 'Index scans',
+    labelKey: 'instance.relations.col.indexScans',
     render: (item) => rateCell(item, 'idx_scan_rate'),
     sortValue: (item) => numberValue(item, 'idx_scan_rate'),
     width: '7.75rem',
   },
   maintenanceColumn(
     'last_vacuum',
-    'Last vacuum',
+    'instance.relations.col.lastVacuum',
     'last_vacuum_at',
     'last_autovacuum_at',
-    'Never vacuumed since the statistics were reset.',
+    'instance.relations.maintenance.neverVacuumed',
   ),
   maintenanceColumn(
     'last_analyze',
-    'Last analyze',
+    'instance.relations.col.lastAnalyze',
     'last_analyze_at',
     'last_autoanalyze_at',
-    'Never analysed since the statistics were reset.',
+    'instance.relations.maintenance.neverAnalysed',
   ),
   OBSERVED_COLUMN,
 ]
@@ -392,33 +420,32 @@ const TABLE_COLUMNS: RelationColumn[] = [
  * "never since reset" is an index with no scan since the reset (PostgreSQL 16 and
  * later); "not available" means the server has no last scan for it (PostgreSQL 15).
  */
-const LAST_SCAN_STATUS_TEXT: Record<string, { text: string; title: string }> = {
+const LAST_SCAN_STATUS_TEXT: Record<string, { textKey: MessageKey; titleKey: MessageKey }> = {
   never_since_reset: {
-    text: 'never since reset',
-    title: 'No scan of this index since the statistics were reset.',
+    textKey: 'instance.relations.lastScan.neverSinceReset',
+    titleKey: 'instance.relations.lastScan.neverSinceResetTitle',
   },
   not_available: {
-    text: 'not available',
-    title:
-      'PostgreSQL 15 does not report the last scan of an index (pg_stat_user_indexes.last_idx_scan).',
+    textKey: 'instance.relations.lastScan.notAvailable',
+    titleKey: 'instance.relations.lastScan.notAvailableTitle',
   },
 }
 
-function lastScanCell(item: RelationItem): ReactNode {
+function lastScanCell(item: RelationItem, t: Translate): ReactNode {
   const at = timeValue(item, 'last_scan_at')
   if (at) {
     return (
       <span
         className="min-[1600px]:block min-[1600px]:truncate"
-        title={`Last scan of this index since the statistics were reset: ${formatTimestamp(at.iso, 'UTC')}.`}
+        title={t('instance.relations.lastScan.title', { time: formatTimestamp(at.iso) })}
       >
-        {formatTimestamp(at.iso, 'UTC')}
+        {formatTimestamp(at.iso)}
       </span>
     )
   }
   const status = stringValue(item, 'last_scan_status')
   const known = status ? LAST_SCAN_STATUS_TEXT[status] : undefined
-  return known ? <span title={known.title}>{known.text}</span> : <Unknown />
+  return known ? <span title={t(known.titleKey)}>{t(known.textKey)}</span> : <Unknown />
 }
 
 const INDEX_COLUMNS: RelationColumn[] = [
@@ -426,45 +453,48 @@ const INDEX_COLUMNS: RelationColumn[] = [
   DATABASE_COLUMN,
   {
     key: 'index',
-    label: 'Index',
+    labelKey: 'instance.relations.col.index',
     render: (item) => textCell(item, 'indexrelname'),
     sortValue: (item) => stringValue(item, 'indexrelname'),
     truncate: (item) => textOf(stringValue(item, 'indexrelname')),
   },
   {
     key: 'idx_scan_rate',
-    label: 'Index scans',
+    labelKey: 'instance.relations.col.indexScans',
     render: (item) => rateCell(item, 'idx_scan_rate'),
     sortValue: (item) => numberValue(item, 'idx_scan_rate'),
     width: '9.25rem',
   },
   {
     key: 'last_scan',
-    label: 'Last scan',
+    labelKey: 'instance.relations.col.lastScan',
     render: lastScanCell,
     sortValue: (item) => timeValue(item, 'last_scan_at')?.ms ?? null,
     width: '10rem',
   },
   {
     key: 'size',
-    label: 'Size',
+    labelKey: 'instance.relations.col.size',
     render: (item) => bytesCell(item, 'index_bytes'),
     sortValue: (item) => numberValue(item, 'index_bytes'),
     width: '5.75rem',
   },
-  booleanColumn('unique', 'Unique', 'is_unique', '7rem'),
-  booleanColumn('primary', 'Primary', 'is_primary', '7.5rem'),
-  booleanColumn('valid', 'Valid', 'is_valid', '6.25rem'),
+  booleanColumn('unique', 'instance.relations.col.unique', 'is_unique', '7rem'),
+  booleanColumn('primary', 'instance.relations.col.primary', 'is_primary', '7.5rem'),
+  booleanColumn('valid', 'instance.relations.col.valid', 'is_valid', '6.25rem'),
   OBSERVED_COLUMN,
 ]
 
 // A bloat row is a table or an index of a table. The relation column names the
 // table in both cases; the index column names the index of an index row.
-const BLOAT_TABLE_COLUMN: RelationColumn = { ...RELATION_COLUMN, label: 'Table' }
+const BLOAT_TABLE_COLUMN: RelationColumn = {
+  ...RELATION_COLUMN,
+  labelKey: 'instance.relations.col.table',
+}
 
 const BLOAT_INDEX_COLUMN: RelationColumn = {
   key: 'index',
-  label: 'Index',
+  labelKey: 'instance.relations.col.index',
   render: (item) => textCell(item, 'indexrelname'),
   sortValue: (item) => stringValue(item, 'indexrelname'),
   truncate: (item) => textOf(stringValue(item, 'indexrelname')),
@@ -473,35 +503,35 @@ const BLOAT_INDEX_COLUMN: RelationColumn = {
 const BLOAT_MEASURE_COLUMNS: RelationColumn[] = [
   {
     key: 'real_bytes',
-    label: 'Real size',
+    labelKey: 'instance.relations.col.realSize',
     render: (item) => bytesCell(item, 'real_bytes'),
     sortValue: (item) => numberValue(item, 'real_bytes'),
     width: '7.5rem',
   },
   {
     key: 'expected_bytes',
-    label: 'Expected size',
+    labelKey: 'instance.relations.col.expectedSize',
     render: (item) => bytesCell(item, 'expected_bytes'),
     sortValue: (item) => numberValue(item, 'expected_bytes'),
     width: '10rem',
   },
   {
     key: 'bloat_bytes',
-    label: 'Bloat',
+    labelKey: 'instance.relations.col.bloat',
     render: (item) => bytesCell(item, 'bloat_bytes'),
     sortValue: (item) => numberValue(item, 'bloat_bytes'),
     width: '6.5rem',
   },
   {
     key: 'bloat_ratio',
-    label: 'Bloat ratio',
+    labelKey: 'instance.relations.col.bloatRatio',
     render: (item) => percentCell(item, 'bloat_ratio'),
     sortValue: (item) => numberValue(item, 'bloat_ratio'),
     width: '9rem',
   },
   {
     key: 'method',
-    label: 'Method',
+    labelKey: 'instance.relations.col.method',
     render: (item) => textCell(item, 'method'),
     sortValue: (item) => stringValue(item, 'method'),
     width: '7.5rem',
@@ -535,35 +565,42 @@ function BudgetNotice({
   noun: string
   configKey: string
 }) {
+  const t = useT()
   if (!response.truncated) return null
   return (
     <ToolbarNote status wrap>
-      {`This list is incomplete: the agent reports only the top ${noun} of each database. Raise the limit with ${configKey}.`}
+      {t('instance.relations.budget', { noun, configKey })}
     </ToolbarNote>
   )
 }
 
 interface RelationPanelProps {
-  title: string
+  titleKey: MessageKey
+  tableId: string
   endpoint: string
   query: RelationQueryState
   columns: RelationColumn[]
-  emptyDescription: string
+  emptyTitleKey: MessageKey
+  emptyDescriptionKey: MessageKey
   captionId: CaptionId
-  noun: string
+  nounKey: MessageKey
   configKey: string
 }
 
 function RelationPanel({
-  title,
+  titleKey,
+  tableId,
   endpoint,
   query,
   columns,
-  emptyDescription,
+  emptyTitleKey,
+  emptyDescriptionKey,
   captionId,
-  noun,
+  nounKey,
   configKey,
 }: RelationPanelProps) {
+  const t = useT()
+  const title = t(titleKey)
   if (query.error && !query.data) {
     return (
       <ErrorState endpoint={endpoint} failure={query.error} onRetry={() => void query.refetch()} />
@@ -571,23 +608,25 @@ function RelationPanel({
   }
   if (!query.data) {
     return (
-      <div role="status" aria-label={`Loading ${title}`}>
-        Loading {title.toLowerCase()}…
+      <div role="status" aria-label={t('instance.relations.loadingAria', { list: title })}>
+        {t('instance.relations.loading', { list: title.toLowerCase() })}
       </div>
     )
   }
   if (query.data.items.length === 0) {
     return (
       <CaptionedBlock ariaLabel={title} captionId={captionId}>
-        <EmptyState title={`No ${title.toLowerCase()}`} description={emptyDescription} />
+        <EmptyState title={t(emptyTitleKey)} description={t(emptyDescriptionKey)} />
       </CaptionedBlock>
     )
   }
   return (
     <div className="space-y-3">
-      <BudgetNotice response={query.data} noun={noun} configKey={configKey} />
+      <BudgetNotice response={query.data} noun={t(nounKey)} configKey={configKey} />
       <SortableRelationTable
         caption={title}
+        noun={t(nounKey)}
+        tableId={tableId}
         captionId={captionId}
         items={query.data.items}
         columns={columns}
@@ -613,6 +652,7 @@ function ExactMeasurement({
   item: RelationItem
   permitted: boolean
 }) {
+  const t = useT()
   const command = useCreateCommand(instanceId)
   const queryClient = useQueryClient()
   const state = command.command.data?.state
@@ -629,7 +669,7 @@ function ExactMeasurement({
   }, [instanceId, queryClient, state])
 
   if (!isTableRow(item) || !schema || !relation) {
-    return <Unknown reason="pgstattuple measures tables only." />
+    return <Unknown reason={t('instance.relations.exact.tablesOnly')} />
   }
   const name = `${schema}.${relation}`
   const running = command.isPending || (state !== undefined && !isTerminalCommandState(state))
@@ -641,7 +681,7 @@ function ExactMeasurement({
         variant="outline"
         type="button"
 
-        aria-label={`Measure exactly: ${name} with pgstattuple`}
+        aria-label={t('instance.relations.exact.ariaLabel', { name })}
         disabled={!permitted || running}
         onClick={() =>
           command.mutate({
@@ -650,7 +690,7 @@ function ExactMeasurement({
           })
         }
       >
-        Measure exactly
+        {t('instance.relations.exact.button')}
       </Button>
       {command.command.data ? (
         <p role="status" className="text-xs">
@@ -659,7 +699,7 @@ function ExactMeasurement({
       ) : null}
       {command.error ? (
         <p role="alert" className="text-destructive text-xs">
-          Could not submit the measurement:{' '}
+          {t('instance.relations.exact.submitFailed')}{' '}
           {commandQueueFullMessage(command.error.failure) ?? command.error.message}
         </p>
       ) : null}
@@ -672,7 +712,7 @@ function tableBloatColumns(instanceId: string, permitted: boolean): RelationColu
     ...TABLE_BLOAT_COLUMNS,
     {
       key: 'exact',
-      label: 'Exact measurement',
+      labelKey: 'instance.relations.col.exactMeasurement',
       width: '10rem',
       render: (item) => (
         <ExactMeasurement instanceId={instanceId} item={item} permitted={permitted} />
@@ -687,18 +727,21 @@ function tableBloatColumns(instanceId: string, permitted: boolean): RelationColu
  * because a column is not readable by it or because row security hides rows.
  */
 function SkippedTablesNotice({ response }: { response: BloatResponse | undefined }) {
+  const t = useT()
   if (!response || response.skipped_tables < 1) return null
   const named = response.skipped_relations
   const more = response.skipped_tables - named.length
-  const skipped = `${formatCount(response.skipped_tables)} ${
-    response.skipped_tables === 1 ? 'table has' : 'tables have'
-  } no bloat estimate: the monitoring role cannot read a column of them, or row security hides rows from it. Their bloat is unknown, not zero.`
+  const skipped = t('instance.relations.skipped.summary', {
+    count: response.skipped_tables,
+    shown: formatCount(response.skipped_tables),
+  })
+  const names = named.map((r) => `${r.datname}: ${r.schemaname}.${r.relname}`).join(', ')
   const largest =
-    named.length > 0
-      ? `Largest: ${named.map((t) => `${t.datname}: ${t.schemaname}.${t.relname}`).join(', ')}${
-          more > 0 ? ` and ${formatCount(more)} more` : ''
-        }.`
-      : null
+    named.length === 0
+      ? null
+      : more > 0
+        ? t('instance.relations.skipped.largestMore', { names, more: formatCount(more) })
+        : t('instance.relations.skipped.largest', { names })
   // From 1600 px the notice is one truncated line beside the exact-measurement note (D26).
   return (
     <div
@@ -716,17 +759,14 @@ function SkippedTablesNotice({ response }: { response: BloatResponse | undefined
   )
 }
 
-const EXACT_BLOAT_NOTE =
-  'An exact measurement runs pgstattuple on the agent in a read-only transaction. It reads the whole table (bounded at 50 seconds) and needs the extension to be installed already in the database that holds the table: pglens never installs extensions, and the agent rejects the command when it is missing there.'
-
 function ExactBloatNotice({ currentTier }: { currentTier: PermTier }) {
+  const t = useT()
+  const note = `${t('instance.relations.exactNote.before')} pgstattuple ${t('instance.relations.exactNote.after')}`
   return (
     <div className="text-muted-foreground space-y-2 text-sm min-[1600px]:flex min-[1600px]:min-w-0 min-[1600px]:flex-1 min-[1600px]:items-center min-[1600px]:gap-3 min-[1600px]:space-y-0 min-[1600px]:text-xs">
-      <p className="min-[1600px]:line-clamp-2 min-[1600px]:min-w-0" title={EXACT_BLOAT_NOTE}>
-        An exact measurement runs <code>pgstattuple</code> on the agent in a read-only transaction.
-        It reads the whole table (bounded at 50 seconds) and needs the extension to be installed
-        already in the database that holds the table: pglens never installs extensions, and the
-        agent rejects the command when it is missing there.
+      <p className="min-[1600px]:line-clamp-2 min-[1600px]:min-w-0" title={note}>
+        {t('instance.relations.exactNote.before')} <code>pgstattuple</code>{' '}
+        {t('instance.relations.exactNote.after')}
       </p>
       {currentTier === 'T0' ? (
         <div className="min-[1600px]:shrink-0">
@@ -740,12 +780,14 @@ function ExactBloatNotice({ currentTier }: { currentTier: PermTier }) {
 type RelationViewId = (typeof RELATION_VIEW_IDS)[number]
 
 /** One relation list per view (15.3); Tables is the default. */
-const RELATION_VIEWS: readonly InstanceView<RelationViewId>[] = [
-  { id: 'tables', label: 'Tables' },
-  { id: 'indexes', label: 'Indexes' },
-  { id: 'table-bloat', label: 'Table bloat' },
-  { id: 'index-bloat', label: 'Index bloat' },
-]
+function relationViews(t: Translate): readonly InstanceView<RelationViewId>[] {
+  return [
+    { id: 'tables', label: t('instance.relations.list.tables') },
+    { id: 'indexes', label: t('instance.relations.list.indexes') },
+    { id: 'table-bloat', label: t('instance.relations.view.tableBloat') },
+    { id: 'index-bloat', label: t('instance.relations.view.indexBloat') },
+  ]
+}
 
 export function RelationsSection({
   instanceId,
@@ -773,47 +815,56 @@ export function RelationsSection({
     [instanceId, permitted],
   )
 
-  const [view = 'tables', showView] = useInstanceView(RELATION_VIEWS)
+  const t = useT()
+  const views = useMemo(() => relationViews(t), [t])
+  const [view = 'tables', showView] = useInstanceView(views)
   const panels: Record<RelationViewId, RelationPanelProps> = {
     tables: {
-      title: 'Tables',
+      titleKey: 'instance.relations.list.tables',
+      tableId: 'relations-tables',
       endpoint: 'table relations',
       query: tablesQuery,
       columns: TABLE_COLUMNS,
-      emptyDescription: 'No table statistics arrived from the agent in the last 15 minutes.',
+      emptyTitleKey: 'instance.relations.empty.tables',
+      emptyDescriptionKey: 'instance.relations.emptyDescription.tables',
       captionId: 'relations.tables',
-      noun: 'tables',
+      nounKey: 'instance.relations.noun.tables',
       configKey: 'checks.table_stats.top_n',
     },
     indexes: {
-      title: 'Indexes',
+      titleKey: 'instance.relations.list.indexes',
+      tableId: 'relations-indexes',
       endpoint: 'index relations',
       query: indexesQuery,
       columns: INDEX_COLUMNS,
-      emptyDescription:
-        'No index usage statistics arrived from the agent in the last 15 minutes (index_stats check). Index bloat estimates cover a longer window and can list indexes anyway.',
+      emptyTitleKey: 'instance.relations.empty.indexes',
+      emptyDescriptionKey: 'instance.relations.emptyDescription.indexes',
       captionId: 'relations.indexes',
-      noun: 'indexes',
+      nounKey: 'instance.relations.noun.indexes',
       configKey: 'checks.index_stats.top_n',
     },
     'table-bloat': {
-      title: 'Table bloat estimates',
+      titleKey: 'instance.relations.list.tableBloat',
+      tableId: 'relations-table-bloat',
       endpoint: 'table bloat estimates',
       query: bloatTablesQuery,
       columns: bloatTableColumns,
-      emptyDescription: 'No table bloat estimate was reported in the last 13 hours.',
+      emptyTitleKey: 'instance.relations.empty.tableBloat',
+      emptyDescriptionKey: 'instance.relations.emptyDescription.tableBloat',
       captionId: 'relations.table-bloat',
-      noun: 'tables',
+      nounKey: 'instance.relations.noun.tables',
       configKey: 'checks.bloat_estimate.top_n',
     },
     'index-bloat': {
-      title: 'Index bloat estimates',
+      titleKey: 'instance.relations.list.indexBloat',
+      tableId: 'relations-index-bloat',
       endpoint: 'index bloat estimates',
       query: bloatIndexesQuery,
       columns: INDEX_BLOAT_COLUMNS,
-      emptyDescription: 'No index bloat estimate was reported in the last 13 hours.',
+      emptyTitleKey: 'instance.relations.empty.indexBloat',
+      emptyDescriptionKey: 'instance.relations.emptyDescription.indexBloat',
       captionId: 'relations.index-bloat',
-      noun: 'indexes',
+      nounKey: 'instance.relations.noun.indexes',
       configKey: 'checks.bloat_estimate.top_n',
     },
   }
@@ -821,10 +872,18 @@ export function RelationsSection({
   return (
     <Tabs onValueChange={showView} value={view}>
       <InstancePanel
-        title="Tables and indexes"
+        title={t('instance.relations.section')}
         captionId="relations.section"
         id="instance-relations"
-        actions={<InstanceViewTabs label="Relation lists" views={RELATION_VIEWS} />}
+        actions={
+          <>
+            <InstanceViewTabs label={t('instance.relations.viewsLabel')} views={views} />
+            <HelpLink
+              anchor="instance-overview#relations"
+              label={t('instance.relations.section')}
+            />
+          </>
+        }
       >
         <StandbyStatsNote role={role} />
         <TabsContent value="tables">

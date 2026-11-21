@@ -1,11 +1,14 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { Link, useInRouterContext } from 'react-router-dom'
 
 import type { PermTier } from '@/api/types'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { MetricTile } from '@/components/layout/MetricTile'
 import { Section } from '@/components/layout/Section'
 import { Disabled, Stale, Unknown } from '@/components/state'
+import { useT, type Translate } from '@/i18n/react'
+import { activeIntl } from '@/i18n/store'
 import type { CaptionId } from '@/lib/captions'
 import {
   WRAPAROUND_RISK_THRESHOLD,
@@ -28,12 +31,12 @@ import {
   type ConnectionsSummary,
 } from '@/lib/sessions'
 import {
-  XMIN_HOLDER_KIND_LABELS,
-  XMIN_IDENTITY_LABELS,
-  XMIN_NONE_TEXT,
-  XMIN_PENDING_TEXT,
   xminHorizonState,
+  xminHolderKindLabel,
+  xminIdentityLabel,
   xminIdentityText,
+  xminNoneText,
+  xminPendingText,
   type XminHorizon,
 } from '@/lib/xmin'
 import { ConnectionSummary } from './ConnectionSummary'
@@ -61,31 +64,41 @@ function sessionQuery(value: unknown): string | null {
 // per second the rate keeps two significant digits so it stays visible.
 function deadlockRateText(rate: number): string {
   if (rate > 0 && rate < 0.01) {
-    return new Intl.NumberFormat('en-US', { maximumSignificantDigits: 2 }).format(rate)
+    return new Intl.NumberFormat(activeIntl(), { maximumSignificantDigits: 2 }).format(rate)
   }
-  return rate.toFixed(2)
+  return new Intl.NumberFormat(activeIntl(), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: false,
+  }).format(rate)
 }
 
-function BlockHeading({ captionId, title }: { captionId: CaptionId; title: string }) {
+function BlockHeading({
+  captionId,
+  help,
+  title,
+}: {
+  captionId: CaptionId
+  help?: ReactNode
+  title: string
+}) {
   return (
     <div className="flex items-center gap-1" data-caption-id={captionId}>
       <h3 className="font-medium">{title}</h3>
       <InfoHint id={captionId} label={title} />
+      {help}
     </div>
   )
 }
 
-function plural(count: number, noun: string): string {
-  return `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`
-}
-
 /** The origin split with a noun for each number (D31): `2 application connections`. */
-function originDetail(connections: ConnectionsSummary): string {
+function originDetail(connections: ConnectionsSummary, t: Translate): string {
   const rows = connectionGroup(connections, 'by_origin')
-  return `${plural(countOf(rows, 'application'), 'application connection')} · ${plural(countOf(rows, 'pglens'), 'pglens connection')}`
+  return `${t('locks.activity.applicationConnections', { count: countOf(rows, 'application') })} · ${t('locks.activity.pglensConnections', { count: countOf(rows, 'pglens') })}`
 }
 
 function ReadinessLink({ instanceId, item }: { instanceId: string | undefined; item: string }) {
+  const t = useT()
   const inRouter = useInRouterContext()
   if (instanceId === undefined || !inRouter) return null
   return (
@@ -95,9 +108,9 @@ function ReadinessLink({ instanceId, item }: { instanceId: string | undefined; i
         className="underline"
         to={`/instances/${encodeURIComponent(instanceId)}?section=readiness`}
       >
-        Readiness item {item}
+        {t('locks.activity.readinessItem', { item })}
       </Link>{' '}
-      has the fix.
+      {t('locks.activity.readinessFix')}
     </>
   )
 }
@@ -113,34 +126,36 @@ function ActiveSessions({
   instanceId: string
   sampleStale: boolean
 }) {
+  const t = useT()
   return (
     <div className="mt-6">
-      <BlockHeading captionId="activity.sessions-active" title="Active sessions" />
+      <BlockHeading
+        captionId="activity.sessions-active"
+        title={t('locks.activity.activeSessions')}
+      />
       {sessions.length > 0 && !hasOrigin(sessions) ? (
-        <p className="text-muted-foreground mt-2 text-sm">
-          This server does not report the origin of a session, so application and pglens sessions
-          are not told apart.
-        </p>
+        <p className="text-muted-foreground mt-2 text-sm">{t('locks.activity.noOrigin')}</p>
       ) : null}
       {sessions.length === 0 ? (
-        <p className="text-muted-foreground mt-2 text-sm">
-          No active sessions in the latest sample.
-        </p>
+        <p className="text-muted-foreground mt-2 text-sm">{t('locks.activity.noActiveSessions')}</p>
       ) : (
-        <ul aria-label="Active sessions" className="mt-3 space-y-3">
+        <ul aria-label={t('locks.activity.activeSessions')} className="mt-3 space-y-3">
           {sessions.map((session) => (
             <li key={sessionKey(session)} className="rounded-md border p-3">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                <strong>PID {sessionValue(session.pid)}</strong>
+                <strong>
+                  {t('locks.sessions.pid')} {sessionValue(session.pid)}
+                </strong>
                 <span>{sessionValue(session.state)}</span>
                 <span className="text-muted-foreground">
-                  database {sessionValue(session.datname ?? session.database)}; user{' '}
-                  {sessionValue(session.usename ?? session.username ?? session.user)}
+                  {t('locks.activity.sessionDbUser', {
+                    database: sessionValue(session.datname ?? session.database),
+                    user: sessionValue(session.usename ?? session.username ?? session.user),
+                  })}
                 </span>
               </div>
               <p className="text-muted-foreground mt-1 truncate text-sm">
-                {sessionQuery(session.query) ??
-                  'Query text shown only for sessions in a blocking tree.'}
+                {sessionQuery(session.query) ?? t('locks.activity.queryBlockingOnly')}
               </p>
               <SignalActions
                 currentTier={currentTier}
@@ -184,34 +199,36 @@ function XminHorizonBlock({
   metrics: ActivityMetrics
   holder: XminHorizon | null | undefined
 }) {
+  const t = useT()
   const xmin = xminHorizonState(metrics, holder)
   return (
     <div className="mt-6">
-      <BlockHeading captionId="activity.xmin-holder" title="Oldest cleanup blocker (xmin holder)" />
+      <BlockHeading
+        captionId="activity.xmin-holder"
+        help={<HelpLink anchor="locks#xmin-holder" label={t('locks.activity.xminHolder')} />}
+        title={t('locks.activity.xminHolder')}
+      />
       {xmin.state === 'holder' ? (
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[max-content_1fr]">
-          <dt className="text-muted-foreground">Holder kind</dt>
-          <dd>{XMIN_HOLDER_KIND_LABELS[xmin.holder.holder_kind]}</dd>
-          <dt className="text-muted-foreground">{XMIN_IDENTITY_LABELS[xmin.holder.holder_kind]}</dt>
+          <dt className="text-muted-foreground">{t('locks.activity.holderKind')}</dt>
+          <dd>{xminHolderKindLabel(xmin.holder.holder_kind)}</dd>
+          <dt className="text-muted-foreground">{xminIdentityLabel(xmin.holder.holder_kind)}</dt>
           <dd className="break-all">{xminIdentityText(xmin.holder)}</dd>
-          <dt className="text-muted-foreground">Age in transaction IDs</dt>
+          <dt className="text-muted-foreground">{t('locks.activity.ageXids')}</dt>
           <dd className="tabular-nums">{formatCount(xmin.holder.age_xids)}</dd>
-          <dt className="text-muted-foreground">Time since start</dt>
+          <dt className="text-muted-foreground">{t('locks.activity.timeSinceStart')}</dt>
           <dd>
             {xmin.holder.age_seconds === null
-              ? 'not measured for this holder kind'
+              ? t('locks.activity.notMeasured')
               : formatDuration(xmin.holder.age_seconds)}
           </dd>
         </dl>
       ) : xmin.state === 'none' ? (
-        <p className="text-muted-foreground mt-2 text-sm">{XMIN_NONE_TEXT}</p>
+        <p className="text-muted-foreground mt-2 text-sm">{xminNoneText()}</p>
       ) : (
-        <p className="text-muted-foreground mt-2 text-sm">{XMIN_PENDING_TEXT}</p>
+        <p className="text-muted-foreground mt-2 text-sm">{xminPendingText()}</p>
       )}
-      <p className="text-muted-foreground mt-2 text-sm">
-        The xmin horizon is the oldest transaction ID VACUUM must keep. Time since start is the
-        start of the session's transaction, or the prepare time of a prepared transaction.
-      </p>
+      <p className="text-muted-foreground mt-2 text-sm">{t('locks.activity.xminExplanation')}</p>
     </div>
   )
 }
@@ -223,8 +240,9 @@ function BreakdownList({
   label: string
   rows: readonly { label: string; value: number }[]
 }) {
+  const t = useT()
   if (rows.length === 0) {
-    return <p className="text-muted-foreground text-sm">No samples reported.</p>
+    return <p className="text-muted-foreground text-sm">{t('locks.activity.noSamples')}</p>
   }
 
   return (
@@ -262,6 +280,7 @@ export function ActivitySection({
   instanceId?: string
   now?: Date
 }) {
+  const t = useT()
   const sampledAt = useMemo(() => latestSampleAt(response.metrics), [response.metrics])
   const age = ageSince(sampledAt, now)
   const sampleStale = response.stale || (age !== null && age > STALE_THRESHOLD_SECONDS)
@@ -287,23 +306,21 @@ export function ActivitySection({
   const showDetails = part !== 'tiles'
 
   return (
-    <Section captionId="activity.section" title="Activity">
+    <Section
+      actions={<HelpLink anchor="locks#activity-tiles" label={t('locks.activity.tilesHelp')} />}
+      captionId="activity.section"
+      title={t('locks.activity.title')}
+    >
       <p className="text-muted-foreground mb-3 text-sm">
-        Activity is sampled every {SAMPLE_INTERVAL_SECONDS} seconds. Breakdowns are available per
-        state and per database
-        {connections ? (
-          <>
-            ; application counts are on by default and can be turned off in the agent. Connections
-            are split by origin: application or pglens.
-          </>
-        ) : (
-          <>; application counts appear only when the agent opts in.</>
-        )}
-        {sampledAt ? <> Latest activity sample: {formatRelative(sampledAt, now)}.</> : null}
+        {t('locks.activity.sampleInterval', { seconds: SAMPLE_INTERVAL_SECONDS })}
+        {connections ? t('locks.activity.originOn') : t('locks.activity.originOff')}
+        {sampledAt ? (
+          <> {t('locks.activity.latestSample', { time: formatRelative(sampledAt, now) })}</>
+        ) : null}
       </p>
       {response.stale && age !== null ? (
         <Stale age={age} threshold={STALE_THRESHOLD_SECONDS}>
-          <span>Activity data is older than the freshness threshold.</span>
+          <span>{t('locks.activity.staleData')}</span>
         </Stale>
       ) : null}
 
@@ -311,7 +328,7 @@ export function ActivitySection({
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <MetricTile
             captionId="activity.connections-used"
-            label="Connections used"
+            label={t('locks.activity.connectionsUsed')}
             value={used !== null ? formatCount(used) : <Unknown />}
             unit={used !== null ? 'connections' : undefined}
             detail={
@@ -320,28 +337,31 @@ export function ActivitySection({
                   {limit !== null ? (
                     <span>
                       {saturation.ratio === null
-                        ? `Limit set by max_connections: ${formatCount(limit)} connections.`
-                        : `Of ${formatCount(limit)} allowed by max_connections, the server setting for the most connections (${formatPercent(saturation.ratio, 1) ?? ''} used).`}
+                        ? t('locks.activity.limitSet', { limit: formatCount(limit) })
+                        : t('locks.activity.limitOf', {
+                            limit: formatCount(limit),
+                            percent: formatPercent(saturation.ratio, 1) ?? '',
+                          })}
                     </span>
                   ) : null}{' '}
-                  {connections ? <span>{originDetail(connections)}</span> : null}
+                  {connections ? <span>{originDetail(connections, t)}</span> : null}
                 </>
               ) : undefined
             }
           />
           <MetricTile
             captionId="activity.longest-transaction"
-            label="Longest transaction"
+            label={t('locks.activity.longestTransaction')}
             value={durationOrUnknown(maxTransactionAge)}
           />
           <MetricTile
             captionId="activity.longest-idle-transaction"
-            label="Longest idle-in-transaction"
+            label={t('locks.activity.longestIdle')}
             value={durationOrUnknown(maxIdleTransactionAge)}
           />
           <MetricTile
             captionId="activity.oldest-state-age"
-            label="Oldest state age"
+            label={t('locks.activity.oldestStateAge')}
             value={durationOrUnknown(maxStateAge)}
           />
         </div>
@@ -350,23 +370,27 @@ export function ActivitySection({
       {showDetails ? (
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           <div>
-            <BlockHeading captionId="activity.saturation" title="Connection saturation" />
+            <BlockHeading captionId="activity.saturation" title={t('locks.activity.saturation')} />
             {saturation.ratio === null ? (
-              <p className="text-muted-foreground mt-2 text-sm">No connection limit sample.</p>
+              <p className="text-muted-foreground mt-2 text-sm">
+                {t('locks.activity.noLimitSample')}
+              </p>
             ) : (
               <p role="status" className="text-muted-foreground mt-2 text-sm">
-                {saturation.saturated ? 'Near max_connections.' : 'Below the saturation threshold.'}{' '}
-                The advisor warns when connections go above 80 % of max_connections.
+                {saturation.saturated
+                  ? t('locks.activity.saturationNear')
+                  : t('locks.activity.saturationBelow')}{' '}
+                {t('locks.activity.saturationAdvice')}
               </p>
             )}
           </div>
           <div>
-            <BlockHeading captionId="activity.by-database" title="Connections by database" />
-            <BreakdownList label="Connections by database" rows={databaseRows} />
+            <BlockHeading captionId="activity.by-database" title={t('locks.activity.byDatabase')} />
+            <BreakdownList label={t('locks.activity.byDatabase')} rows={databaseRows} />
           </div>
           <div>
-            <BlockHeading captionId="activity.by-state" title="Connections by state" />
-            <BreakdownList label="Connections by state" rows={stateRows} />
+            <BlockHeading captionId="activity.by-state" title={t('locks.activity.byState')} />
+            <BreakdownList label={t('locks.activity.byState')} rows={stateRows} />
           </div>
         </div>
       ) : null}
@@ -376,7 +400,7 @@ export function ActivitySection({
           <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <MetricTile
               captionId="activity.prepared-transactions"
-              label="Prepared transactions"
+              label={t('locks.activity.preparedTransactions')}
               unit={
                 preparedTransactions !== null && preparedTransactions !== undefined
                   ? 'transactions'
@@ -386,13 +410,13 @@ export function ActivitySection({
             />
             <MetricTile
               captionId="activity.oldest-prepared-transaction"
-              label="Oldest prepared transaction"
+              label={t('locks.activity.oldestPrepared')}
               value={durationOrUnknown(oldestPreparedTransaction)}
             />
             <MetricTile
               captionId="activity.frozen-xid-age"
-              detail="Transaction IDs used since the oldest database was last frozen."
-              label="Transactions since oldest freeze"
+              detail={t('locks.activity.frozenDetail')}
+              label={t('locks.activity.sinceFreeze')}
               unit={
                 frozenXidAge !== null && frozenXidAge !== undefined ? 'transactions' : undefined
               }
@@ -400,16 +424,15 @@ export function ActivitySection({
             />
             <MetricTile
               captionId="activity.deadlock-rate"
-              label="Deadlock rate"
+              label={t('locks.activity.deadlockRate')}
               value={rate === null ? <Unknown /> : deadlockRateText(rate)}
               unit="per second"
             />
           </div>
           <p className="text-muted-foreground mt-3 text-sm">
-            Transactions since the oldest freeze: the advisor raises a critical finding at{' '}
-            {formatCount(WRAPAROUND_RISK_THRESHOLD)}, before transaction IDs run out. Deadlock rate
-            is the sum of each database's latest rate; identifying involved statements requires
-            PostgreSQL log analysis.
+            {t('locks.activity.wraparoundNote', {
+              threshold: formatCount(WRAPAROUND_RISK_THRESHOLD),
+            })}
           </p>
         </>
       ) : null}
@@ -419,16 +442,19 @@ export function ActivitySection({
           <XminHorizonBlock holder={response.xmin_horizon} metrics={response.metrics} />
 
           <div className="mt-6">
-            <BlockHeading captionId="activity.by-application" title="Connections by application" />
-            <BreakdownList label="Connections by application" rows={applicationRows} />
+            <BlockHeading
+              captionId="activity.by-application"
+              title={t('locks.activity.byApplication')}
+            />
+            <BreakdownList label={t('locks.activity.byApplication')} rows={applicationRows} />
             {connections?.by_application_enabled === false ? (
               <>
                 <Disabled
-                  feature="Per-application activity counts"
+                  feature={t('locks.activity.disabledFeature')}
                   configKey="checks.activity.by_application"
                 />
                 <p className="text-muted-foreground mt-2 text-sm">
-                  This breakdown is opt-in and was not reported by the agent.
+                  {t('locks.activity.optIn')}
                   <ReadinessLink instanceId={instanceId} item="RDY-ACT-01" />
                 </p>
               </>

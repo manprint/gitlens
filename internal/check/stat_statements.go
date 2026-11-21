@@ -36,9 +36,10 @@ type textCache struct {
 	lastUsed time.Time
 }
 
-// sentText is one shipped query text and when it was shipped.
+// sentText records one shipped query text: the server's hash of its raw text,
+// which tells a changed text without reading it, and when it was shipped.
 type sentText struct {
-	text   string
+	hash   int64
 	sentAt time.Time
 }
 
@@ -102,7 +103,8 @@ type statementRow struct {
 	SharedBlksRead  int64
 	WALBytes        int64
 	TempBlksWritten int64
-	Query           *string
+	// TextHash is hashtextextended of the raw query text, nil when unknown.
+	TextHash *int64
 }
 
 // statementsQuery aggregates per queryid before ranking. pg_stat_statements
@@ -114,8 +116,12 @@ type statementRow struct {
 //
 // The view is referenced once: every reference re-reads the whole external
 // query-text file. %[1]s selects the database whose rows are read, %[2]d is
-// the per-ranking pre-filter, %[3]s is the view's schema-qualified name and
-// %[4]d is statementTextLimit.
+// the per-ranking pre-filter and %[3]s is the view's schema-qualified name.
+//
+// The text itself is not read here: up to twice the pre-filter rows rank, and
+// their texts ran to megabytes on every scrape although the server already
+// stored nearly all of them. A hash of each text stands in for it, and
+// statementTextsQuery reads only the texts the server lacks.
 const statementsQuery = `
 WITH agg AS (
     SELECT queryid,
@@ -139,19 +145,30 @@ ranked AS (
 )
 SELECT a.queryid, a.calls, a.total_exec_time, a.rows,
        a.shared_blks_hit, a.shared_blks_read, a.wal_bytes, a.temp_blks_written,
-       CASE WHEN octet_length(a.query) <= %[4]d THEN a.query END,
+       hashtextextended(a.query, 0),
        (SELECT count(*) FROM agg)
   FROM agg a
   JOIN ranked USING (queryid)
  ORDER BY a.queryid`
 
-// statementTextLimit is the longest query text the statements query reads. A
+// statementTextsQuery reads the raw texts of the queryids in %[4]s, for the
+// database %[1]s selects, through the view %[2]s. A text longer than %[3]d
+// bytes reads as NULL.
+const statementTextsQuery = `
+SELECT queryid, CASE WHEN octet_length(q) <= %[3]d THEN q END
+  FROM (SELECT queryid, min(query) AS q
+          FROM %[2]s
+         WHERE dbid = (SELECT oid FROM pg_database WHERE datname = %[1]s)
+           AND queryid = ANY (%[4]s::bigint[])
+         GROUP BY queryid) t`
+
+// statementTextLimit is the longest query text the texts query reads. A
 // longer text is read as NULL and not shipped: only a text read whole can be
 // redacted, since a credential's keyword may lie past any cut. PostgreSQL keeps
 // utility statements whole, so a long DO block or CREATE FUNCTION keeps its
-// full text and is affected by the limit. The ranking reads at most twice the
-// prefilter rows, so the worst case per scrape is that count times this limit,
-// about 9.8 MB at the prefilter's minimum of 300.
+// full text and is affected by the limit. Only the reported statements whose
+// text the server lacks are read, so the worst case per scrape is the
+// selector's MaxKeys times this limit, and a steady workload reads none.
 const statementTextLimit = 16384
 
 // textResendInterval bounds how long a shipped query text is trusted to be
@@ -170,26 +187,32 @@ func (c *statStatementsCheck) Scrape(ctx context.Context, t Target) (Result, err
 	if err != nil {
 		return Result{}, err
 	}
-	parsed, distinct, statsReset, err := readStatements(ctx, conn, c.Timeout(), "current_database()", prefilter)
-	conn.Release()
+	// The texts are read later through the same connection and view, for the
+	// same database, as the statistics.
+	database, args := "current_database()", []any(nil)
+	read, err := readStatements(ctx, conn, c.Timeout(), database, prefilter)
 	if pgErrorCode(err) == pgUndefinedTable {
 		// CREATE EXTENSION creates the view in one database only, while the
 		// statistics themselves are cluster-wide. The agent found the view
 		// in another database when it scheduled this check, so read this
 		// database's rows through it instead of reporting nothing for it.
-		source, serr := StatementsConn(ctx, t)
-		if serr != nil {
-			return Result{}, serr
+		conn.Release()
+		conn, err = StatementsConn(ctx, t)
+		if err != nil {
+			return Result{}, err
 		}
-		parsed, distinct, statsReset, err = readStatements(ctx, source, c.Timeout(), "$1", prefilter, t.Database())
-		source.Release()
+		database, args = "$1", []any{t.Database()}
+		read, err = readStatements(ctx, conn, c.Timeout(), database, prefilter, args...)
 		if pgErrorCode(err) == pgUndefinedTable {
+			conn.Release()
 			return Result{}, fmt.Errorf("pg_stat_statements is not installed in database %q nor in %s: %w", t.Database(), StatementsSourceName(t), err)
 		}
 	}
+	defer conn.Release()
 	if err != nil {
 		return Result{}, explainStatementsError(err)
 	}
+	parsed, distinct, statsReset := read.rows, read.distinct, read.statsReset
 
 	candidates := make([]cardinality.Candidate, 0, len(parsed))
 	for _, r := range parsed {
@@ -248,7 +271,7 @@ func (c *statStatementsCheck) Scrape(ctx context.Context, t Target) (Result, err
 	// check's own retention state stays bounded too, not just its output.
 	selected, truncated := selector.Select(cycle, candidates)
 	selector.Forget(cycle)
-	queryTexts := make(map[int64]string)
+	var needText []int64
 
 	var metrics []pgtype.Metric
 	rowsByID := make(map[int64]statementRow, len(parsed))
@@ -310,17 +333,31 @@ func (c *statStatementsCheck) Scrape(ctx context.Context, t Target) (Result, err
 			Labels: labels,
 		})
 
-		if r.Query != nil {
-			// Redacted before the cache sees it, so a credential is neither
-			// shipped nor kept in memory. The text is cut to its display size
-			// only after redaction, because a cut before it can drop the keyword
-			// that makes a value a credential.
-			text := truncateUTF8(redactQueryText(*r.Query), 8192)
+		if r.TextHash != nil {
 			prev, cached := cache.Get(r.QueryID)
-			if !cached || prev.text != text || now.Sub(prev.sentAt) >= textResendInterval {
-				queryTexts[r.QueryID] = text
-				cache.Add(r.QueryID, sentText{text: text, sentAt: now})
+			if !cached || prev.hash != *r.TextHash || now.Sub(prev.sentAt) >= textResendInterval {
+				needText = append(needText, r.QueryID)
 			}
+		}
+	}
+
+	queryTexts := make(map[int64]string)
+	if len(needText) > 0 {
+		texts, err := readStatementTexts(ctx, conn, read.schema, database, needText, args...)
+		if err != nil {
+			return Result{}, err
+		}
+		for _, id := range needText {
+			raw, ok := texts[id]
+			if !ok {
+				continue // longer than statementTextLimit, or gone since
+			}
+			// Redacted before it is kept, so a credential is never shipped.
+			// The text is cut to its display size only after redaction,
+			// because a cut before it can drop the keyword that makes a value
+			// a credential.
+			queryTexts[id] = truncateUTF8(redactQueryText(raw), 8192)
+			cache.Add(id, sentText{hash: *rowsByID[id].TextHash, sentAt: now})
 		}
 	}
 
@@ -336,13 +373,13 @@ func (c *statStatementsCheck) Scrape(ctx context.Context, t Target) (Result, err
 // readStatements runs the aggregated statements query on conn and reads the
 // extension's reset time. database is the SQL expression naming the database
 // whose rows are read; args are its parameters.
-func readStatements(ctx context.Context, conn Conn, timeout time.Duration, database string, prefilter int, args ...any) ([]statementRow, int64, *time.Time, error) {
+func readStatements(ctx context.Context, conn Conn, timeout time.Duration, database string, prefilter int, args ...any) (statementsRead, error) {
 	if err := ApplySessionLimits(ctx, conn, timeout); err != nil {
-		return nil, 0, nil, err
+		return statementsRead{}, err
 	}
 	schema, err := ExtensionSchema(ctx, conn, "pg_stat_statements")
 	if err != nil {
-		return nil, 0, nil, err
+		return statementsRead{}, err
 	}
 	// With compute_query_id off PostgreSQL computes no query ID, so the view
 	// records no statement that runs from then on and keeps the rows it had.
@@ -351,15 +388,15 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 	var queryIDSetting string
 	err = conn.QueryRow(ctx, "SELECT current_setting('compute_query_id')").Scan(&queryIDSetting)
 	if err != nil {
-		return nil, 0, nil, err
+		return statementsRead{}, err
 	}
 	if queryIDSetting == "off" {
-		return nil, 0, nil, errors.New("compute_query_id is off, so pg_stat_statements records no new statements (set compute_query_id to auto or on)")
+		return statementsRead{}, errors.New("compute_query_id is off, so pg_stat_statements records no new statements (set compute_query_id to auto or on)")
 	}
 	view := pgx.Identifier{schema, "pg_stat_statements"}.Sanitize()
-	rows, err := conn.Query(ctx, fmt.Sprintf(statementsQuery, database, prefilter, view, statementTextLimit), args...)
+	rows, err := conn.Query(ctx, fmt.Sprintf(statementsQuery, database, prefilter, view), args...)
 	if err != nil {
-		return nil, 0, nil, err
+		return statementsRead{}, err
 	}
 	defer rows.Close()
 
@@ -369,13 +406,13 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 		var r statementRow
 		if err := rows.Scan(&r.QueryID, &r.Calls, &r.TotalExecTime, &r.Rows,
 			&r.SharedBlksHit, &r.SharedBlksRead, &r.WALBytes, &r.TempBlksWritten,
-			&r.Query, &distinct); err != nil {
-			return nil, 0, nil, err
+			&r.TextHash, &distinct); err != nil {
+			return statementsRead{}, err
 		}
 		parsed = append(parsed, r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, nil, err
+		return statementsRead{}, err
 	}
 
 	// pg_stat_statements_info only exists from extension version 1.9 on; an
@@ -383,9 +420,44 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 	var statsReset *time.Time
 	err = conn.QueryRow(ctx, "SELECT stats_reset FROM "+pgx.Identifier{schema, "pg_stat_statements_info"}.Sanitize()).Scan(&statsReset)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) && pgErrorCode(err) != pgUndefinedTable {
-		return nil, 0, nil, err
+		return statementsRead{}, err
 	}
-	return parsed, distinct, statsReset, nil
+	return statementsRead{rows: parsed, distinct: distinct, statsReset: statsReset, schema: schema}, nil
+}
+
+// statementsRead is what readStatements read: the ranked rows, the count of
+// distinct statements, the extension's reset time and the extension's schema.
+type statementsRead struct {
+	rows       []statementRow
+	distinct   int64
+	statsReset *time.Time
+	schema     string
+}
+
+// readStatementTexts reads the raw texts of ids through the view in schema,
+// for the database the SQL expression database names; args are that
+// expression's parameters. An id whose text is too long, or that is gone,
+// is missing from the result.
+func readStatementTexts(ctx context.Context, conn Conn, schema, database string, ids []int64, args ...any) (map[int64]string, error) {
+	view := pgx.Identifier{schema, "pg_stat_statements"}.Sanitize()
+	query := fmt.Sprintf(statementTextsQuery, database, view, statementTextLimit, fmt.Sprintf("$%d", len(args)+1))
+	rows, err := conn.Query(ctx, query, append(append([]any(nil), args...), ids)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	texts := make(map[int64]string, len(ids))
+	for rows.Next() {
+		var id int64
+		var text *string
+		if err := rows.Scan(&id, &text); err != nil {
+			return nil, err
+		}
+		if text != nil {
+			texts[id] = *text
+		}
+	}
+	return texts, rows.Err()
 }
 
 // explainStatementsError turns the two misconfigurations that used to be

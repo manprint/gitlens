@@ -2,12 +2,26 @@ import { useMemo, useState } from 'react'
 
 import { usePlans } from '@/api/queries'
 import type { Schemas } from '@/api/types'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
 import { Degraded } from '@/components/state/Degraded'
 import { ErrorState } from '@/components/state/ErrorState'
+import { Badge } from '@/components/ui/badge'
 import type { TableToolbarSpec } from '@/hooks/useFilteredRows'
-import { formatTimestamp } from '@/lib/format'
+import { type Translate, useT } from '@/i18n/react'
+import { formatCount, formatDecimal, formatMilliseconds, formatTimestamp } from '@/lib/format'
+import {
+  changeRatio,
+  diffPlans,
+  parsePlan,
+  type NodeChange,
+  type ParsedPlan,
+  type PlanDiffRow,
+  type PlanNodeView,
+} from '@/lib/planTree'
+
+import { PlanView } from './PlanView'
 
 type Plan = Schemas['Plan']
 
@@ -17,38 +31,12 @@ interface PlanHistoryProps {
   datname?: string
 }
 
-interface PlanNodeSnapshot {
-  path: string
-  nodeType: string
-  totalCost: number | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function flattenPlan(value: unknown, path = 'root', result: PlanNodeSnapshot[] = []) {
-  if (Array.isArray(value)) {
-    value.forEach((child, index) => flattenPlan(child, `${path}.${index}`, result))
-    return result
-  }
-  if (!isRecord(value)) return result
-
-  if (typeof value['Node Type'] === 'string') {
-    const rawCost = value['Total Cost']
-    result.push({
-      path,
-      nodeType: value['Node Type'],
-      totalCost: typeof rawCost === 'number' && Number.isFinite(rawCost) ? rawCost : null,
-    })
-  }
-
-  Object.entries(value).forEach(([key, child]) => {
-    if (key !== 'Node Type' && key !== 'Total Cost') {
-      flattenPlan(child, `${path}.${key}`, result)
-    }
-  })
-  return result
+interface Capture {
+  key: string
+  plan: Plan
+  parsed: ParsedPlan | null
+  /** Short form of the shape hash, the same for every capture of one shape. */
+  shape: string
 }
 
 function planKey(plan: Plan): string {
@@ -63,121 +51,272 @@ function sortPlans(plans: Plan[]): Plan[] {
   })
 }
 
-function planKind(plan: Plan): string {
+function kindOf(plan: Plan): string {
   return plan.analyzed ? 'ANALYZE' : 'EXPLAIN'
 }
 
-function describePlan(plan: Plan): string {
-  return `${formatTimestamp(plan.captured_at, 'UTC')} · ${planKind(plan)} · ${plan.plan_hash}`
+function topOperation(parsed: ParsedPlan | null, t: Translate): string {
+  const root = parsed?.nodes[0]
+  if (!root) return '—'
+  return root.object
+    ? t('queries.planHistory.operationOn', { title: root.title, object: root.object })
+    : root.title
 }
 
-function firstTwo(plans: Plan[]): [Plan, Plan] | null {
-  if (plans.length < 2) return null
-  const [first, second] = plans
-  return first && second ? [first, second] : null
+function captureLabel(capture: Capture, t: Translate): string {
+  return t('queries.planHistory.captureLabel', {
+    time: formatTimestamp(capture.plan.captured_at),
+    kind: kindOf(capture.plan),
+    shape: capture.shape,
+  })
 }
 
-function plansDiffer(left: PlanNodeSnapshot | undefined, right: PlanNodeSnapshot | undefined) {
-  return (
-    left?.nodeType !== right?.nodeType ||
-    left?.totalCost !== right?.totalCost ||
-    left === undefined ||
-    right === undefined
-  )
-}
-
-interface ComparisonRow {
-  path: string
-  left: PlanNodeSnapshot | undefined
-  right: PlanNodeSnapshot | undefined
-  different: boolean
-}
-
-function nodeText(node: PlanNodeSnapshot | undefined): string {
-  return node ? `${node.nodeType} · cost ${node.totalCost ?? '—'}` : '—'
-}
-
-const COMPARISON_TOOLBAR: TableToolbarSpec<ComparisonRow> = {
-  searchFields: [(row) => row.path, (row) => row.left?.nodeType, (row) => row.right?.nodeType],
-  filters: [
-    {
-      id: 'difference',
-      label: 'Difference',
-      kind: 'select',
-      options: [
-        { value: 'differs', label: 'Differs' },
-        { value: 'same', label: 'Same' },
-      ],
-      accessor: (row) => (row.different ? 'differs' : 'same'),
-    },
-  ],
-}
-
-function nodeCell(row: ComparisonRow, node: PlanNodeSnapshot | undefined) {
-  return row.different ? (
-    <span className="bg-warning/15 -mx-1 block px-1" data-different="true" data-testid="plan-diff">
-      {nodeText(node)}
-    </span>
-  ) : (
-    nodeText(node)
-  )
-}
-
-function PlanComparison({ plans }: { plans: [Plan, Plan] }) {
-  const [left, right] = plans
-  const rows = useMemo(() => {
-    const leftNodes = flattenPlan(left.plan)
-    const rightNodes = flattenPlan(right.plan)
-    const leftByPath = new Map(leftNodes.map((node) => [node.path, node]))
-    const rightByPath = new Map(rightNodes.map((node) => [node.path, node]))
-    const paths = [
-      ...new Set([...leftNodes.map((node) => node.path), ...rightNodes.map((node) => node.path)]),
-    ]
-    return paths.map((path) => {
-      const leftNode = leftByPath.get(path)
-      const rightNode = rightByPath.get(path)
-      return { path, left: leftNode, right: rightNode, different: plansDiffer(leftNode, rightNode) }
-    })
-  }, [left.plan, right.plan])
-  // Rows keep the plan's tree order: only the path sorts, the plan columns do not.
-  const columns = useMemo<SimpleColumn<ComparisonRow>[]>(
-    () => [
+function captureToolbar(t: Translate): TableToolbarSpec<Capture> {
+  return {
+    searchFields: [(row) => row.shape, (row) => topOperation(row.parsed, t)],
+    filters: [
       {
-        id: 'path',
-        header: 'Path',
-        rowHeader: true,
-        sortValue: (row) => row.path,
-        className: 'font-normal',
-        cell: (row) => row.path,
+        id: 'kind',
+        label: t('queries.common.kind'),
+        kind: 'select',
+        options: [
+          { value: 'EXPLAIN', label: 'EXPLAIN' },
+          { value: 'ANALYZE', label: 'ANALYZE' },
+        ],
+        accessor: (row) => kindOf(row.plan),
       },
-      { id: 'left', header: planKey(left), cell: (row) => nodeCell(row, row.left) },
-      { id: 'right', header: planKey(right), cell: (row) => nodeCell(row, row.right) },
     ],
-    [left, right],
+  }
+}
+
+function ratioText(left: number | null, right: number | null): string | null {
+  const ratio = changeRatio(left, right)
+  if (ratio === null || Math.abs(ratio - 1) < 0.1) return null
+  return ratio > 1 ? `+${Math.round((ratio - 1) * 100)}%` : `−${Math.round((1 - ratio) * 100)}%`
+}
+
+function Figure({
+  left,
+  right,
+  format,
+}: {
+  left: number | null
+  right: number | null
+  format: (value: number) => string
+}) {
+  if (left === null && right === null) return <span className="text-muted-foreground">—</span>
+  const delta = ratioText(left, right)
+  return (
+    <span className="whitespace-nowrap tabular-nums">
+      {left === null ? '—' : format(left)} → {right === null ? '—' : format(right)}
+      {delta && (
+        <span
+          className={`ml-1 text-xs font-medium ${delta.startsWith('+') ? 'text-destructive' : 'text-success'}`}
+        >
+          {delta}
+        </span>
+      )}
+    </span>
   )
+}
+
+const CHANGE_KEY = {
+  same: 'queries.planHistory.changeSame',
+  changed: 'queries.planHistory.changeChanged',
+  added: 'queries.planHistory.changeAdded',
+  removed: 'queries.planHistory.changeRemoved',
+} as const satisfies Record<NodeChange, string>
+
+const CHANGE_STYLE: Record<NodeChange, string> = {
+  same: 'text-muted-foreground',
+  changed: 'bg-warning/20',
+  added: 'bg-success/15 text-success',
+  removed: 'bg-destructive/10 text-destructive',
+}
+
+function operationText(node: PlanNodeView | undefined, t: Translate): string {
+  if (!node) return '—'
+  return node.object
+    ? t('queries.planHistory.operationOn', { title: node.title, object: node.object })
+    : node.title
+}
+
+function comparisonToolbar(t: Translate): TableToolbarSpec<PlanDiffRow> {
+  return {
+    searchFields: [(row) => operationText(row.left, t), (row) => operationText(row.right, t)],
+    filters: [
+      {
+        id: 'difference',
+        label: t('queries.planHistory.difference'),
+        kind: 'select',
+        options: [
+          { value: 'differs', label: t('queries.planHistory.differs') },
+          { value: 'same', label: t('queries.planHistory.changeSame') },
+        ],
+        accessor: (row) => (row.change === 'same' ? 'same' : 'differs'),
+      },
+    ],
+  }
+}
+
+function PlanComparison({ older, newer }: { older: Capture; newer: Capture }) {
+  const t = useT()
+  const toolbar = useMemo(() => comparisonToolbar(t), [t])
+  const left = older.parsed
+  const right = newer.parsed
+  const rows = useMemo(() => (left && right ? diffPlans(left, right) : []), [left, right])
+  const bothAnalyzed = Boolean(left?.analyzed && right?.analyzed)
+  const columns = useMemo<SimpleColumn<PlanDiffRow>[]>(() => {
+    const list: SimpleColumn<PlanDiffRow>[] = [
+      {
+        id: 'operation',
+        header: t('queries.common.operation'),
+        rowHeader: true,
+        className: 'font-normal',
+        cell: (row) => {
+          const changedText =
+            row.change === 'changed' && operationText(row.left, t) !== operationText(row.right, t)
+          return (
+            <div style={{ paddingLeft: `${row.depth * 16}px` }}>
+              {changedText ? (
+                <>
+                  <span className="text-muted-foreground line-through">
+                    {operationText(row.left, t)}
+                  </span>
+                  <span className="block font-medium">{operationText(row.right, t)}</span>
+                </>
+              ) : (
+                <span className="font-medium">{operationText(row.right ?? row.left, t)}</span>
+              )}
+            </div>
+          )
+        },
+      },
+      {
+        id: 'change',
+        header: t('queries.planHistory.change'),
+        sortValue: (row) => t(CHANGE_KEY[row.change]),
+        cell: (row) => (
+          <span
+            className={`rounded px-1.5 py-0.5 text-xs font-medium ${CHANGE_STYLE[row.change]}`}
+            data-different={row.change === 'same' ? undefined : 'true'}
+            data-testid={row.change === 'same' ? undefined : 'plan-diff'}
+          >
+            {t(CHANGE_KEY[row.change])}
+          </span>
+        ),
+      },
+      {
+        id: 'cost',
+        header: t('queries.common.totalCost'),
+        sortValue: (row) => row.right?.totalCost ?? row.left?.totalCost ?? null,
+        cell: (row) => (
+          <Figure
+            left={row.left?.totalCost ?? null}
+            right={row.right?.totalCost ?? null}
+            format={(value) => formatDecimal(value, 2)}
+          />
+        ),
+      },
+      {
+        id: 'rows',
+        header: bothAnalyzed ? t('queries.common.rows') : t('queries.common.rowsEstimated'),
+        cell: (row) => (
+          <Figure
+            left={(bothAnalyzed ? row.left?.actualRows : row.left?.estimatedRows) ?? null}
+            right={(bothAnalyzed ? row.right?.actualRows : row.right?.estimatedRows) ?? null}
+            format={(value) => formatCount(Math.round(value))}
+          />
+        ),
+      },
+    ]
+    if (bothAnalyzed) {
+      list.push({
+        id: 'time',
+        header: t('queries.common.timeInNode'),
+        cell: (row) => (
+          <Figure
+            left={row.left?.exclusiveMs ?? null}
+            right={row.right?.exclusiveMs ?? null}
+            format={(value) => formatMilliseconds(value)}
+          />
+        ),
+      })
+    }
+    return list
+  }, [bothAnalyzed, t])
+
+  const changed = rows.filter((row) => row.change !== 'same').length
+  const sameShape = older.plan.plan_hash === newer.plan.plan_hash
 
   return (
     <section aria-labelledby="plan-comparison-title" className="space-y-3">
-      <h3 id="plan-comparison-title" className="font-medium">
-        Plan comparison
-      </h3>
-      <p className="text-muted-foreground text-sm">
-        Differing node types and total costs are highlighted.
+      <div className="flex items-center gap-1">
+        <h3 id="plan-comparison-title" className="font-medium">
+          {t('queries.planHistory.comparisonTitle')}
+        </h3>
+        <InfoHint id="queries.plan-comparison" label={t('queries.planHistory.comparisonTitle')} />
+      </div>
+      <dl
+        aria-label={t('queries.planHistory.comparedCaptures')}
+        className="grid grid-cols-[auto_1fr] gap-x-3 text-sm"
+      >
+        <dt className="text-muted-foreground">{t('queries.planHistory.older')}</dt>
+        <dd>{captureLabel(older, t)}</dd>
+        <dt className="text-muted-foreground">{t('queries.planHistory.newer')}</dt>
+        <dd>{captureLabel(newer, t)}</dd>
+      </dl>
+      <p role="note" className="text-sm font-medium">
+        {sameShape
+          ? t('queries.planHistory.shapeSame')
+          : t('queries.planHistory.shapeDiffers', { changed })}
       </p>
+      <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+        <div>
+          <dt className="text-muted-foreground text-xs">{t('queries.common.totalCost')}</dt>
+          <dd>
+            <Figure
+              left={left?.totalCost ?? null}
+              right={right?.totalCost ?? null}
+              format={(value) => formatDecimal(value, 2)}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground text-xs">{t('queries.common.executionTime')}</dt>
+          <dd>
+            <Figure
+              left={left?.executionMs ?? null}
+              right={right?.executionMs ?? null}
+              format={(value) => formatMilliseconds(value)}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground text-xs">{t('queries.common.rows')}</dt>
+          <dd>
+            <Figure
+              left={left?.rows ?? null}
+              right={right?.rows ?? null}
+              format={(value) => formatCount(Math.round(value))}
+            />
+          </dd>
+        </div>
+      </dl>
       {rows.length === 0 ? (
-        <p className="text-muted-foreground text-sm">Neither selected entry contains plan nodes.</p>
+        <p className="text-muted-foreground text-sm">{t('queries.planHistory.noOperations')}</p>
       ) : (
         <SimpleTable
-          ariaLabel="Plan comparison"
+          ariaLabel={t('queries.planHistory.comparisonTitle')}
           captionId="queries.plan-comparison"
-          caption="Side-by-side comparison of two query plans"
+          caption={t('queries.planHistory.comparisonCaption')}
           columns={columns}
           emptyState={null}
-          rowKey={(row) => row.path}
+          rowKey={(row) => row.id}
           rows={rows}
-          scope="plan nodes"
-          tableId="plan-history"
-          toolbar={COMPARISON_TOOLBAR}
+          scope={t('queries.planHistory.scopeOperations')}
+          tableId="plan-comparison"
+          toolbar={toolbar}
         />
       )}
     </section>
@@ -185,6 +324,8 @@ function PlanComparison({ plans }: { plans: [Plan, Plan] }) {
 }
 
 export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) {
+  const t = useT()
+  const toolbar = useMemo(() => captureToolbar(t), [t])
   const params = {
     queryid,
     ...(instanceId === undefined ? {} : { instance_id: instanceId }),
@@ -193,39 +334,133 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
   }
   const plansQuery = usePlans(params)
   const response = plansQuery.data as Schemas['PlansResponse'] | undefined
-  const plans = useMemo(() => sortPlans(response?.plans ?? []), [response?.plans])
+  const captures = useMemo<Capture[]>(
+    () =>
+      sortPlans(response?.plans ?? []).map((plan) => ({
+        key: planKey(plan),
+        plan,
+        parsed: parsePlan(plan.plan),
+        shape: plan.plan_hash.slice(0, 8),
+      })),
+    [response?.plans],
+  )
   const [selectedKeys, setSelectedKeys] = useState<string[]>([])
-  const selectedPlans = plans.filter((plan) => selectedKeys.includes(planKey(plan))).slice(0, 2)
-  const selectedPair = firstTwo(selectedPlans)
+  const selected = captures.filter((capture) => selectedKeys.includes(capture.key))
 
-  const togglePlan = (plan: Plan) => {
-    const key = planKey(plan)
+  const toggle = (capture: Capture) => {
     setSelectedKeys((current) => {
-      if (current.includes(key)) return current.filter((selectedKey) => selectedKey !== key)
-      return [...current, key].slice(-2)
+      if (current.includes(capture.key)) return current.filter((key) => key !== capture.key)
+      return [...current, capture.key].slice(-2)
     })
   }
 
+  const columns: SimpleColumn<Capture>[] = [
+    {
+      id: 'select',
+      header: t('queries.common.select'),
+      srOnlyHeader: true,
+      cell: (row) => (
+        <input
+          type="checkbox"
+          aria-label={t('queries.planHistory.selectCaptured', {
+            time: formatTimestamp(row.plan.captured_at),
+          })}
+          checked={selectedKeys.includes(row.key)}
+          onChange={() => toggle(row)}
+        />
+      ),
+    },
+    {
+      id: 'captured',
+      header: t('queries.planHistory.captured'),
+      rowHeader: true,
+      sortValue: (row) => Date.parse(row.plan.captured_at),
+      cell: (row) => formatTimestamp(row.plan.captured_at),
+    },
+    {
+      id: 'kind',
+      header: t('queries.common.kind'),
+      sortValue: (row) => kindOf(row.plan),
+      cell: (row) => <Badge variant="outline">{kindOf(row.plan)}</Badge>,
+    },
+    {
+      id: 'shape',
+      header: t('queries.planHistory.shape'),
+      sortValue: (row) => row.shape,
+      cell: (row) => (
+        <span className="flex items-center gap-1.5">
+          <code className="font-mono text-xs" title={row.plan.plan_hash}>
+            {row.shape}
+          </code>
+          {row.plan.changed && (
+            <span className="bg-warning/20 rounded px-1.5 text-xs font-medium">
+              {t('queries.planHistory.newShape')}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'cost',
+      header: t('queries.common.totalCost'),
+      sortValue: (row) => row.parsed?.totalCost ?? null,
+      cell: (row) => (row.parsed?.totalCost == null ? '—' : formatDecimal(row.parsed.totalCost, 2)),
+    },
+    {
+      id: 'time',
+      header: t('queries.common.executionTime'),
+      sortValue: (row) => row.parsed?.executionMs ?? null,
+      cell: (row) =>
+        row.parsed?.executionMs === null || row.parsed?.executionMs === undefined
+          ? '—'
+          : formatMilliseconds(row.parsed.executionMs),
+    },
+    {
+      id: 'rows',
+      header: t('queries.common.rows'),
+      sortValue: (row) => row.parsed?.rows ?? null,
+      cell: (row) =>
+        row.parsed?.rows === null || row.parsed?.rows === undefined
+          ? '—'
+          : row.parsed.analyzed
+            ? formatCount(Math.round(row.parsed.rows))
+            : t('queries.planHistory.rowsEstimated', {
+                rows: formatCount(Math.round(row.parsed.rows)),
+              }),
+    },
+    {
+      id: 'top',
+      header: t('queries.planHistory.topOperation'),
+      cell: (row) => topOperation(row.parsed, t),
+    },
+  ]
+
   if (plansQuery.isPending && response === undefined) {
-    return <div role="status">Loading plan history…</div>
+    return <div role="status">{t('queries.planHistory.loading')}</div>
   }
 
   if (plansQuery.error && response === undefined) {
     if (plansQuery.error.kind === 'not_found') {
-      return (
-        <Degraded
-          reason={`Query ${String(queryid)} is no longer available in plan history. The entry may have been evicted from pg_stat_statements; query ids are only comparable within this cluster.`}
-        />
-      )
+      return <Degraded reason={t('queries.planHistory.evicted', { queryid: String(queryid) })} />
     }
     return (
       <ErrorState
-        endpoint="plan history"
+        endpoint={t('queries.planHistory.endpoint')}
         failure={plansQuery.error}
         onRetry={() => void plansQuery.refetch()}
       />
     )
   }
+
+  const shapes =
+    response?.total_shapes ?? new Set(captures.map((capture) => capture.plan.plan_hash)).size
+  const [first, second] = selected
+  const pair =
+    first && second
+      ? Date.parse(first.plan.captured_at) <= Date.parse(second.plan.captured_at)
+        ? { older: first, newer: second }
+        : { older: second, newer: first }
+      : null
 
   return (
     <section
@@ -237,49 +472,64 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
       <div>
         <div className="flex items-center gap-1">
           <h2 id="plan-history-title" className="text-base font-semibold">
-            Plan history
+            {t('queries.planHistory.title')}
           </h2>
-          <InfoHint id="queries.plan-history" label="Plan history" />
+          <InfoHint id="queries.plan-history" label={t('queries.planHistory.title')} />
+          <HelpLink
+            anchor="query-performance#plan-history"
+            label={t('queries.planHistory.title')}
+          />
         </div>
-        <p className="text-muted-foreground mt-1 text-sm">
-          History contains only explicitly requested EXPLAIN plans; pglens does not sample plans
-          automatically.
-        </p>
+        <p className="text-muted-foreground mt-1 text-sm">{t('queries.planHistory.intro')}</p>
       </div>
 
-      {plans.length === 0 ? (
+      {captures.length === 0 ? (
         <p role="status" className="text-muted-foreground text-sm">
-          No plan history yet. Request an EXPLAIN above to create the first entry.
+          {t('queries.planHistory.noHistory')}
         </p>
       ) : (
         <>
-          <ul aria-label="Plan history entries" className="space-y-2">
-            {plans.map((plan) => {
-              const key = planKey(plan)
-              const selected = selectedKeys.includes(key)
-              return (
-                <li key={key}>
-                  <button
-                    type="button"
-                    aria-pressed={selected}
-                    className={`hover:border-primary/40 w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${selected ? 'border-primary bg-primary/5 ring-primary/20 ring-2' : ''}`}
-                    onClick={() => togglePlan(plan)}
-                  >
-                    <span className="font-medium">{describePlan(plan)}</span>
-                    <span className="text-muted-foreground ml-2">plan {key}</span>
-                  </button>
-                </li>
-              )
+          <p className="text-sm">
+            {t('queries.planHistory.summary', {
+              shown: formatCount(captures.length),
+              captureCount: captures.length,
+              shownShapes: formatCount(shapes),
+              shapeCount: shapes,
             })}
-          </ul>
+          </p>
+          <SimpleTable
+            ariaLabel={t('queries.planHistory.entriesLabel')}
+            captionId="queries.plan-captures"
+            caption={t('queries.planHistory.capturedCaption')}
+            columns={columns}
+            emptyState={null}
+            rowKey={(row) => row.key}
+            rows={captures}
+            scope={t('queries.planHistory.scopePlans')}
+            tableId="plan-history"
+            toolbar={toolbar}
+          />
 
-          {selectedPair === null ? (
+          {selected.length === 0 && (
             <p role="status" className="text-muted-foreground text-sm">
-              Select two plan entries to compare them side by side.
+              {t('queries.planHistory.selectCapture')}
             </p>
-          ) : (
-            <PlanComparison plans={selectedPair} />
           )}
+          {selected.length === 1 &&
+            first &&
+            (first.parsed ? (
+              <PlanView
+                plan={first.parsed}
+                title={t('queries.planHistory.planCaptured', {
+                  time: formatTimestamp(first.plan.captured_at),
+                })}
+              />
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                {t('queries.planHistory.noOperationsCapture')}
+              </p>
+            ))}
+          {pair && <PlanComparison older={pair.older} newer={pair.newer} />}
         </>
       )}
     </section>

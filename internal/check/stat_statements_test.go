@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"strconv"
 	"strings"
 	"testing"
@@ -82,9 +83,9 @@ func TestStatStatements_QueryTextCacheIsScopedToClusterAndDatabase(t *testing.T)
 				return pgconn.CommandTag{}, nil
 			},
 			queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-				return &mockRows{rows: [][]any{
+				return answerStatements(sql, args, [][]any{
 					{int64(42), int64(100), float64(100), int64(1), int64(0), int64(0), int64(0), int64(0), &text, int64(1)},
-				}}, nil
+				})
 			},
 			queryRowFunc: func(ctx context.Context, sql string, args ...any) pgx.Row {
 				if strings.Contains(sql, "compute_query_id") {
@@ -189,7 +190,41 @@ func (f *statementsFixture) target() *SimpleTarget {
 }
 
 func statementRows(rows ...[]any) func(string, []any) (pgx.Rows, error) {
-	return func(string, []any) (pgx.Rows, error) { return &mockRows{rows: rows}, nil }
+	return func(sql string, args []any) (pgx.Rows, error) { return answerStatements(sql, args, rows) }
+}
+
+// answerStatements answers both queries of a scrape from rows written as the
+// statements query once returned them, with the raw text at index 8. The
+// statements query gets a hash of the text in its place; the texts query gets
+// the text of each queryid it asks for.
+func answerStatements(sql string, args []any, rows [][]any) (pgx.Rows, error) {
+	if strings.Contains(sql, "queryid = ANY") {
+		ids := args[len(args)-1].([]int64)
+		var out [][]any
+		for _, r := range rows {
+			text, _ := r[8].(*string)
+			for _, id := range ids {
+				if id == r[0].(int64) && text != nil {
+					out = append(out, []any{id, text})
+				}
+			}
+		}
+		return &mockRows{rows: out}, nil
+	}
+	out := make([][]any, len(rows))
+	for i, r := range rows {
+		row := append([]any(nil), r...)
+		var hash *int64
+		if text, _ := r[8].(*string); text != nil {
+			h := fnv.New64a()
+			_, _ = h.Write([]byte(*text))
+			v := int64(h.Sum64())
+			hash = &v
+		}
+		row[8] = hash
+		out[i] = row
+	}
+	return &mockRows{rows: out}, nil
 }
 
 func newStatementsCheck(opts cardinality.Options) *statStatementsCheck {
@@ -228,9 +263,13 @@ func TestStatStatements_FallsBackToMaintenanceDatabase(t *testing.T) {
 	res, err := newStatementsCheck(cardinality.Options{TopN: 50}).Scrape(context.Background(), f.target())
 	require.NoError(t, err)
 	require.NotEmpty(t, res.Metrics)
-	require.Len(t, f.sqls, 2)
+	require.Len(t, f.sqls, 3)
 	require.Contains(t, f.sqls[1], "datname = $1")
 	require.Equal(t, []any{"app"}, f.args[1], "the fallback must still read only the scraped database's rows")
+	require.Contains(t, f.sqls[2], "datname = $1")
+	require.Contains(t, f.sqls[2], "ANY ($2::bigint[])")
+	require.Equal(t, []any{"app", []int64{7}}, f.args[2], "the texts are read through the same fallback connection")
+	require.Equal(t, text, res.QueryTexts[7])
 }
 
 // sourcedTarget is a target that found the pg_stat_statements view in
@@ -382,9 +421,9 @@ func TestStatStatements_TextIsResent(t *testing.T) {
 	text := "SELECT 1"
 	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	f := &statementsFixture{clk: clk}
-	f.perDB = func(string, []any) (pgx.Rows, error) {
+	f.perDB = func(sql string, args []any) (pgx.Rows, error) {
 		current := text
-		return &mockRows{rows: [][]any{{int64(5), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &current, int64(1)}}}, nil
+		return answerStatements(sql, args, [][]any{{int64(5), int64(1), float64(1), int64(1), int64(0), int64(0), int64(0), int64(0), &current, int64(1)}})
 	}
 	target := f.target()
 	c := newStatementsCheck(cardinality.Options{TopN: 50})
@@ -450,4 +489,42 @@ func TestStatStatements_ShipsNoCredentialFromUtilityDDL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, withheldQuery, res.QueryTexts[9])
 	require.NotContains(t, res.QueryTexts[9], "hunter2")
+}
+
+// TestStatStatements_ReadsOnlyTheTextsTheServerLacks: the statements query
+// carries a hash of each text, not the text. The texts are read in a second
+// query, only for the statements whose text the server does not have yet or
+// whose text changed.
+func TestStatStatements_ReadsOnlyTheTextsTheServerLacks(t *testing.T) {
+	t.Parallel()
+	first, second := "SELECT 1", "SELECT 2"
+	f := &statementsFixture{}
+	f.perDB = func(sql string, args []any) (pgx.Rows, error) {
+		a, b := first, second
+		return answerStatements(sql, args, [][]any{
+			{int64(1), int64(10), float64(10), int64(1), int64(0), int64(0), int64(0), int64(0), &a, int64(2)},
+			{int64(2), int64(20), float64(20), int64(1), int64(0), int64(0), int64(0), int64(0), &b, int64(2)},
+		})
+	}
+	target := f.target()
+	c := newStatementsCheck(cardinality.Options{TopN: 50})
+
+	res, err := c.Scrape(context.Background(), target)
+	require.NoError(t, err)
+	require.Len(t, f.sqls, 2)
+	require.NotContains(t, f.sqls[0], "THEN a.query", "the statements query ships no text")
+	require.Contains(t, f.sqls[0], "hashtextextended(a.query, 0)")
+	require.Equal(t, map[int64]string{1: first, 2: second}, res.QueryTexts)
+
+	res, err = c.Scrape(context.Background(), target)
+	require.NoError(t, err)
+	require.Len(t, f.sqls, 3, "no text query when the server has every text")
+	require.Empty(t, res.QueryTexts)
+
+	second = "SELECT 3"
+	res, err = c.Scrape(context.Background(), target)
+	require.NoError(t, err)
+	require.Len(t, f.sqls, 5)
+	require.Equal(t, []int64{2}, f.args[4][0], "only the changed text is read")
+	require.Equal(t, map[int64]string{2: "SELECT 3"}, res.QueryTexts)
 }

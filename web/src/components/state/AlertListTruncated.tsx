@@ -1,5 +1,6 @@
 import { ALERT_LIST_LIMIT } from '@/lib/alerts'
 import { Callout } from '@/components/ui/callout'
+import { useT } from '@/i18n/react'
 
 interface AlertListTruncatedProps {
   truncated: boolean
@@ -10,13 +11,12 @@ interface AlertListTruncatedProps {
  * count or list drawn from the alerts on the page is then a lower bound.
  */
 export function AlertListTruncated({ truncated }: AlertListTruncatedProps) {
+  const t = useT()
   if (!truncated) return null
   return (
     <Callout role="status" variant="warning">
-      <strong>Only the {ALERT_LIST_LIMIT} most recently evaluated alerts are loaded.</strong>
-      <p>
-        Older alerts are not on this page, so any count or list built from alerts is a lower bound.
-      </p>
+      <strong>{t('shell.state.alertsCapped', { limit: ALERT_LIST_LIMIT })}</strong>
+      <p>{t('shell.state.alertsCappedText')}</p>
     </Callout>
   )
 }

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/manprint/pglens/internal/i18n"
 )
 
 // HostSampleWindow is how recent a host_disk_* sample must be for the data
@@ -114,28 +116,22 @@ func buildExt01(in Input) Item {
 	p, e, preload := ext01Findings(in)
 	var evidence []string
 	if p {
-		evidence = append(evidence, fmt.Sprintf("shared_preload_libraries = %q does not list pg_stat_statements", preload))
+		evidence = append(evidence, in.say("ext01.evidence.preload", i18n.Args{"preload": strconv.Quote(preload)}))
 	}
 	if e {
-		evidence = append(evidence, "no monitored database lists the pg_stat_statements extension")
+		evidence = append(evidence, in.say("ext01.evidence.extension", nil))
 	}
 	return Item{
-		Title:    "pg_stat_statements is not enabled",
-		Summary:  "The server does not load or create pg_stat_statements, so there are no per-statement statistics.",
-		Impact:   []string{"Slowest queries", "Statement charts", "Index suggestions"},
+		Title:    in.say("ext01.title", nil),
+		Summary:  in.say("ext01.summary", nil),
+		Impact:   in.sayAll("ext01.impact.slowest", "ext01.impact.charts", "ext01.impact.suggestions"),
 		Evidence: strings.Join(evidence, "; "),
 		Fixes: []Fix{
-			{Channel: ChannelPostgresConfig, Title: "Preload the library", RequiresRestart: true,
-				Steps: []string{
-					"Add pg_stat_statements to shared_preload_libraries in postgresql.conf (keep the libraries already listed).",
-					"Restart PostgreSQL: the setting is read at start.",
-				},
+			{Channel: ChannelPostgresConfig, Title: in.say("ext01.preload.title", nil), RequiresRestart: true,
+				Steps:   in.sayAll("ext01.preload.step", "step.restart_pg_at_start"),
 				Snippet: "shared_preload_libraries = 'pg_stat_statements'"},
-			{Channel: ChannelSQL, Title: "Create the extension in each monitored database",
-				Steps: []string{
-					"Connect to each monitored database as a DBA (pglens never creates extensions).",
-					"Run the statement below.",
-				},
+			{Channel: ChannelSQL, Title: in.say("ext01.create.title", nil),
+				Steps:   in.sayAll("step.connect_each_dba", "step.run_below"),
 				Snippet: "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"},
 		},
 	}
@@ -153,22 +149,19 @@ func appliesSet01(in Input) bool {
 
 func buildSet01(in Input) Item {
 	return Item{
-		Title:    "compute_query_id is off",
-		Summary:  "Without a query identifier an active session cannot be matched to its statement.",
-		Impact:   []string{"Link between active sessions and statements", "Normalised text for active sessions"},
+		Title:    in.say("set01.title", nil),
+		Summary:  in.say("set01.summary", nil),
+		Impact:   in.sayAll("set01.impact.link", "set01.impact.normalised"),
 		Evidence: "compute_query_id = off" + sourceSuffix(in, "compute_query_id"),
-		Fixes: []Fix{{Channel: ChannelPostgresConfig, Title: "Let PostgreSQL compute the identifier",
-			Steps: []string{
-				"Set compute_query_id to auto (or on) in postgresql.conf.",
-				"Reload the configuration (SELECT pg_reload_conf();): no restart is needed.",
-			},
+		Fixes: []Fix{{Channel: ChannelPostgresConfig, Title: in.say("set01.fix.title", nil),
+			Steps:   in.sayAll("set01.fix.step1", "set01.fix.step2"),
 			Snippet: "compute_query_id = auto"}},
 	}
 }
 
 func sourceSuffix(in Input, name string) string {
 	if s := in.SettingSources[name]; s != "" {
-		return " (source: " + s + ")"
+		return in.say("source_suffix", i18n.Args{"source": s})
 	}
 	return ""
 }
@@ -181,25 +174,18 @@ func appliesSet02(in Input) bool {
 }
 
 func buildSet02(in Input) Item {
-	fix := Fix{Channel: ChannelSQL, Title: "Turn it on without a restart",
-		Steps: []string{
-			"Run the statements below as a superuser (or the managed service's equivalent parameter group change).",
-			"No restart is needed.",
-		},
+	fix := Fix{Channel: ChannelSQL, Title: in.say("set02.sql.title", nil),
+		Steps:   in.sayAll("set02.sql.step1", "set02.sql.step2"),
 		Snippet: "ALTER SYSTEM SET track_io_timing = on;\nSELECT pg_reload_conf();"}
 	if in.SettingSources["track_io_timing"] == "command line" {
-		fix = Fix{Channel: ChannelPostgresConfig, Title: "Change the server start command", RequiresRestart: true,
-			Steps: []string{
-				"track_io_timing is set on the server command line, which ALTER SYSTEM cannot override.",
-				"Change the start command (for a container, the command: line of the compose file) to pass -c track_io_timing=on.",
-				"Restart PostgreSQL.",
-			},
+		fix = Fix{Channel: ChannelPostgresConfig, Title: in.say("set02.command.title", nil), RequiresRestart: true,
+			Steps:   in.sayAll("set02.command.step1", "set02.command.step2", "step.restart_pg"),
 			Snippet: "-c track_io_timing=on"}
 	}
 	return Item{
-		Title:    "track_io_timing is off",
-		Summary:  "PostgreSQL does not time block reads and writes.",
-		Impact:   []string{"I/O time charts", "Per-statement I/O time"},
+		Title:    in.say("set02.title", nil),
+		Summary:  in.say("set02.summary", nil),
+		Impact:   in.sayAll("set02.impact.charts", "set02.impact.statement"),
 		Evidence: "track_io_timing = off" + sourceSuffix(in, "track_io_timing"),
 		Fixes:    []Fix{fix},
 	}
@@ -223,15 +209,17 @@ func buildRole01(in Input) Item {
 		missing = append(missing, "pg_read_all_stats")
 		snippet = append(snippet, fmt.Sprintf("GRANT pg_read_all_stats TO %s;", role))
 	}
+	roles := missing[0]
+	if len(missing) == 2 {
+		roles = in.say("and", i18n.Args{"first": missing[0], "second": missing[1]})
+	}
 	return Item{
-		Title:    "The monitoring role lacks predefined roles",
-		Summary:  "The role cannot see other users' sessions and statements, nor every setting.",
-		Impact:   []string{"Statistics of other users' sessions", "Statistics of other users' statements", "Settings"},
-		Evidence: "the monitoring role is not a member of " + strings.Join(missing, " and "),
-		Fixes: []Fix{{Channel: ChannelSQL, Title: "Grant the missing membership",
-			Steps: []string{
-				"Run the statements below as a superuser, or run deploy/sql/monitoring_user.sql as documented in deploy/sql/README.md.",
-			},
+		Title:    in.say("role01.title", nil),
+		Summary:  in.say("role01.summary", nil),
+		Impact:   in.sayAll("role01.impact.sessions", "role01.impact.statements", "role01.impact.settings"),
+		Evidence: in.say("role01.evidence", i18n.Args{"roles": roles}),
+		Fixes: []Fix{{Channel: ChannelSQL, Title: in.say("role01.fix.title", nil),
+			Steps:   in.sayAll("role01.fix.step"),
 			Snippet: strings.Join(snippet, "\n")}},
 	}
 }
@@ -249,20 +237,17 @@ func appliesHost01(in Input) bool {
 }
 
 func buildHost01(in Input) Item {
-	evidence := "the agent could not read the data directory's filesystem"
+	evidence := in.say("host01.evidence.unreadable", nil)
 	if in.Flags.DataDirectoryReadable == nil {
-		evidence = fmt.Sprintf("no host_disk_* sample in the last %d minutes", int(HostSampleWindow/time.Minute))
+		evidence = in.say("host01.evidence.no_sample", i18n.Args{"minutes": int(HostSampleWindow / time.Minute)})
 	}
 	return Item{
-		Title:    "The host filesystem is not measured",
-		Summary:  "The agent runs next to this server but cannot read its data directory.",
-		Impact:   []string{"Host filesystem total and free charts"},
+		Title:    in.say("host01.title", nil),
+		Summary:  in.say("host01.summary", nil),
+		Impact:   in.sayAll("host01.impact"),
 		Evidence: evidence,
-		Fixes: []Fix{{Channel: ChannelHost, Title: "Mount the data directory read-only into the agent",
-			Steps: []string{
-				"Mount the PostgreSQL data directory into the agent container read-only, at the same path as on the server.",
-				"Restart the agent.",
-			},
+		Fixes: []Fix{{Channel: ChannelHost, Title: in.say("host01.fix.title", nil),
+			Steps:   in.sayAll("host01.fix.step", "step.restart_agent"),
 			Snippet: "# compose: under the agent service\nvolumes:\n  - /var/lib/postgresql/data:/var/lib/postgresql/data:ro"}},
 	}
 }
@@ -274,16 +259,14 @@ func appliesChk01(in Input) bool { return len(in.FailingChecks) > 0 }
 func buildChk01(in Input) Item {
 	names := append([]string(nil), in.FailingChecks...)
 	sort.Strings(names)
+	checks := i18n.Args{"checks": strings.Join(names, ", ")}
 	return Item{
-		Title:    "A check is failing",
-		Summary:  "The agent reports errors for at least one check, so its data is missing or old.",
-		Impact:   []string{"Data of the failing check: " + strings.Join(names, ", ")},
-		Evidence: "failing: " + strings.Join(names, ", "),
-		Fixes: []Fix{{Channel: ChannelConsole, Title: "Read the agent's error", Route: "/findings",
-			Steps: []string{
-				"Open Findings and read the entry of the failing check; the agent log has the full error.",
-				"Fix the cause it names (a missing privilege or extension is the usual one), then wait one collection interval.",
-			}}},
+		Title:    in.say("chk01.title", nil),
+		Summary:  in.say("chk01.summary", nil),
+		Impact:   []string{in.say("chk01.impact", checks)},
+		Evidence: in.say("chk01.evidence", checks),
+		Fixes: []Fix{{Channel: ChannelConsole, Title: in.say("chk01.fix.title", nil), Route: "/findings",
+			Steps: in.sayAll("chk01.fix.step1", "chk01.fix.step2")}},
 	}
 }
 
@@ -326,17 +309,14 @@ func buildChk02(in Input) Item {
 	generic := false
 	for _, s := range skips {
 		evidence = append(evidence, s.Check+": "+s.Reason)
-		impact = append(impact, "Data of the "+s.Check+" check")
+		impact = append(impact, in.say("chk02.impact", i18n.Args{"check": s.Check}))
 		switch {
 		case strings.HasPrefix(s.Reason, "missing extension "):
 			ext := strings.TrimPrefix(s.Reason, "missing extension ")
 			if identifier.MatchString(ext) && !seen["ext:"+ext] {
 				seen["ext:"+ext] = true
-				fixes = append(fixes, Fix{Channel: ChannelSQL, Title: "Create the " + ext + " extension",
-					Steps: []string{
-						"Connect to each monitored database as a DBA (pglens never creates extensions).",
-						"Run the statement below.",
-					},
+				fixes = append(fixes, Fix{Channel: ChannelSQL, Title: in.say("chk02.extension.title", i18n.Args{"extension": ext}),
+					Steps:   in.sayAll("step.connect_each_dba", "step.run_below"),
 					Snippet: "CREATE EXTENSION IF NOT EXISTS " + ext + ";"})
 			}
 		default:
@@ -344,15 +324,12 @@ func buildChk02(in Input) Item {
 		}
 	}
 	if generic || len(fixes) == 0 {
-		fixes = append(fixes, Fix{Channel: ChannelHost, Title: "Find why the agent skips the check",
-			Steps: []string{
-				"Search the agent log for the check name: the line says what the agent found missing.",
-				"Give the monitoring role what the check needs (a predefined role, a privilege or an extension), then wait one collection interval.",
-			}})
+		fixes = append(fixes, Fix{Channel: ChannelHost, Title: in.say("chk02.generic.title", nil),
+			Steps: in.sayAll("chk02.generic.step1", "chk02.generic.step2")})
 	}
 	return Item{
-		Title:    "A check is skipped",
-		Summary:  "The agent does not run a check on this server for a reason that can be fixed.",
+		Title:    in.say("chk02.title", nil),
+		Summary:  in.say("chk02.summary", nil),
 		Impact:   impact,
 		Evidence: strings.Join(evidence, "; "),
 		Fixes:    fixes,
@@ -365,12 +342,12 @@ func appliesAct01(in Input) bool { return isFalse(in.Flags.ByApplication) }
 
 func buildAct01(in Input) Item {
 	return Item{
-		Title:    "Per-application activity is off",
-		Summary:  "The agent does not count connections per application.",
-		Impact:   []string{"Per-application connection counts"},
-		Evidence: "checks.activity.by_application is false in the agent configuration",
-		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: "Turn it on in agent.yaml", RequiresRestart: true,
-			Steps:   []string{"Set the key below in agent.yaml.", "Restart the agent."},
+		Title:    in.say("act01.title", nil),
+		Summary:  in.say("act01.summary", nil),
+		Impact:   in.sayAll("act01.impact"),
+		Evidence: in.say("act01.evidence", nil),
+		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: in.say("act01.fix.title", nil), RequiresRestart: true,
+			Steps:   in.sayAll("act01.fix.step", "step.restart_agent"),
 			Snippet: "checks:\n  activity:\n    by_application: true"}},
 	}
 }
@@ -383,15 +360,12 @@ func appliesDB01(in Input) bool {
 
 func buildDB01(in Input) Item {
 	return Item{
-		Title:    "Some databases are not monitored",
-		Summary:  "The agent found more databases than its budget lets it monitor.",
-		Impact:   []string{"Databases beyond the budget are not analysed"},
-		Evidence: fmt.Sprintf("%d databases found, budget %d", in.DatabasesDiscovered, in.DatabasesBudget),
-		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: "Raise the per-target database budget", RequiresRestart: true,
-			Steps: []string{
-				"Raise databases.max of the target in agent.yaml to at least the number of databases found, or narrow the list with include and exclude.",
-				"Restart the agent.",
-			},
+		Title:    in.say("db01.title", nil),
+		Summary:  in.say("db01.summary", nil),
+		Impact:   in.sayAll("db01.impact"),
+		Evidence: in.say("db01.evidence", i18n.Args{"found": in.DatabasesDiscovered, "budget": in.DatabasesBudget}),
+		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: in.say("db01.fix.title", nil), RequiresRestart: true,
+			Steps:   in.sayAll("db01.fix.step", "step.restart_agent"),
 			Snippet: fmt.Sprintf("targets:\n  - name: <target>\n    databases:\n      max: %d", in.DatabasesDiscovered)}},
 	}
 }
@@ -402,15 +376,15 @@ func appliesNotif01(in Input) bool { return in.NotificationChannels == 0 }
 
 func buildNotif01(in Input) Item {
 	return Item{
-		Title:    "No notification channel is configured",
-		Summary:  "Alerts are raised but nothing delivers them.",
-		Impact:   []string{"Alert delivery (Slack, Google Chat, webhook)"},
-		Evidence: "0 notification channels",
+		Title:    in.say("notif01.title", nil),
+		Summary:  in.say("notif01.summary", nil),
+		Impact:   in.sayAll("notif01.impact"),
+		Evidence: in.say("notif01.evidence", nil),
 		Fixes: []Fix{
-			{Channel: ChannelConsole, Title: "Add a channel in the console", Route: "/settings?tab=notifications",
-				Steps: []string{"Open Settings, Notifications, and add a channel."}},
-			{Channel: ChannelHost, Title: "Configure it in the server environment",
-				Steps: []string{"Set the notification variables of the server as documented in the README, then restart the server."}},
+			{Channel: ChannelConsole, Title: in.say("notif01.console.title", nil), Route: "/settings?tab=notifications",
+				Steps: in.sayAll("notif01.console.step")},
+			{Channel: ChannelHost, Title: in.say("notif01.env.title", nil),
+				Steps: in.sayAll("notif01.env.step")},
 		},
 	}
 }
@@ -422,14 +396,12 @@ func appliesT201(in Input) bool { return in.Instance.PermTier >= 0 && in.Instanc
 func buildT201(in Input) Item {
 	role := roleName(in)
 	return Item{
-		Title:    "The monitoring role cannot signal other sessions",
-		Summary:  "Tier 2 is the pg_signal_backend grant. Cancel and terminate also need allow_signal in the agent configuration.",
-		Impact:   []string{"Cancel and terminate of other sessions from the console"},
-		Evidence: fmt.Sprintf("permission tier T%d", in.Instance.PermTier),
-		Fixes: []Fix{{Channel: ChannelSQL, Title: "Grant tier 2",
-			Steps: []string{
-				"Run the statements below as a superuser, or run deploy/sql/monitoring_user.sql with tier1=1 and tier2=1 as documented in deploy/sql/README.md.",
-			},
+		Title:    in.say("t201.title", nil),
+		Summary:  in.say("t201.summary", nil),
+		Impact:   in.sayAll("t201.impact"),
+		Evidence: in.say("t201.evidence", i18n.Args{"tier": in.Instance.PermTier}),
+		Fixes: []Fix{{Channel: ChannelSQL, Title: in.say("t201.fix.title", nil),
+			Steps:   in.sayAll("t201.fix.step"),
 			Snippet: fmt.Sprintf("GRANT pg_read_all_data TO %s;\nGRANT pg_signal_backend TO %s;", role, role)}},
 	}
 }
@@ -459,15 +431,12 @@ func appliesExt02(in Input) bool { return len(pgstattupleMissing(in)) > 0 }
 
 func buildExt02(in Input) Item {
 	return Item{
-		Title:    "pgstattuple is not installed",
-		Summary:  "Exact bloat measurement on demand needs the pgstattuple extension.",
-		Impact:   []string{"Exact bloat on demand (the pgstattuple command)"},
-		Evidence: "not installed in: " + strings.Join(pgstattupleMissing(in), ", "),
-		Fixes: []Fix{{Channel: ChannelSQL, Title: "Create the extension",
-			Steps: []string{
-				"Connect to the database as a DBA (pglens never creates extensions).",
-				"Run the statement below.",
-			},
+		Title:    in.say("ext02.title", nil),
+		Summary:  in.say("ext02.summary", nil),
+		Impact:   in.sayAll("ext02.impact"),
+		Evidence: in.say("ext02.evidence", i18n.Args{"databases": strings.Join(pgstattupleMissing(in), ", ")}),
+		Fixes: []Fix{{Channel: ChannelSQL, Title: in.say("ext02.fix.title", nil),
+			Steps:   in.sayAll("ext02.fix.step", "step.run_below"),
 			Snippet: "CREATE EXTENSION IF NOT EXISTS pgstattuple;"}},
 	}
 }
@@ -478,12 +447,12 @@ func appliesCmd01(in Input) bool { return isFalse(in.Flags.CommandsEnabled) }
 
 func buildCmd01(in Input) Item {
 	return Item{
-		Title:    "On-demand commands are off",
-		Summary:  "The agent does not poll the server for commands.",
-		Impact:   []string{"On-demand EXPLAIN", "Command audit"},
-		Evidence: "commands.enabled is false in the agent configuration",
-		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: "Turn commands on", RequiresRestart: true,
-			Steps:   []string{"Set the key below in agent.yaml (the default is on).", "Restart the agent."},
+		Title:    in.say("cmd01.title", nil),
+		Summary:  in.say("cmd01.summary", nil),
+		Impact:   in.sayAll("cmd01.impact.explain", "cmd01.impact.audit"),
+		Evidence: in.say("cmd01.evidence", nil),
+		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: in.say("cmd01.fix.title", nil), RequiresRestart: true,
+			Steps:   in.sayAll("cmd01.fix.step", "step.restart_agent"),
 			Snippet: "commands:\n  enabled: true"}},
 	}
 }
@@ -492,15 +461,12 @@ func appliesSig01(in Input) bool { return isFalse(in.Flags.AllowSignal) }
 
 func buildSig01(in Input) Item {
 	return Item{
-		Title:    "Cancel and terminate are off (by design)",
-		Summary:  "allow_signal is off by default: the agent never signals another session unless you turn it on for the target.",
-		Impact:   []string{"Cancel and terminate buttons"},
-		Evidence: "allow_signal is false for this target",
-		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: "Allow signals for the target", RequiresRestart: true,
-			Steps: []string{
-				"Needs tier 2 (see RDY-T2-01). Set the key below on the target in agent.yaml.",
-				"Restart the agent.",
-			},
+		Title:    in.say("sig01.title", nil),
+		Summary:  in.say("sig01.summary", nil),
+		Impact:   in.sayAll("sig01.impact"),
+		Evidence: in.say("sig01.evidence", nil),
+		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: in.say("sig01.fix.title", nil), RequiresRestart: true,
+			Steps:   in.sayAll("sig01.fix.step", "step.restart_agent"),
 			Snippet: "targets:\n  - name: <target>\n    allow_signal: true"}},
 	}
 }
@@ -509,15 +475,12 @@ func appliesSess01(in Input) bool { return isFalse(in.Flags.SessionQueryText) }
 
 func buildSess01(in Input) Item {
 	return Item{
-		Title:    "Raw text of active sessions is off",
-		Summary:  "The console shows the normalised text of active sessions, not the raw text.",
-		Impact:   []string{"Raw text of active sessions (normalised text is still shown)"},
-		Evidence: "checks.locks.session_query_text is false",
-		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: "Collect the raw text", RequiresRestart: true,
-			Steps: []string{
-				"Raw text may contain literal values such as names or identifiers: turn it on only if that is acceptable.",
-				"Set the key below in agent.yaml, then restart the agent.",
-			},
+		Title:    in.say("sess01.title", nil),
+		Summary:  in.say("sess01.summary", nil),
+		Impact:   in.sayAll("sess01.impact"),
+		Evidence: in.say("sess01.evidence", nil),
+		Fixes: []Fix{{Channel: ChannelAgentConfig, Title: in.say("sess01.fix.title", nil), RequiresRestart: true,
+			Steps:   in.sayAll("sess01.fix.step1", "sess01.fix.step2"),
 			Snippet: "checks:\n  locks:\n    session_query_text: true"}},
 	}
 }
@@ -546,12 +509,12 @@ func appliesSet03(in Input) bool {
 func buildSet03(in Input) Item {
 	n, _ := querySize(in)
 	return Item{
-		Title:    "Long statements are cut in activity",
-		Summary:  "track_activity_query_size is below 4096 bytes, so long statements are truncated.",
-		Impact:   []string{"Full text of long statements in activity"},
-		Evidence: fmt.Sprintf("track_activity_query_size = %d", n),
-		Fixes: []Fix{{Channel: ChannelPostgresConfig, Title: "Raise the size", RequiresRestart: true,
-			Steps:   []string{"Set the value below in postgresql.conf.", "Restart PostgreSQL: the setting is read at start."},
+		Title:    in.say("set03.title", nil),
+		Summary:  in.say("set03.summary", nil),
+		Impact:   in.sayAll("set03.impact"),
+		Evidence: in.say("set03.evidence", i18n.Args{"size": n}),
+		Fixes: []Fix{{Channel: ChannelPostgresConfig, Title: in.say("set03.fix.title", nil), RequiresRestart: true,
+			Steps:   in.sayAll("set03.fix.step", "step.restart_pg_at_start"),
 			Snippet: "track_activity_query_size = 4096"}},
 	}
 }

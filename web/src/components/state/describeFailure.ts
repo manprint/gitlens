@@ -1,24 +1,30 @@
 import type { ApiFailure } from '@/api/client'
+import { translate } from '@/i18n/store'
 
-// describeFailure is the sentence a state component shows for a failed request.
+// describeFailure is the sentence a state component shows for a failed request, in the
+// console's language (the component re-renders on a language change through useT).
 export function describeFailure(failure: ApiFailure): string {
   switch (failure.kind) {
     case 'unauthorized':
-      return 'Authentication is required.'
+      return translate('shell.state.unauthorized')
     case 'forbidden':
-      return 'The current session is not permitted.'
+      return translate('shell.state.forbidden')
     case 'not_found':
-      return 'The requested resource was not found.'
+      return translate('shell.state.notFound')
     case 'unprocessable':
       return `${failure.error}: ${failure.detail}`
     case 'server':
-      return `Server returned ${failure.status}: ${failure.error}: ${failure.detail}`
+      return translate('shell.state.server', {
+        status: failure.status,
+        error: failure.error,
+        detail: failure.detail,
+      })
     case 'network':
-      return `The server could not be reached: ${failure.message}`
+      return translate('shell.state.network', { message: failure.message })
     case 'malformed':
-      return `The server returned an invalid response: ${failure.message}`
+      return translate('shell.state.malformed', { message: failure.message })
     case 'client':
-      return `The page failed to render in the browser: ${failure.message}`
+      return translate('shell.state.client', { message: failure.message })
     default: {
       const exhaustive: never = failure
       return exhaustive

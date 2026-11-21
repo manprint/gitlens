@@ -493,7 +493,7 @@ test.describe('HA-STATIC', () => {
     await expect(standbyNote(page), 'GAP-1 standby note on Tables and indexes').toBeVisible({
       timeout: 10_000,
     })
-    for (const tab of ['indexes', 'cleanup', 'suggestions', 'dead-rows', 'tax']) {
+    for (const tab of ['indexes', 'missing', 'cleanup', 'dead-rows', 'tax']) {
       await page.goto(`/indexes?instance=${standby.instance_id}&tab=${tab}`)
       await expect(standbyNote(page), `GAP-2 standby note on /indexes ${tab}`).toHaveCount(1, {
         timeout: 30_000,

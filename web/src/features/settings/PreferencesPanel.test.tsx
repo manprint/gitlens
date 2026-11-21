@@ -2,7 +2,10 @@ import { fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useTheme } from '@/hooks/useTheme'
+import { activeLocale, setServerLanguage } from '@/i18n/store'
+import { formatTimestamp } from '@/lib/format'
 import { DEFAULT_PREFERENCES, PREFERENCES_STORAGE_KEY, readPreferences } from '@/lib/preferences'
+import { displayTimeZone, setServerTimeZone } from '@/lib/timezone'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 
@@ -32,6 +35,8 @@ const CONTROLS = [
   { name: 'Default time range', help: /time range pages open with when the address names none/ },
   { name: 'Refresh interval', help: /Automatic keeps each page’s own interval/ },
   { name: 'Table page size', help: /Rows per page of the tables when the address sets no page/ },
+  { name: 'Time zone', help: /Server default is the zone set on the server with PGLENS_TZ/ },
+  { name: 'Language', help: /Server default is the language set on the server with PGLENS_LANG/ },
 ] as const
 
 beforeEach(() => {
@@ -62,9 +67,17 @@ describe('PreferencesPanel', () => {
         .map((option) => (option as HTMLOptionElement).value)
     expect(values('Theme')).toEqual(['light', 'dark', 'system'])
     // 15m is deliberately not offered (P2).
-    expect(values('Default time range')).toEqual(['1h', '6h', '24h', '7d'])
+    expect(values('Default time range')).toEqual(['1h', '2h', '4h', '6h', '8h', '24h', '3d', '7d'])
     expect(values('Refresh interval')).toEqual(['auto', 'off', '15s', '30s', '60s'])
     expect(values('Table page size')).toEqual(['20', '50', '100'])
+    expect(values('Time zone')).toEqual(['server', 'browser', 'UTC'])
+    // The pseudo-language is offered in development and tests only (I18N-003).
+    expect(values('Language')).toEqual(['server', 'browser', 'en', 'it', 'en-XA'])
+    expect(
+      within(screen.getByRole('combobox', { name: 'Time zone' })).getByRole('option', {
+        name: 'Server default (UTC)',
+      }),
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Reset to defaults' })).toBeDisabled()
 
     // axe schedules on real timers.
@@ -92,6 +105,8 @@ describe('PreferencesPanel', () => {
       defaultTimeRange: '6h',
       refreshInterval: 'off',
       tablePageSize: 50,
+      timeZone: 'server',
+      language: 'server',
     })
     expect(screen.getByRole('combobox', { name: 'Table page size' })).toHaveValue('50')
     expect(document.documentElement).toHaveClass('dark')
@@ -110,5 +125,58 @@ describe('PreferencesPanel', () => {
     expect(screen.getByRole('button', { name: 'Header theme: light' })).toBeInTheDocument()
     expect(document.documentElement).not.toHaveClass('dark')
     expect(screen.getByRole('button', { name: 'Reset to defaults' })).toBeDisabled()
+  })
+
+  it('PREF-009 the time zone choice names the server zone and reaches every formatter', () => {
+    setServerTimeZone('Europe/Rome')
+    try {
+      renderPanel()
+      const select = screen.getByRole('combobox', { name: 'Time zone' })
+      expect(
+        within(select).getByRole('option', { name: 'Server default (Europe/Rome)' }),
+      ).toBeInTheDocument()
+      expect(displayTimeZone()).toBe('Europe/Rome')
+      expect(formatTimestamp('2026-11-20T17:00:00Z')).toBe('2026-11-20 18:00:00 UTC+1')
+
+      fireEvent.change(select, { target: { value: 'UTC' } })
+      expect(readPreferences().timeZone).toBe('UTC')
+      expect(formatTimestamp('2026-11-20T17:00:00Z')).toBe('2026-11-20 17:00:00 UTC')
+      expect(screen.getByRole('button', { name: 'Reset to defaults' })).toBeEnabled()
+    } finally {
+      setServerTimeZone('UTC')
+    }
+  })
+
+  it('PREF-010 the language choice names the server language and moves the panel to it', async () => {
+    // The Italian catalog is a lazy chunk; loading it and findBy* run on real timers.
+    vi.useRealTimers()
+    await setServerLanguage('it')
+    try {
+      renderPanel()
+      const select = await screen.findByRole('combobox', { name: 'Lingua' })
+      expect(screen.getByRole('region', { name: 'Preferenze' })).toBeInTheDocument()
+      expect(
+        within(select).getByRole('option', { name: 'Predefinita del server (Italiano)' }),
+      ).toBeInTheDocument()
+      expect(within(select).getByRole('option', { name: 'English' })).toBeInTheDocument()
+      expect(
+        within(screen.getByRole('combobox', { name: 'Righe per pagina' })).getByRole('option', {
+          name: '20 righe',
+        }),
+      ).toBeInTheDocument()
+      expect(
+        within(screen.getByRole('combobox', { name: 'Aggiornamento' })).getByRole('option', {
+          name: 'Ogni 15 secondi',
+        }),
+      ).toBeInTheDocument()
+
+      fireEvent.change(select, { target: { value: 'en' } })
+      expect(readPreferences().language).toBe('en')
+      expect(await screen.findByRole('combobox', { name: 'Language' })).toBeInTheDocument()
+      expect(activeLocale()).toBe('en')
+      expect(document.documentElement).toHaveAttribute('lang', 'en')
+    } finally {
+      await setServerLanguage(undefined)
+    }
   })
 })

@@ -1,9 +1,12 @@
 import { Link } from 'react-router-dom'
 
+import { useT } from '@/i18n/react'
+
 import { useAshTop } from '@/api/queries'
 import type { AshTopQuery } from '@/lib/ash'
 import { topQueries } from '@/lib/ash'
 import type { QueryWindow } from '@/lib/timerange'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 
@@ -31,35 +34,40 @@ function QueryRow({
   instanceId: string
   query: AshTopQuery
 }) {
+  const t = useT()
   return (
     <li className="bg-card rounded-lg border p-4 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <Link className="font-medium underline" to={queryPath(instanceId, query.queryid, database)}>
-          Query {query.queryid}
+          {t('ash.top.queryLink', { id: query.queryid })}
         </Link>
         <span className="text-muted-foreground text-sm">
           {query.avg_active_sessions === null
-            ? 'Unknown average active backends'
-            : `${query.avg_active_sessions} avg active backends`}
+            ? t('ash.top.avgUnknown')
+            : t('ash.top.avg', { value: query.avg_active_sessions })}
         </span>
       </div>
       <code className="mt-2 block text-sm whitespace-pre-wrap">{query.query_text}</code>
       <p className="text-muted-foreground mt-2 text-xs">
-        {query.samples} samples across {query.ticks} ticks
+        {t('ash.top.samples', { samples: query.samples, ticks: query.ticks })}
       </p>
     </li>
   )
 }
 
-function scopeDescription(waitEventType?: string, waitEvent?: string): string {
+function scopeDescription(
+  t: ReturnType<typeof useT>,
+  waitEventType?: string,
+  waitEvent?: string,
+): string {
   if (waitEvent !== undefined) {
     return waitEventType === undefined
-      ? `Ranked by samples in wait event ${waitEvent}.`
-      : `Ranked by samples in wait event ${waitEventType}/${waitEvent}.`
+      ? t('ash.top.scope.event', { event: waitEvent })
+      : t('ash.top.scope.typeEvent', { type: waitEventType, event: waitEvent })
   }
   return waitEventType === undefined
-    ? 'Ranked by samples across every wait event.'
-    : `Ranked by samples in wait event type ${waitEventType}.`
+    ? t('ash.top.scope.all')
+    : t('ash.top.scope.type', { type: waitEventType })
 }
 
 export function AshTopQueries({
@@ -69,6 +77,7 @@ export function AshTopQueries({
   waitEvent,
   waitEventType,
 }: AshTopQueriesProps) {
+  const t = useT()
   const params = {
     instance_id: instanceId,
     limit: 20,
@@ -81,7 +90,7 @@ export function AshTopQueries({
   if (query.error && !query.data) {
     return (
       <ErrorState
-        endpoint="ASH top queries"
+        endpoint={t('ash.top.listLabel')}
         failure={query.error}
         onRetry={() => void query.refetch()}
       />
@@ -90,8 +99,8 @@ export function AshTopQueries({
 
   if (query.isPending || query.data === undefined) {
     return (
-      <section aria-busy="true" aria-label="Loading ASH top queries" role="status">
-        Loading ASH top queries…
+      <section aria-busy="true" aria-label={t('ash.top.loadingLabel')} role="status">
+        {t('ash.top.loading')}
       </section>
     )
   }
@@ -99,14 +108,16 @@ export function AshTopQueries({
   const entries = topQueries(query.data.entries)
 
   return (
-    <Section captionId="ash.top-queries" title="Top queries">
+    <Section
+      actions={<HelpLink anchor="wait-events#top-queries" label={t('ash.top.title')} />}
+      captionId="ash.top-queries"
+      title={t('ash.top.title')}
+    >
       <p className="text-muted-foreground mb-3 text-sm">
-        {scopeDescription(waitEventType, waitEvent)} Query text is the normalised text from
-        pg_stat_statements. ASH never collects live query text; it collects only query_id. This
-        deliberate PII decision means literal values are not available here.
+        {`${scopeDescription(t, waitEventType, waitEvent)} ${t('ash.top.note')}`}
       </p>
       {entries.length > 0 ? (
-        <ol className="grid gap-3" aria-label="ASH top queries">
+        <ol className="grid gap-3" aria-label={t('ash.top.listLabel')}>
           {entries.map((entry) => (
             <QueryRow
               database={database}
@@ -117,10 +128,7 @@ export function AshTopQueries({
           ))}
         </ol>
       ) : (
-        <EmptyState
-          title="No top queries"
-          description="No query ids were sampled in the selected time range."
-        />
+        <EmptyState title={t('ash.top.emptyTitle')} description={t('ash.top.emptyBody')} />
       )}
     </Section>
   )

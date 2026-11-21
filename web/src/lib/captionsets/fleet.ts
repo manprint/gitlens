@@ -136,11 +136,12 @@ export const fleetCaptions = {
       'Severity and the suggested check come from the console description of each event type. An empty list means no failover was detected.',
   },
   'cluster.events-table': {
-    what: 'One row per cluster event: its time, title, severity, type and details.',
+    what: 'One row per failover detected in the cluster: its time, title, severity, type and details.',
     source:
-      'handleTopology in internal/server/api_topology.go: the newest 100 events of the cluster.',
+      'handleTopology in internal/server/api_topology.go: events of type failover_detected, the newest 100 of the cluster. Other event types are on the Events page.',
     unit: 'events',
-    window: 'The newest 100 events on record, newest first, one page at a time; times are UTC.',
+    window:
+      'The newest 100 failover events on record, newest first, one page at a time; times in the console time zone.',
     howToRead:
       'Type is the raw event name, always shown so an event the console does not know stays visible. Details says what to check; a cut line shows in full on hover.',
   },

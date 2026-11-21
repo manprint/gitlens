@@ -14,6 +14,7 @@
  */
 
 import { ALERTS_SECTIONS, EVENTS_SECTIONS } from '../src/features/alerts/alertingSections'
+import { messages as english } from '../src/i18n/messages/en'
 import { CLUSTER_SECTIONS } from '../src/features/cluster/clusterSections'
 import { INDEX_VIEWS } from '../src/features/indexes/indexViews'
 import { LOCKS_VIEWS } from '../src/features/locks/locksViews'
@@ -68,19 +69,19 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
   { path: '/queries?q=res_partner', name: 'Slowest queries: search', kind: 'fit' },
   { path: '/indexes?tab=indexes', name: 'Index analysis: indexes', kind: 'fit' },
   // The other views of the Indexes tab (15.3); the inventory is the default.
-  ...INDEX_VIEWS.slice(1).map(({ id, label }): FullHdRoute => ({
+  ...INDEX_VIEWS.slice(1).map(({ id, labelKey }): FullHdRoute => ({
     path: `/indexes?tab=indexes&view=${id}`,
-    name: `Index analysis: indexes, ${label}`,
+    name: `Index analysis: indexes, ${english[labelKey]}`,
     kind: 'fit',
   })),
   { path: '/indexes?tab=cleanup', name: 'Index analysis: cleanup', kind: 'fit' },
   { path: '/indexes?tab=dead-rows', name: 'Index analysis: dead rows', kind: 'fit' },
-  { path: '/indexes?tab=suggestions', name: 'Index analysis: suggestions', kind: 'fit' },
+  { path: '/indexes?tab=missing', name: 'Index analysis: missing indexes', kind: 'fit' },
   { path: '/indexes?tab=tax', name: 'Index analysis: index tax', kind: 'fit' },
   // One entry per cluster-page tab (15.3), kind from the tab registry.
-  ...CLUSTER_SECTIONS.map(({ id, label, kind }): FullHdRoute => ({
+  ...CLUSTER_SECTIONS.map(({ id, labelKey, kind }): FullHdRoute => ({
     path: `/clusters/:clusterId?section=${id}`,
-    name: `Cluster detail: ${label}`,
+    name: `Cluster detail: ${english[labelKey]}`,
     kind: kind === 'charts' ? 'charts' : 'fit',
   })),
   // One entry per instance-page tab (15.2), kind from the section registry.
@@ -123,14 +124,14 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
   })),
   { path: '/findings?q=index', name: 'Advisor findings: search', kind: 'fit' },
   // One entry per alerting tab (15.3); the default tab has no `section` in its URL.
-  ...ALERTS_SECTIONS.map(({ id, label }, index): FullHdRoute => ({
+  ...ALERTS_SECTIONS.map(({ id, labelKey }, index): FullHdRoute => ({
     path: index === 0 ? '/alerts' : `/alerts?section=${id}`,
-    name: `Alerts: ${label}`,
+    name: `Alerts: ${english[labelKey]}`,
     kind: 'fit',
   })),
-  ...EVENTS_SECTIONS.map(({ id, label }, index): FullHdRoute => ({
+  ...EVENTS_SECTIONS.map(({ id, labelKey }, index): FullHdRoute => ({
     path: index === 0 ? '/events' : `/events?section=${id}`,
-    name: `Fleet events: ${label}`,
+    name: `Fleet events: ${english[labelKey]}`,
     kind: 'fit',
   })),
   { path: '/alerts/rules', name: 'Alert rules', kind: 'fit' },
@@ -159,6 +160,18 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
     name: `Settings: Audit & server, ${label}`,
     kind: 'fit',
   })),
+  {
+    path: '/help',
+    name: 'Inline Help',
+    kind: 'exempt',
+    reason: 'long-form documentation, scrolls',
+  },
+  {
+    path: '/help/:topicId',
+    name: 'Inline Help chapter',
+    kind: 'exempt',
+    reason: 'long-form documentation, scrolls',
+  },
   { path: '*', name: 'Not found', kind: 'exempt', reason: 'no data page' },
 ]
 

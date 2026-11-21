@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom'
 
 import { useSession } from '@/api/queries'
+import { HelpLink } from '@/components/layout/HelpLink'
 import { Section } from '@/components/layout/Section'
 import { Unknown } from '@/components/state'
+import type { MessageKey } from '@/i18n/messages/en'
+import { useT } from '@/i18n/react'
 import { formatTimestamp } from '@/lib/format'
 
 const LIMITS_URL = '/docs/LIMITS.md'
@@ -10,70 +13,99 @@ const LIMITS_URL = '/docs/LIMITS.md'
 /** The Data retention tab, where each metrics family's retention is read and set (11.3). */
 const RETENTION_TAB = '/settings?tab=retention'
 
+/** Product limits: the texts are keys, translated at render. `id` names the row, not its text. */
 const limits = [
-  [
-    'Raw retention',
-    'Raw data is retained for 30 days by default (bloat estimates 90 days); the Data retention tab shows and sets the live value of each group of metrics. pglens keeps no summaries: data older than its retention is deleted, not condensed into a coarser history.',
-  ],
-  ['PostgreSQL versions', 'PostgreSQL 15 through 19 are supported.'],
-  ['Replication', 'Streaming replication is supported; other replication modes are not.'],
-  ['Databases per instance', 'At most 10 databases per instance are monitored by default.'],
-  [
-    'Table and index lists',
-    'For each database only the top-ranked tables and indexes are kept, up to a fixed number per check; the ones left out are not counted and not collected later.',
-  ],
-  [
-    'Bloat',
-    'Bloat, the space wasted inside tables by old row versions, is an estimate worked out from statistics; it can be wrong in either direction.',
-  ],
-  [
-    'Active session history',
-    'pglens regularly samples what busy sessions are doing; it is a sample, not a complete trace.',
-  ],
-  [
-    'Connection poolers',
-    'A pooler such as PgBouncer shares database connections between many clients; there is no pooler view in this release.',
-  ],
-] as const
+  {
+    id: 'rawRetention',
+    labelKey: 'settings.limits.rawRetention.label',
+    detailKey: 'settings.limits.rawRetention.detail',
+  },
+  {
+    id: 'postgresVersions',
+    labelKey: 'settings.limits.postgresVersions.label',
+    detailKey: 'settings.limits.postgresVersions.detail',
+  },
+  {
+    id: 'replication',
+    labelKey: 'settings.limits.replication.label',
+    detailKey: 'settings.limits.replication.detail',
+  },
+  {
+    id: 'databasesPerInstance',
+    labelKey: 'settings.limits.databasesPerInstance.label',
+    detailKey: 'settings.limits.databasesPerInstance.detail',
+  },
+  {
+    id: 'tableIndexLists',
+    labelKey: 'settings.limits.tableIndexLists.label',
+    detailKey: 'settings.limits.tableIndexLists.detail',
+  },
+  {
+    id: 'bloat',
+    labelKey: 'settings.limits.bloat.label',
+    detailKey: 'settings.limits.bloat.detail',
+  },
+  {
+    id: 'activeSessionHistory',
+    labelKey: 'settings.limits.activeSessionHistory.label',
+    detailKey: 'settings.limits.activeSessionHistory.detail',
+  },
+  {
+    id: 'connectionPoolers',
+    labelKey: 'settings.limits.connectionPoolers.label',
+    detailKey: 'settings.limits.connectionPoolers.detail',
+  },
+] as const satisfies readonly { id: string; labelKey: MessageKey; detailKey: MessageKey }[]
 
 function DocumentationLink() {
+  const t = useT()
   return (
     <a className="text-primary underline underline-offset-2" href={LIMITS_URL}>
-      Product limits documentation
+      {t('settings.server.limitsDocs')}
     </a>
   )
 }
 
 function SessionExpiry() {
+  const t = useT()
   const sessionQuery = useSession()
   const expiresAt = sessionQuery.data?.expires_at
 
   if (sessionQuery.isPending) {
-    return <span>Loading…</span>
+    return <span>{t('settings.server.sessionLoading')}</span>
   }
   if (expiresAt) {
-    return <time dateTime={expiresAt}>{formatTimestamp(expiresAt, 'UTC')}</time>
+    return <time dateTime={expiresAt}>{formatTimestamp(expiresAt)}</time>
   }
-  return <Unknown reason="The session endpoint did not provide an expiry." />
+  return <Unknown reason={t('settings.server.sessionUnknown')} />
 }
 
 export function ServerInfo() {
+  const t = useT()
   return (
     // From 1600 px the cards and the limit rows are tighter, so the view fits a Full HD screen (D26).
     <div className="grid gap-8 min-[1600px]:items-start min-[1600px]:gap-4 lg:grid-cols-2">
       <div className="max-[1599px]:*:h-full min-[1600px]:col-start-1 min-[1600px]:row-start-1">
-        <Section captionId="settings.server-info" title="Server information">
+        <Section
+          actions={<HelpLink anchor="settings#server-info" label={t('settings.server.title')} />}
+          captionId="settings.server-info"
+          title={t('settings.server.title')}
+        >
           <dl className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-md border p-3">
-              <dt className="text-muted-foreground text-sm">Interface build</dt>
+              <dt className="text-muted-foreground text-sm">
+                {t('settings.server.interfaceBuild')}
+              </dt>
               <dd className="mt-1 font-medium">{__PGLENS_BUILD__}</dd>
             </div>
             <div className="rounded-md border p-3">
-              <dt className="text-muted-foreground text-sm">API contract</dt>
+              <dt className="text-muted-foreground text-sm">{t('settings.server.apiContract')}</dt>
               <dd className="mt-1 font-medium">{__PGLENS_API_CONTRACT_VERSION__}</dd>
             </div>
             <div className="rounded-md border p-3">
-              <dt className="text-muted-foreground text-sm">Session expiry</dt>
+              <dt className="text-muted-foreground text-sm">
+                {t('settings.server.sessionExpiry')}
+              </dt>
               <dd className="mt-1 font-medium">
                 <SessionExpiry />
               </dd>
@@ -86,30 +118,30 @@ export function ServerInfo() {
         <Section
           actions={<DocumentationLink />}
           captionId="settings.product-limits"
-          title="Product limits"
+          title={t('settings.server.limitsTitle')}
         >
           <ul className="space-y-3 text-sm min-[1600px]:space-y-1.5">
-            {limits.map(([label, detail]) => (
+            {limits.map((limit) => (
               <li
                 className="flex items-start justify-between gap-4 rounded-md border p-3 min-[1600px]:py-2"
-                key={label}
+                key={limit.id}
               >
                 <span>
-                  <strong>{label}.</strong> {detail}
+                  <strong>{t(limit.labelKey)}.</strong> {t(limit.detailKey)}
                 </span>
-                {label === 'Raw retention' ? (
+                {limit.id === 'rawRetention' ? (
                   <Link
                     className="text-primary shrink-0 underline underline-offset-2"
                     to={RETENTION_TAB}
                   >
-                    Data retention
+                    {t('settings.tabs.retention')}
                   </Link>
                 ) : (
                   <a
                     className="text-primary shrink-0 underline underline-offset-2"
                     href={LIMITS_URL}
                   >
-                    Details
+                    {t('settings.server.details')}
                   </a>
                 )}
               </li>
@@ -119,32 +151,29 @@ export function ServerInfo() {
       </div>
 
       <div className="max-[1599px]:*:h-full min-[1600px]:col-start-1 min-[1600px]:row-start-2">
-        <Section captionId="settings.authentication" title="Authentication">
+        <Section captionId="settings.authentication" title={t('settings.server.authTitle')}>
           <ul className="list-disc space-y-2 pl-5 text-sm min-[1600px]:space-y-1">
-            <li>One shared password protects the browser session.</li>
-            <li>No user accounts exist.</li>
-            <li>No roles or per-user audit exist.</li>
-            <li>Sessions are held in server memory and do not survive a restart.</li>
-            <li>
-              The agent signs in with its own secret token (a bearer token sent with its requests),
-              not with the console password.
-            </li>
-            <li>There is no enrollment queue or browser revocation control.</li>
+            <li>{t('settings.server.authSharedPassword')}</li>
+            <li>{t('settings.server.authNoAccounts')}</li>
+            <li>{t('settings.server.authNoRoles')}</li>
+            <li>{t('settings.server.authMemory')}</li>
+            <li>{t('settings.server.authAgentToken')}</li>
+            <li>{t('settings.server.authNoEnrollment')}</li>
           </ul>
         </Section>
       </div>
 
       <div className="max-[1599px]:*:h-full min-[1600px]:col-start-1 min-[1600px]:row-start-3">
-        <Section captionId="settings.references" title="References">
-          <nav aria-label="Settings references" className="flex flex-wrap gap-4 text-sm">
+        <Section captionId="settings.references" title={t('settings.server.refsTitle')}>
+          <nav aria-label={t('settings.server.refsLabel')} className="flex flex-wrap gap-4 text-sm">
             <a className="text-primary underline underline-offset-2" href="/docs/api.md">
-              API reference
+              {t('settings.server.apiReference')}
             </a>
             <Link className="text-primary underline underline-offset-2" to="/alerts/rules">
-              Alert rules
+              {t('shell.nav.alertRules')}
             </Link>
             <Link className="text-primary underline underline-offset-2" to="/alerts/silences">
-              Silences
+              {t('shell.nav.silences')}
             </Link>
           </nav>
         </Section>

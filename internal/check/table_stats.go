@@ -36,6 +36,55 @@ type tableStatsRow struct {
 	OID      uint32
 }
 
+// tableStatsQuery reads the tables the selection can pick: the top $1 by each
+// ranking (dead tuples, estimated size, relfrozenxid age), ordered as the Go
+// side orders them (score descending, then key in byte order), and the keys
+// the selector retains ($2). A database with hundreds of thousands of tables
+// otherwise ships every row on each scrape. The last column counts every
+// table, so Partial still compares against all of them.
+//
+// The ranking reads the catalogs and pg_stat_get_dead_tuples directly, with
+// the filters of pg_stat_user_tables: the view groups every table by its
+// indexes, which costs more than the whole ranking. The view is read only for
+// the picked tables.
+const tableStatsQuery = `
+WITH base AS (
+  SELECT c.oid,
+         n.nspname || '.' || c.relname AS key,
+         COALESCE(pg_stat_get_dead_tuples(c.oid), 0)::float8 AS dead,
+         ((GREATEST(c.relpages, 0)::bigint + GREATEST(COALESCE(tc.relpages, 0), 0)::bigint) * current_setting('block_size')::bigint)::float8 AS est,
+         age(c.relfrozenxid) AS xid_age
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_class tc ON tc.oid = c.reltoastrelid
+  WHERE c.relkind = 'r'
+    AND c.relpersistence <> 't'
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    AND n.nspname !~ '^pg_toast'
+), picked AS (
+  (SELECT oid FROM base ORDER BY dead DESC, key COLLATE "C" LIMIT $1)
+  UNION
+  (SELECT oid FROM base ORDER BY est DESC, key COLLATE "C" LIMIT $1)
+  UNION
+  (SELECT oid FROM base ORDER BY xid_age DESC, key COLLATE "C" LIMIT $1)
+  UNION
+  SELECT oid FROM base WHERE key = ANY($2::text[])
+)
+SELECT s.schemaname, s.relname,
+       COALESCE(s.seq_scan, 0), COALESCE(s.seq_tup_read, 0), COALESCE(s.idx_scan, 0), COALESCE(s.idx_tup_fetch, 0),
+       COALESCE(s.n_tup_ins, 0), COALESCE(s.n_tup_upd, 0), COALESCE(s.n_tup_del, 0), COALESCE(s.n_tup_hot_upd, 0),
+       COALESCE(s.n_live_tup, 0), COALESCE(s.n_dead_tup, 0), COALESCE(s.n_mod_since_analyze, 0),
+       s.last_vacuum, s.last_autovacuum, s.last_analyze, s.last_autoanalyze,
+       COALESCE(s.autovacuum_count, 0), COALESCE(s.autoanalyze_count, 0),
+       COALESCE(c.relpages, 0), COALESCE(c.reltuples, 0), age(c.relfrozenxid),
+       (GREATEST(c.relpages, 0)::bigint + GREATEST(COALESCE(tc.relpages, 0), 0)::bigint) * current_setting('block_size')::bigint,
+       c.oid,
+       (SELECT count(*) FROM base)
+FROM pg_stat_user_tables s
+JOIN pg_class c ON c.oid = s.relid
+LEFT JOIN pg_class tc ON tc.oid = c.reltoastrelid
+WHERE s.relid = ANY (ARRAY(SELECT oid FROM picked))`
+
 // tableSizesQuery reads one table's exact sizes. The size functions lock the
 // table, so they run only for the tables that are reported.
 const tableSizesQuery = `SELECT pg_total_relation_size(c.oid), pg_table_size(c.oid), COALESCE(pg_total_relation_size(c.reltoastrelid), 0) FROM pg_class c WHERE c.oid = $1`
@@ -60,32 +109,19 @@ func (c *tableStatsCheck) Scrape(ctx context.Context, t Target) (Result, error) 
 	// pg_stat_user_tables lists the temporary tables of every session under
 	// their pg_temp_N schemas. They are gone with their session, so they are
 	// left out, as bloat_estimate leaves them out.
-	rows, err := conn.Query(ctx, `
-SELECT s.schemaname, s.relname,
-       COALESCE(s.seq_scan, 0), COALESCE(s.seq_tup_read, 0), COALESCE(s.idx_scan, 0), COALESCE(s.idx_tup_fetch, 0),
-       COALESCE(s.n_tup_ins, 0), COALESCE(s.n_tup_upd, 0), COALESCE(s.n_tup_del, 0), COALESCE(s.n_tup_hot_upd, 0),
-       COALESCE(s.n_live_tup, 0), COALESCE(s.n_dead_tup, 0), COALESCE(s.n_mod_since_analyze, 0),
-       s.last_vacuum, s.last_autovacuum, s.last_analyze, s.last_autoanalyze,
-       COALESCE(s.autovacuum_count, 0), COALESCE(s.autoanalyze_count, 0),
-       COALESCE(c.relpages, 0), COALESCE(c.reltuples, 0), age(c.relfrozenxid),
-       (GREATEST(c.relpages, 0)::bigint + GREATEST(COALESCE(tc.relpages, 0), 0)::bigint) * current_setting('block_size')::bigint,
-       c.oid
-FROM pg_stat_user_tables s
-JOIN pg_class c ON c.oid = s.relid
-LEFT JOIN pg_class tc ON tc.oid = c.reltoastrelid
-WHERE c.relkind = 'r'
-  AND c.relpersistence <> 't'`)
+	rows, err := conn.Query(ctx, tableStatsQuery, c.selectors.prefilterLimit(), c.selectors.retained(t))
 	if err != nil {
 		return Result{}, err
 	}
 	defer rows.Close()
 	var parsed []tableStatsRow
+	var total int64
 	for rows.Next() {
 		var r tableStatsRow
 		if err := rows.Scan(&r.Schema, &r.Relation, &r.SeqScan, &r.SeqTupRead, &r.IdxScan, &r.IdxTupFetch,
 			&r.NTupIns, &r.NTupUpd, &r.NTupDel, &r.NTupHotUpd, &r.NLiveTup, &r.NDeadTup, &r.NModSinceAnalyze,
 			&r.LastVacuum, &r.LastAutovacuum, &r.LastAnalyze, &r.LastAutoanalyze, &r.AutovacuumCount,
-			&r.AutoanalyzeCount, &r.Relpages, &r.RelTuples, &r.RelfrozenXIDAge, &r.EstBytes, &r.OID); err != nil {
+			&r.AutoanalyzeCount, &r.Relpages, &r.RelTuples, &r.RelfrozenXIDAge, &r.EstBytes, &r.OID, &total); err != nil {
 			return Result{}, err
 		}
 		parsed = append(parsed, r)
@@ -131,7 +167,7 @@ WHERE c.relkind = 'r'
 	// it as truncated kept cardinality_budget_exceeded firing on every real
 	// database and stopped the server from ever pruning dropped tables.
 	result.Truncated = truncated
-	result.Partial = len(reported) < len(parsed)
+	result.Partial = int64(len(reported)) < total
 	return result, nil
 }
 

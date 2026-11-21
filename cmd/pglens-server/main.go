@@ -12,11 +12,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // PGLENS_TZ works on an image without a zoneinfo database
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/manprint/pglens/internal/advisor"
 	"github.com/manprint/pglens/internal/alert"
+	"github.com/manprint/pglens/internal/i18n"
 	"github.com/manprint/pglens/internal/server"
 	"github.com/manprint/pglens/internal/store"
 	"github.com/manprint/pglens/internal/webui"
@@ -117,6 +119,12 @@ func run() int {
 	default:
 		log.Println("PGLENS_UI_ENABLED=true; UI enabled")
 	}
+	// PGLENS_LANG is the language of the notifications and the console's
+	// default (en, it); PGLENS_TZ the IANA zone both write times in
+	// (Europe/Rome). Empty or unknown keeps en and UTC.
+	lang := i18n.Resolve(os.Getenv("PGLENS_LANG"))
+	loc := notificationLocation(os.Getenv("PGLENS_TZ"))
+	uiCfg.Language, uiCfg.TimeZone = lang, loc.String()
 	sessionStore := server.NewSessionStore(uiCfg.SessionTTL)
 	var alertStore alert.Store
 	var alertSources []alert.Source
@@ -129,7 +137,9 @@ func run() int {
 	if pool != nil {
 		alertStore = alert.NewPgStore(pool)
 		alertSources = []alert.Source{alert.NewMetricSource(pool, alertCfg.Interval), alert.NewEventSource(pool, alertCfg.Interval)}
-		alertNotifier = alert.NewChannelNotifier(alertStore, channels...)
+		// The detail names the table, the row, the sessions and what to do.
+		log.Printf("notifications in %q, times in %s", lang, loc)
+		alertNotifier = alert.NewChannelNotifierWith(alertStore, server.NewAlertDescriber(pool, lang).InLocation(loc), channels...)
 	}
 	alertEngine := alert.NewEngineWithInterval(pool, nil, alertCfg.Interval, alertStore, alertNotifier, alertSources)
 	alertEngine.Start(startupCtx)
@@ -256,4 +266,17 @@ func healthcheckURL(listen, path string) string {
 		host = "127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, port) + path
+}
+
+// notificationLocation loads the IANA zone name; empty or unknown is UTC.
+func notificationLocation(name string) *time.Location {
+	if name == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		log.Printf("warning: PGLENS_TZ %q: %v; notification times stay in UTC", name, err)
+		return time.UTC
+	}
+	return loc
 }

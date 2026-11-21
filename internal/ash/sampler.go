@@ -39,6 +39,7 @@ type Sampler struct {
 	interval time.Duration      // tick period; defaults to 1s in NewSampler, overridable via SetInterval before Start
 	onSample func(SampleRow)    // invoked for every row of every successful tick; nil is valid (rows dropped)
 	onTick   func(success bool) // invoked exactly once per tick attempt, success or not; nil is valid
+	onBatch  func([]SampleRow)  // invoked with the rows of each successful tick, after its deadline is released; nil is valid
 
 	mu          sync.Mutex
 	running     bool
@@ -146,6 +147,17 @@ func (s *Sampler) SetTickCallback(f func(success bool)) {
 	s.onTick = f
 }
 
+// SetBatchCallback registers a callback invoked with every row of each
+// successful tick, on the sampler's goroutine, once the tick's own deadline is
+// released. It may query through the sampler's connection: the tick's rows
+// are closed by then. It delays the next tick for as long as it runs. Must be
+// called before Start.
+func (s *Sampler) SetBatchCallback(f func([]SampleRow)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onBatch = f
+}
+
 // run is the main sampling loop. It samples every 1 second and processes the results.
 // The sampler must be stopped via Stop(); run does not return until ctx is cancelled.
 func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
@@ -160,17 +172,20 @@ func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
 		case <-ticker.C():
 			// Create a context with timeout for this tick
 			tickCtx, cancel := context.WithTimeout(ctx, s.timeout)
-			err := s.doSample(tickCtx)
+			batch, err := s.sampleBatch(tickCtx)
 			if err != nil {
 				s.ticksMissed.Add(1)
 			}
 			cancel()
 			s.mu.Lock()
 			s.lastErr = err
-			onTick := s.onTick
+			onTick, onBatch := s.onTick, s.onBatch
 			s.mu.Unlock()
 			if onTick != nil {
 				onTick(err == nil)
+			}
+			if err == nil && onBatch != nil {
+				onBatch(batch)
 			}
 		}
 	}
@@ -184,6 +199,13 @@ func (s *Sampler) run(ctx context.Context, ticker clock.Ticker) {
 // pglens is not, because the monitoring role's default application_name is
 // pglens and the target's own sessions can carry it too.
 func (s *Sampler) doSample(ctx context.Context) error {
+	_, err := s.sampleBatch(ctx)
+	return err
+}
+
+// sampleBatch runs one tick's query and returns its rows, after handing each
+// to onSample.
+func (s *Sampler) sampleBatch(ctx context.Context) ([]SampleRow, error) {
 	rows, err := s.conn.Query(ctx, `
 SELECT COALESCE(datname, '')             AS datname,
        state                             AS state,
@@ -197,7 +219,7 @@ SELECT COALESCE(datname, '')             AS datname,
    AND COALESCE(application_name, '') NOT LIKE 'pglens/%'
 	`)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -211,7 +233,7 @@ SELECT COALESCE(datname, '')             AS datname,
 		var queryID *int64
 
 		if err := rows.Scan(&datname, &state, &waitEventType, &waitEvent, &queryID); err != nil {
-			return err
+			return nil, err
 		}
 
 		batch = append(batch, SampleRow{
@@ -223,7 +245,7 @@ SELECT COALESCE(datname, '')             AS datname,
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	if s.onSample != nil {
 		for _, row := range batch {
@@ -231,7 +253,7 @@ SELECT COALESCE(datname, '')             AS datname,
 		}
 	}
 
-	return nil
+	return batch, nil
 }
 
 // SessionsVisible reports whether the role behind q sees every session in

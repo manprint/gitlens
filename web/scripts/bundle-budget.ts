@@ -5,6 +5,15 @@ import { fileURLToPath } from 'node:url'
 
 export const INITIAL_GZIP_LIMIT = 350 * 1024
 export const LAZY_GZIP_LIMIT = 500 * 1024
+/** One language's catalog chunk (plan 006 D5), named `i18n-<code>` in vite.config.ts. */
+export const LOCALE_GZIP_LIMIT = 64 * 1024
+
+/** The gzip limit of a lazy chunk: a language catalog has its own, smaller one. */
+export function lazyLimit(fileName: string): number {
+  return /^i18n-[A-Za-z]{2,3}(-[A-Za-z0-9]+)?-[\w-]+\.js$/.test(fileName)
+    ? LOCALE_GZIP_LIMIT
+    : LAZY_GZIP_LIMIT
+}
 
 export interface ChunkMeasurement {
   fileName: string
@@ -97,14 +106,17 @@ function main(): void {
     .reduce((total, chunk) => total + chunk.gzipBytes, 0)
   const lazy = chunks.filter((chunk) => !initial.has(chunk.fileName))
   const initialPass = initialGzipBytes < INITIAL_GZIP_LIMIT
-  const lazyFailures = lazy.filter((chunk) => chunk.gzipBytes >= LAZY_GZIP_LIMIT)
+  const lazyFailures = lazy.filter((chunk) => chunk.gzipBytes >= lazyLimit(chunk.fileName))
 
   console.log(
     `initial entry + synchronous imports: ${formatKiB(initialGzipBytes)} (< 350 KiB) ${initialPass ? 'PASS' : 'FAIL'}`,
   )
   for (const chunk of lazy) {
-    const result = chunk.gzipBytes < LAZY_GZIP_LIMIT ? 'PASS' : 'FAIL'
-    console.log(`lazy ${chunk.fileName}: ${formatKiB(chunk.gzipBytes)} (< 500 KiB) ${result}`)
+    const limit = lazyLimit(chunk.fileName)
+    const result = chunk.gzipBytes < limit ? 'PASS' : 'FAIL'
+    console.log(
+      `lazy ${chunk.fileName}: ${formatKiB(chunk.gzipBytes)} (< ${limit / 1024} KiB) ${result}`,
+    )
   }
 
   if (!initialPass || lazyFailures.length > 0) process.exitCode = 1
