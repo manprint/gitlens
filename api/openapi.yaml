@@ -2098,11 +2098,12 @@ components:
             policy).
     RetentionFamilyName:
       type: string
-      enum: [metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat, metrics_1h, metrics_statements_1h, metrics_ash_1h]
+      enum: [metrics, metrics_statements, metrics_ash, metrics_replication, metrics_tables, metrics_indexes, metrics_bloat, log_events, metrics_1h, metrics_statements_1h, metrics_ash_1h]
       description: >-
         A metrics family; each maps to the hypertable of the same name. The
         three `_1h` families are the hourly rollups (continuous aggregates of
-        metrics, metrics_statements and metrics_ash).
+        metrics, metrics_statements and metrics_ash); log_events holds the
+        PostgreSQL log lines the agent ships (14 days by default).
     RetentionPreview:
       type: object
       required: [family, days, chunks_to_drop, bytes_to_free, oldest_chunk_at, newest_dropped_chunk_end]

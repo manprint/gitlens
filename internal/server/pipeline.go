@@ -193,6 +193,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var indexRows []store.IndexStatRow
 	var bloatRows []store.BloatRow
 	var lockSnapshotRows []store.LockSnapshotRow
+	var logEventRows []store.LogEventRow
 	var relationPrunes []store.RelationStatsPrune
 	var factPrunes []store.ObjectFactPrune
 	var checkOutcomes []checkOutcome
@@ -360,6 +361,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		// instance in this envelope.
 		truncatedAt := make(map[string]time.Time)
 		var instLockSnapshot *store.LockSnapshotRow
+		var instLogEvents []store.LogEventRow
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
 		bloatMap := make(map[bloatKey]*store.BloatRow)
@@ -530,6 +532,15 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 				}
 				if f.Kind == "plan" {
 					// phase 8: plans are routed to their dedicated history table.
+					continue
+				}
+				if f.Kind == logEventFactKind {
+					row, ok := logEventRow(f, tenantID, cidDB, instUUID)
+					if !ok {
+						IncIngestRejected("invalid_fact")
+						continue
+					}
+					instLogEvents = append(instLogEvents, row)
 					continue
 				}
 				// A capture of the agent's watcher is an event, not an object fact.
@@ -896,6 +907,7 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		if instLockSnapshot != nil {
 			lockSnapshotRows = append(lockSnapshotRows, *instLockSnapshot)
 		}
+		logEventRows = append(logEventRows, instLogEvents...)
 		relationPrunes = append(relationPrunes, instRelationPrunes...)
 		factPrunes = append(factPrunes, instFactPrunes...)
 		storedInstances = append(storedInstances, instUUID)
@@ -950,6 +962,9 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	}
 	if err := store.WriteCheckResults(ctx, tx, checkResultRows); err != nil {
 		return nil, fmt.Errorf("write check results: %w", err)
+	}
+	if err := store.WriteLogEvents(ctx, tx, logEventRows); err != nil {
+		return nil, err
 	}
 	if err := store.WriteLockSnapshots(ctx, tx, lockSnapshotRows); err != nil {
 		return nil, fmt.Errorf("write lock snapshots: %w", err)

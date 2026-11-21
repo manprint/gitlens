@@ -101,3 +101,6 @@ Gates: G-GO-FOCUS ./internal/pglog/ ok (PGL-009..014); G-GO-INT TestINTPGL001 pa
 
 ## 2026-11-21 6.4/1 complete unit:6.4:1
 Gates: G-GO-FOCUS ok (agent, cmd agent, wire, pglog); G-GO-INT cmd/pglens-agent ok; INT-PGL-002/003 ok; G-RO INTRO001 pg15+pg18 ok; lint 0 issues; review: self-review (agent:opus) accepted; changes: checks.logs config + validation; agent LogSettings/ReadLogSettings/LogQuerier; cmd agent log loop (logs.go, logs_build.go) wired in run.go; log_event fact kind; example config block; RO audit covers log reader; notes: A21: PG15 grant of pg_current_logfile; shared position store
+
+## 2026-11-21 6.5/1 complete unit:6.5:1
+Gates: G-GO-FOCUS server/store ok; INT-PGL-004 ok; RETINT001-003, RLP ok; store integration ok; vitest retention/settings 114 ok; typecheck ok; lint 0; review: self-review (agent:opus) accepted; changes: migration 0036 log_events; store LogEventRow/WriteLogEvents; pipeline routes log_event facts (server withhold, class check); retention family log_events 14d (API enum, generated.ts, console label); notes: A22

@@ -406,6 +406,7 @@ export const settings: Translation<typeof english> = {
   'settings.lib.retention.family.metricsTables': 'Statistiche tabelle',
   'settings.lib.retention.family.metricsIndexes': 'Statistiche indici',
   'settings.lib.retention.family.metricsBloat': 'Stime di bloat',
+  'settings.lib.retention.family.logEvents': 'Eventi del log PostgreSQL',
   'settings.lib.retention.family.metrics1h': 'Medie orarie delle metriche',
   'settings.lib.retention.family.metricsStatements1h': 'Statistiche orarie delle query',
   'settings.lib.retention.family.metricsAsh1h': 'Active Session History oraria',

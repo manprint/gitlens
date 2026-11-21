@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:07 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:15 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 5435b9b6f8787f28d01a0146c14cb8a14306e055 + tree 7d983ef6f1d34d7c9b1a13e545dfcc2cdfc3d79c · branch main · last WIP tree none
-- Last closure: unit:6.4:1
-- Next: open 6.5 · next eligible: 6.5
+- Base: HEAD 9aa8e510c83d89b18d77b9624db393155229d609 + tree 9f283d3206a73c1117000ca93d45ca79072461c4 · branch main · last WIP tree none
+- Last closure: unit:6.5:1
+- Next: open 6.6 · next eligible: 6.6
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -76,6 +76,7 @@ none
 - A19 (6.3 design note, approved by agent-1): Advance cases — first run (no saved position): next = end of current file, nothing read; same file grown: read [offset, size); truncated (size < offset): read from 0; rotated (saved file != current): rest of the old file (if it still exists), then the new one from 0, in budget order; file gone: new file from 0; backlog (sum of unread spans) > 16 × budget: nothing read, next = end of current file, skipped = backlog. Reads stop at the budget, next = where they stopped. Contract extension: Advance returns `[]Chunk{File, Offset, Data, Ended}` instead of `[][]byte`, and `Settle(next, lastChunk, consumed)` moves the position back to the end of the last complete record of a file still being written (a half record at the end of a rotated-away file is dropped). `NewSQLSource` takes a driver-free `Querier{QueryRow}` (D9: pglog imports no driver); the agent adapts pgx. Integration helper `pgtest.StartLogging` (collector on, `log_directory=log`, RoleT0 as plain pg_monitor). Verified on PG 18.6: pg_monitor already executes `pg_current_logfile` and `pg_ls_logdir`; only `pg_read_binary_file` needs the grant.
 - A20 (6.4 wiring plan, approved by agent-1): one goroutine per target started in `run.go` right after `startASH`, only when `checks.logs.enabled: true`; it ticks at `checks.logs.interval` (default 15s) and appends its `wire.Result` (check `logs`) to `pending[target]` under the shared `mu`, like the watcher, so the existing pusher ships it. Coverage notes are `wire.Result{Check: "logs", SkipReason: <code>}`, which the server already files as `check_skip` facts keyed by check. Each query takes `mgr.Shared` and releases it at once (no dedicated connection). Settings read, the driver-free `pglog.Querier` adapter and `LogSettings` live in `internal/agent/logs.go` so the read-only audit (G-RO) runs the same statements; fact building is a pure function in `cmd/pglens-agent/logs_build.go`. `logs` is not a registered check, so the scheduler ignores it.
 - A21 (6.4): PostgreSQL 15's pg_monitor lacks EXECUTE on pg_current_logfile (16+ has it), so the SQL source there needs that grant too; the loop reports logs_sql_denied, example config and 6.6 docs say so. INT-PGL-002/003 run through the SQL source (the file source is covered by pglog unit tests; bind-mounting the container log dir is not portable in the sandbox). Saved positions are one shared store per state file (sharedLogState) so multi-target loops never write back another target's stale position.
+- A22 (6.5): migration 0035 is the rollups, so log events take 0036 (alert seeds of 6.6 take 0037). The server keeps the spec's withheld constant "[withheld: may hold a credential]" (redact.Withheld is "[redacted]") and re-checks application_name too. log_events joins the retention whitelist (default 14, no compression, floor 3), so the OpenAPI enum, generated types and the console family label (en/it) change with it.
 
 ## 9. Blockers
 none
@@ -99,7 +100,7 @@ none
 | · 6.2 | DONE | 1 | — | unit:6.2:1 |
 | · 6.3 | DONE | 1 | — | unit:6.3:1 |
 | · 6.4 | DONE | 1 | — | unit:6.4:1 |
-| · 6.5 | TODO | 1 | — | — |
+| · 6.5 | DONE | 1 | — | unit:6.5:1 |
 | · 6.6 | TODO | 1 | — | — |
 | · P6 closure | TODO | 1 | — | — |
 | 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |

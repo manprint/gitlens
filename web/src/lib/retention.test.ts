@@ -111,6 +111,7 @@ describe('retention rules', () => {
       'metrics_tables',
       'metrics_indexes',
       'metrics_bloat',
+      'log_events',
       'metrics_1h',
       'metrics_statements_1h',
       'metrics_ash_1h',

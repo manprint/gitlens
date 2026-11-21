@@ -26,6 +26,7 @@ export const RETENTION_FAMILY_KEYS = {
   metrics_tables: 'settings.lib.retention.family.metricsTables',
   metrics_indexes: 'settings.lib.retention.family.metricsIndexes',
   metrics_bloat: 'settings.lib.retention.family.metricsBloat',
+  log_events: 'settings.lib.retention.family.logEvents',
   metrics_1h: 'settings.lib.retention.family.metrics1h',
   metrics_statements_1h: 'settings.lib.retention.family.metricsStatements1h',
   metrics_ash_1h: 'settings.lib.retention.family.metricsAsh1h',

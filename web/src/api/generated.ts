@@ -3117,10 +3117,10 @@ export interface components {
             unsupported_policy?: string;
         };
         /**
-         * @description A metrics family; each maps to the hypertable of the same name. The three `_1h` families are the hourly rollups (continuous aggregates of metrics, metrics_statements and metrics_ash).
+         * @description A metrics family; each maps to the hypertable of the same name. The three `_1h` families are the hourly rollups (continuous aggregates of metrics, metrics_statements and metrics_ash); log_events holds the PostgreSQL log lines the agent ships (14 days by default).
          * @enum {string}
          */
-        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat" | "metrics_1h" | "metrics_statements_1h" | "metrics_ash_1h";
+        RetentionFamilyName: "metrics" | "metrics_statements" | "metrics_ash" | "metrics_replication" | "metrics_tables" | "metrics_indexes" | "metrics_bloat" | "log_events" | "metrics_1h" | "metrics_statements_1h" | "metrics_ash_1h";
         RetentionPreview: {
             family: components["schemas"]["RetentionFamilyName"];
             /** Format: int32 */

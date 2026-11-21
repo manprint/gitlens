@@ -25,13 +25,13 @@ func secondsOf(d time.Duration) *float64 {
 
 const day = 24 * time.Hour
 
-// defaultPolicies is what migrations 0003, 0007 and 0035 leave: 30 days of
-// retention (bloat 90, rollups 730) and a 48-hour compression horizon (bloat
-// 7 days, rollups none).
+// defaultPolicies is what migrations 0003, 0007, 0035 and 0036 leave: 30 days
+// of retention (bloat 90, rollups 730, log events 14) and a 48-hour
+// compression horizon (bloat 7 days, rollups and log events none).
 func defaultPolicies() map[string]livePolicy {
 	out := map[string]livePolicy{}
 	for _, f := range retentionFamilies {
-		if f.Rollup {
+		if f.Rollup || f.Name == "log_events" {
 			out[f.Hypertable] = livePolicy{DropAfter: secondsOf(time.Duration(f.DefaultDays) * day)}
 			continue
 		}
@@ -138,15 +138,19 @@ func TestRET001(t *testing.T) {
 			continue // RLP-001
 		}
 		require.Equal(t, 365, row.MaxDays)
-		if row.Family == "metrics_bloat" {
+		switch row.Family {
+		case "metrics_bloat":
 			require.Equal(t, 90, *row.Days)
 			require.Equal(t, 8, row.MinDays)
-		} else {
+		case "log_events":
+			require.Equal(t, 14, *row.Days)
+			require.Equal(t, 3, row.MinDays)
+		default:
 			require.Equal(t, 30, *row.Days, row.Family)
 			require.Equal(t, 3, row.MinDays, row.Family)
 		}
 	}
-	require.Equal(t, []string{"metrics", "metrics_statements", "metrics_ash", "metrics_replication", "metrics_tables", "metrics_indexes", "metrics_bloat", "metrics_1h", "metrics_statements_1h", "metrics_ash_1h"}, names)
+	require.Equal(t, []string{"metrics", "metrics_statements", "metrics_ash", "metrics_replication", "metrics_tables", "metrics_indexes", "metrics_bloat", "log_events", "metrics_1h", "metrics_statements_1h", "metrics_ash_1h"}, names)
 
 	policies := defaultPolicies()
 	policies["metrics_ash"] = livePolicy{DropAfter: secondsOf(14 * day), CompressAfter: secondsOf(48 * time.Hour)}
@@ -438,7 +442,7 @@ func TestRET005(t *testing.T) {
 	require.Contains(t, retentionPreviewSQL, `chunks_detailed_size(format('%I.%I', h.store_schema, h.store_name)::regclass)`)
 	require.Contains(t, retentionPreviewSQL, `ca.view_name = $1::text`)
 
-	ident := regexp.MustCompile(`^metrics(_[a-z]+)?(_1h)?$`)
+	ident := regexp.MustCompile(`^(metrics(_[a-z]+)?(_1h)?|log_events)$`)
 	seen := map[string]bool{}
 	for _, f := range retentionFamilies {
 		require.Regexp(t, ident, f.Hypertable)
@@ -446,7 +450,7 @@ func TestRET005(t *testing.T) {
 		require.False(t, seen[f.Name])
 		seen[f.Name] = true
 	}
-	require.Len(t, retentionFamilies, 10)
+	require.Len(t, retentionFamilies, 11)
 	_, ok := lookupRetentionFamily("metrics_ash")
 	require.True(t, ok)
 	for _, bad := range []string{"", "Metrics", "metrics_ash ", "public.metrics", "metrics_ash;", "events"} {
@@ -672,14 +676,14 @@ func (t *retentionRecTx) Rollback(context.Context) error {
 	return nil
 }
 
-// RLP-001: the list has ten families; the last three are the hourly rollups,
+// RLP-001: the list has eleven families; the last three are the hourly rollups,
 // 730 days by default, bounds 31..1825.
 func TestRLP001(t *testing.T) {
 	t.Parallel()
 	rows := getRetentionRows(t, &API{retention: &stubPolicyStore{policies: defaultPolicies()}})
-	require.Len(t, rows, 10)
+	require.Len(t, rows, 11)
 	for i, row := range rows {
-		require.Equal(t, i >= 7, row.Rollup, row.Family)
+		require.Equal(t, i >= 8, row.Rollup, row.Family)
 		if !row.Rollup {
 			require.Equal(t, 365, row.MaxDays, row.Family)
 			continue
@@ -690,7 +694,7 @@ func TestRLP001(t *testing.T) {
 		require.Equal(t, "default", row.Source, row.Family)
 	}
 	require.Equal(t, []string{"metrics_1h", "metrics_statements_1h", "metrics_ash_1h"},
-		[]string{rows[7].Family, rows[8].Family, rows[9].Family})
+		[]string{rows[8].Family, rows[9].Family, rows[10].Family})
 }
 
 // RLP-002: each family has its own upper bound.

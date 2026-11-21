@@ -606,6 +606,52 @@ func DeleteCheckPartialFact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 	return nil
 }
 
+// LogEventRow is one PostgreSQL log line the agent shipped (plan 007 6.5).
+type LogEventRow struct {
+	TS              time.Time
+	TenantID        string
+	ClusterID       int64
+	InstanceID      uuid.UUID
+	Datname         string
+	Usename         string
+	ApplicationName string
+	PID             *int32
+	SessionID       string
+	LineNum         int64
+	Severity        string
+	SQLState        string
+	Class           string
+	QueryID         *int64
+	Message         string
+	Extra           []byte
+}
+
+// WriteLogEvents writes log events ON CONFLICT DO NOTHING: a result pushed
+// twice stores each line once.
+func WriteLogEvents(ctx context.Context, tx pgx.Tx, rows []LogEventRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, r := range rows {
+		var extra any
+		if len(r.Extra) > 0 {
+			extra = string(r.Extra)
+		}
+		batch.Queue(`INSERT INTO log_events (ts, tenant_id, cluster_id, instance_id, datname, usename, application_name, pid, session_id, line_num, severity, sqlstate, class, queryid, message, extra)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb) ON CONFLICT DO NOTHING`,
+			r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Usename, r.ApplicationName, r.PID, r.SessionID, r.LineNum, r.Severity, r.SQLState, r.Class, r.QueryID, r.Message, extra)
+	}
+	br := tx.SendBatch(ctx, batch)
+	for range rows {
+		if _, err := br.Exec(); err != nil {
+			_ = br.Close()
+			return fmt.Errorf("write log event: %w", err)
+		}
+	}
+	return br.Close()
+}
+
 // WriteLockSnapshots keeps only the newest tree per instance and removes trees
 // older than the fifteen-minute freshness window for each touched instance.
 func WriteLockSnapshots(ctx context.Context, tx pgx.Tx, rows []LockSnapshotRow) error {
