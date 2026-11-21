@@ -19,7 +19,7 @@ type SampleRow struct {
 	WaitEventType string
 	WaitEvent     string
 	QueryID       *int64
-	// Usename, ClientAddr and ApplicationName are '' when unknown; each is cut
+	// Usename, ClientAddr and ApplicationName are empty when unknown; each is cut
 	// to 64 bytes on a UTF-8 boundary.
 	Usename         string
 	ClientAddr      string

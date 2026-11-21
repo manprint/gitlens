@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -49,6 +50,11 @@ type ashBucket struct {
 	// PostgreSQL query IDs are int64 values. Keep them as decimal strings in
 	// JSON so browsers cannot round them past Number.MAX_SAFE_INTEGER.
 	QueryID *string `json:"queryid,omitempty"`
+	// The text dimensions are set only when grouped or filtered by them; an
+	// unknown value reads as "".
+	Usename         *string `json:"usename,omitempty"`
+	ClientAddr      *string `json:"client_addr,omitempty"`
+	ApplicationName *string `json:"application_name,omitempty"`
 }
 
 type ashResponse struct {
@@ -89,7 +95,7 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	groupByStr := q.Get("group_by")
 	database := q.Get("database")
 	limitStr := q.Get("limit")
-	filters := ashFilters{waitEventType: q.Get("wait_event_type"), waitEvent: q.Get("wait_event")}
+	filters := ashFiltersFrom(q)
 
 	if instanceIDStr == "" {
 		writeError(w, http.StatusBadRequest, "missing instance_id", "query param instance_id is required")
@@ -135,11 +141,14 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 	if groupByStr != "" {
 		parts := strings.Split(groupByStr, ",")
 		validCols := map[string]bool{
-			"wait_event_type": true,
-			"wait_event":      true,
-			"state":           true,
-			"queryid":         true,
-			"datname":         true,
+			"wait_event_type":  true,
+			"wait_event":       true,
+			"state":            true,
+			"queryid":          true,
+			"datname":          true,
+			"usename":          true,
+			"client_addr":      true,
+			"application_name": true,
 		}
 		for _, part := range parts {
 			col := strings.TrimSpace(part)
@@ -310,6 +319,28 @@ func (a *AshAPI) queryASHTicks(ctx context.Context, instanceID uuid.UUID, from, 
 // drill-down from a type to its events and from an event to its queries.
 type ashFilters struct {
 	waitEventType, waitEvent string
+	// dims holds the text-dimension filters by column name; the value ashUnknown
+	// matches empty. A column name is only ever one of ashDimColumns.
+	dims map[string]string
+}
+
+// ashDimColumns are the text dimensions a request may filter or group by.
+var ashDimColumns = []string{"usename", "client_addr", "application_name"}
+
+// ashUnknown in a dimension filter selects the samples whose value is empty.
+const ashUnknown = "-"
+
+func ashFiltersFrom(q url.Values) ashFilters {
+	f := ashFilters{waitEventType: q.Get("wait_event_type"), waitEvent: q.Get("wait_event")}
+	for _, col := range ashDimColumns {
+		if v := q.Get(col); v != "" {
+			if f.dims == nil {
+				f.dims = make(map[string]string, len(ashDimColumns))
+			}
+			f.dims[col] = v
+		}
+	}
+	return f
 }
 
 func ashWhere(instanceID uuid.UUID, from, to *time.Time, database string, filters ashFilters) (string, []any) {
@@ -333,6 +364,16 @@ func ashWhere(instanceID uuid.UUID, from, to *time.Time, database string, filter
 	}
 	if filters.waitEvent != "" {
 		add("wait_event = $%d", filters.waitEvent)
+	}
+	for _, col := range ashDimColumns {
+		v, ok := filters.dims[col]
+		if !ok {
+			continue
+		}
+		if v == ashUnknown {
+			v = ""
+		}
+		add(col+" = $%d", v)
 	}
 	return strings.Join(frags, " AND "), args
 }
@@ -437,6 +478,15 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 				dests = append(dests, &b.State)
 			case "queryid":
 				dests = append(dests, &qid)
+			case "usename":
+				b.Usename = new(string)
+				dests = append(dests, b.Usename)
+			case "client_addr":
+				b.ClientAddr = new(string)
+				dests = append(dests, b.ClientAddr)
+			case "application_name":
+				b.ApplicationName = new(string)
+				dests = append(dests, b.ApplicationName)
 			}
 		}
 		if carryType {
@@ -464,6 +514,7 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 		if filters.waitEvent != "" {
 			buckets[i].WaitEvent = filters.waitEvent
 		}
+		echoASHDims(&buckets[i], filters)
 		buckets[i].AvgActiveSessions = avgActive(buckets[i].Samples, buckets[i].Ticks)
 	}
 	totalTicks, err := a.queryASHTicks(ctx, instanceID, &from, &to)
@@ -484,7 +535,7 @@ func foldASHGroups(rows []ashBucket, groupByCols []string, nBuckets, limit int) 
 		if b.QueryID != nil {
 			qid = *b.QueryID
 		}
-		return strings.Join([]string{b.Datname, b.WaitEventType, b.WaitEvent, b.State, qid}, "\x00")
+		return strings.Join([]string{b.Datname, b.WaitEventType, b.WaitEvent, b.State, qid, deref(b.Usename), deref(b.ClientAddr), deref(b.ApplicationName)}, "\x00")
 	}
 	var template ashBucket
 	for _, col := range groupByCols {
@@ -497,6 +548,12 @@ func foldASHGroups(rows []ashBucket, groupByCols []string, nBuckets, limit int) 
 			template.WaitEvent = ashOther
 		case "state":
 			template.State = ashOther
+		case "usename":
+			template.Usename = ptr(ashOther)
+		case "client_addr":
+			template.ClientAddr = ptr(ashOther)
+		case "application_name":
+			template.ApplicationName = ptr(ashOther)
 		}
 	}
 	otherKey := keyOf(template)
@@ -549,6 +606,33 @@ func foldASHGroups(rows []ashBucket, groupByCols []string, nBuckets, limit int) 
 	return out
 }
 
+// echoASHDims names the filtered dimension values on a grouped row, as the
+// wait event filters are echoed, so a drill-down can tell where it is.
+func echoASHDims(b *ashBucket, filters ashFilters) {
+	for col, v := range filters.dims {
+		if v == ashUnknown {
+			v = ""
+		}
+		switch col {
+		case "usename":
+			b.Usename = ptr(v)
+		case "client_addr":
+			b.ClientAddr = ptr(v)
+		case "application_name":
+			b.ApplicationName = ptr(v)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func avgActive(samples, ticks int) *float64 {
 	if ticks <= 0 {
 		return nil
@@ -569,7 +653,7 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	// The drill-down filters, so the queries listed under a wait event are
 	// the ones seen in it: the list used to rank every query of the range
 	// whatever wait event the chart above had narrowed to.
-	filters := ashFilters{waitEventType: q.Get("wait_event_type"), waitEvent: q.Get("wait_event")}
+	filters := ashFiltersFrom(q)
 
 	if instanceIDStr == "" {
 		writeError(w, http.StatusBadRequest, "missing instance_id", "query param instance_id is required")

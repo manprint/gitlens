@@ -86,7 +86,7 @@ type ASHRow struct {
 	Samples       int
 	WindowSeconds int
 	WindowTicks   int
-	// Usename, ClientAddr and ApplicationName are '' when the agent sent no
+	// Usename, ClientAddr and ApplicationName are empty when the agent sent no
 	// label (unknown, turned off, or an agent older than plan 007).
 	Usename         string
 	ClientAddr      string

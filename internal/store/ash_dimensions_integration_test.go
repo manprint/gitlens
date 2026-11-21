@@ -56,7 +56,7 @@ func TestINTASHD002_DimensionsStoredAndDeduplicated(t *testing.T) {
 }
 
 // INT-ASH-D-003: rows stored before 0033, in a compressed chunk, survive the
-// migration with '' in the three new columns.
+// migration with empty values in the three new columns.
 func TestINTASHD003_MigrationKeepsOldRows(t *testing.T) {
 	ctx, _, pool := newMigrationTestPool(t)
 	require.NoError(t, Migrate(ctx, pool))

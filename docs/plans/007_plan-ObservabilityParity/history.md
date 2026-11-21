@@ -35,3 +35,6 @@ Gates: G-GO-FOCUS ./cmd/pglens-agent ./internal/agent TestASHD004-007 pass; both
 
 ## 2026-11-21 2.3/1 complete unit:2.3:1
 Gates: G-GO-FOCUS ./internal/server TestASHD008 pass; server+store -race pass; G-GO-INT TestINTASHD002/003 pass (TimescaleDB 2.31); review: self-review (agent:opus) accepted; changes: migration 0033_ash_dimensions.sql (as designed); ASHRow + both writers (batch, temp-table copy) carry usename, client_addr, application_name; buildASHRow reads labels, missing = ''; notes: self-review agent:opus: migration reviewed before run; R7 exercised live (0033 applied over a compressed chunk, TestINTASHD003); ON CONFLICT DO NOTHING kept
+
+## 2026-11-21 2.4/1 complete unit:2.4:1
+Gates: G-GO-FOCUS (ASH-D-009..011, server/ash/store/cmd), G-GO-INT TestINTASHD004 + TestIntASH0*, G-API (gen:api, api-docs), web typecheck; review: self-review (agent:opus) accepted; changes: api_ash.go: group_by usename/client_addr/application_name, filters as bind params (- = empty), echo on grouped rows, fold keeps dims; openapi enum + 3 params + AshBucket fields; generated.ts; notes: doc comments reworded from '' to empty (gofmt rewrites '' into a curly quote); raw ungrouped rows keep wait-event dimensions only, documented

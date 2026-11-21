@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
 	"time"
@@ -615,4 +616,57 @@ func TestAshTop_NonEmptyAnswerReadsTicksFromItsEntries(t *testing.T) {
 	require.Len(t, entries, 1)
 	require.Equal(t, 600, totalTicks)
 	require.Zero(t, pool.queryRowCalls, "the entries already carry the range's ticks")
+}
+
+// ASH-D-009: the dimension columns are accepted group_by values; an unknown
+// column is still refused.
+func TestASHD009_GroupByDimensions(t *testing.T) {
+	t.Parallel()
+	r := chi.NewRouter()
+	NewAshAPI(nil).RegisterRoutes(r)
+	instID := uuid.NewString()
+	for _, col := range []string{"usename", "client_addr", "application_name", "usename,wait_event_type"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+instID+"&group_by="+col, nil))
+		require.Equal(t, http.StatusOK, w.Code, col)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+instID+"&group_by=foo", nil))
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ASH-D-010: a dimension filter is one more bind parameter; the request's text
+// never reaches the SQL string.
+func TestASHD010_DimensionFilterIsABindParameter(t *testing.T) {
+	t.Parallel()
+	inst := uuid.New()
+	baseSQL, baseArgs := ashWhere(inst, nil, nil, "", ashFiltersFrom(url.Values{}))
+	val := "app'; DROP TABLE metrics_ash; --"
+	sql, args := ashWhere(inst, nil, nil, "", ashFiltersFrom(url.Values{"usename": {val}}))
+	require.Len(t, args, len(baseArgs)+1)
+	require.Equal(t, val, args[len(args)-1])
+	require.Equal(t, baseSQL+" AND usename = $2", sql)
+	require.NotContains(t, sql, "DROP")
+
+	// Unknown query keys are ignored; every dimension adds its own parameter.
+	sql, args = ashWhere(inst, nil, nil, "", ashFiltersFrom(url.Values{
+		"usename": {"a"}, "client_addr": {"10.0.0.1"}, "application_name": {"svc"}, "role": {"x"},
+	}))
+	require.Equal(t, "instance_id = $1 AND usename = $2 AND client_addr = $3 AND application_name = $4", sql)
+	require.Equal(t, []any{inst, "a", "10.0.0.1", "svc"}, args)
+}
+
+// ASH-D-011: the value "-" selects the samples whose dimension is empty.
+func TestASHD011_UnknownSelectsEmpty(t *testing.T) {
+	t.Parallel()
+	inst := uuid.New()
+	sql, args := ashWhere(inst, nil, nil, "", ashFiltersFrom(url.Values{"client_addr": {"-"}}))
+	require.Equal(t, "instance_id = $1 AND client_addr = $2", sql)
+	require.Equal(t, []any{inst, ""}, args)
+
+	var b ashBucket
+	echoASHDims(&b, ashFiltersFrom(url.Values{"client_addr": {"-"}, "usename": {"a"}}))
+	require.Equal(t, "", *b.ClientAddr)
+	require.Equal(t, "a", *b.Usename)
+	require.Nil(t, b.ApplicationName)
 }

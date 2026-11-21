@@ -745,7 +745,7 @@ export interface paths {
         };
         /**
          * Return activity samples grouped by the requested dimensions.
-         * @description With group_by, the range (default: the last hour) is aggregated into time buckets of resolution_seconds, at most 180 of them, one row per bucket and group. ticks is the instance's sampling ticks in the bucket, whatever the filters, so avg_active_sessions is the group's share of the instance's time. The largest groups are kept (at most 24, fewer when limit rows cannot hold them for every bucket) and the rest are folded into one group named other, so the total is conserved. Without group_by, the stored rows are returned newest first, every dimension included, and a request with no from reads the last hour before to, or before now when to is omitted too.
+         * @description With group_by, the range (default: the last hour) is aggregated into time buckets of resolution_seconds, at most 180 of them, one row per bucket and group. ticks is the instance's sampling ticks in the bucket, whatever the filters, so avg_active_sessions is the group's share of the instance's time. The largest groups are kept (at most 24, fewer when limit rows cannot hold them for every bucket) and the rest are folded into one group named other, so the total is conserved. Without group_by, the stored rows are returned newest first, every wait-event dimension included (not the user, client or application), and a request with no from reads the last hour before to, or before now when to is omitted too.
          */
         get: operations["getAsh"];
         put?: never;
@@ -1536,6 +1536,12 @@ export interface components {
             state?: string;
             /** @description PostgreSQL query ID as a decimal string. */
             queryid?: string | null;
+            /** @description User of the samples, empty when unknown. Present when grouped or filtered by usename. */
+            usename?: string;
+            /** @description Client address of the samples, empty for a local socket or unknown. Present when grouped or filtered by client_addr. */
+            client_addr?: string;
+            /** @description application_name of the samples, empty when unset. Present when grouped or filtered by application_name. */
+            application_name?: string;
         };
         CommandAuditEntry: {
             /** Format: int64 */
@@ -4216,12 +4222,18 @@ export interface operations {
                 from?: components["schemas"]["Timestamp"];
                 to?: components["schemas"]["Timestamp"];
                 /** @description Grouped by wait_event without wait_event_type, every bucket still carries its event's wait_event_type. */
-                group_by?: "wait_event_type" | "wait_event" | "queryid" | "state" | "datname";
+                group_by?: "wait_event_type" | "wait_event" | "queryid" | "state" | "datname" | "usename" | "client_addr" | "application_name";
                 database?: string;
                 /** @description Only samples of this wait event type; echoed on every returned row. */
                 wait_event_type?: string;
                 /** @description Only samples of this wait event; echoed on every returned row. */
                 wait_event?: string;
+                /** @description Only samples of this user; - selects the samples whose user is unknown (empty). Echoed on every grouped row. */
+                usename?: string;
+                /** @description Only samples from this client address; - selects the samples without one (local socket or unknown). Echoed on every grouped row. */
+                client_addr?: string;
+                /** @description Only samples of this application name; - selects the samples without one. Echoed on every grouped row. */
+                application_name?: string;
                 limit?: number;
             };
             header?: never;
@@ -4254,6 +4266,12 @@ export interface operations {
                 wait_event_type?: string;
                 /** @description Only samples of this wait event. */
                 wait_event?: string;
+                /** @description Only samples of this user; - selects the samples whose user is unknown (empty). */
+                usename?: string;
+                /** @description Only samples from this client address; - selects the samples without one (local socket or unknown). */
+                client_addr?: string;
+                /** @description Only samples of this application name; - selects the samples without one. */
+                application_name?: string;
                 limit?: number;
             };
             header?: never;

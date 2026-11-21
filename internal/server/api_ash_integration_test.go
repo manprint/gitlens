@@ -651,3 +651,62 @@ func TestIntASH021_RawAndTopDefaultToTheLastHour(t *testing.T) {
 	require.Len(t, top.Entries, 1)
 	require.Equal(t, 12, top.Entries[0].Samples)
 }
+
+// INT-ASH-D-004: rows of users a and b group into two usename series whose
+// samples sum to the total, and a usename filter narrows the top queries to
+// that user's.
+func TestINTASHD004_GroupAndFilterByUsename(t *testing.T) {
+	pool := getSharedPool(t)
+	truncateAll(t, pool)
+	ctx := contextBackground()
+	instID := uuid.New()
+	cid := pgtype.ClusterID(4344)
+	base := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	for i := 0; i < 2; i++ {
+		ts := base.Add(time.Duration(i*10) * time.Second)
+		for _, key := range []struct {
+			user, addr string
+			qid        int64
+			samples    int
+		}{{"a", "10.0.0.1", 1, 6}, {"b", "", 2, 4}} {
+			_, err := pool.Exec(ctx, `INSERT INTO metrics_ash (ts, cluster_id, instance_id, datname, wait_event_type, wait_event, state, queryid, samples, window_seconds, window_ticks, usename, client_addr, application_name)
+				VALUES ($1, $2, $3, 'app', 'CPU', 'CPU', 'active', $4, $5, 10, 10, $6, $7, 'svc')`, ts, store.ToDB(cid), instID, key.qid, key.samples, key.user, key.addr)
+			require.NoError(t, err)
+		}
+	}
+
+	r := chi.NewRouter()
+	NewAshAPI(pool).RegisterRoutes(r)
+	get := func(path, query string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", path+"?instance_id="+instID.String()+"&from="+base.Format(time.RFC3339)+"&to="+base.Add(time.Hour).Format(time.RFC3339)+query, nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		return w
+	}
+
+	var grouped ashResponse
+	require.NoError(t, json.NewDecoder(get("/api/v1/ash", "&group_by=usename").Body).Decode(&grouped))
+	require.Len(t, grouped.Buckets, 2)
+	byUser := map[string]int{}
+	total := 0
+	for _, b := range grouped.Buckets {
+		require.NotNil(t, b.Usename)
+		byUser[*b.Usename] += b.Samples
+		total += b.Samples
+	}
+	require.Equal(t, map[string]int{"a": 12, "b": 8}, byUser)
+	require.Equal(t, 20, total)
+
+	var unknownAddr ashResponse
+	require.NoError(t, json.NewDecoder(get("/api/v1/ash", "&group_by=usename&client_addr=-").Body).Decode(&unknownAddr))
+	require.Len(t, unknownAddr.Buckets, 1)
+	require.Equal(t, "b", *unknownAddr.Buckets[0].Usename)
+	require.Equal(t, "", *unknownAddr.Buckets[0].ClientAddr, "the filter is echoed")
+
+	var top ashTopResponse
+	require.NoError(t, json.NewDecoder(get("/api/v1/ash/top", "&usename=a").Body).Decode(&top))
+	require.Len(t, top.Entries, 1)
+	require.Equal(t, "1", top.Entries[0].QueryID)
+	require.Equal(t, 12, top.Entries[0].Samples)
+}

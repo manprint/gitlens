@@ -1197,7 +1197,7 @@ func TestPresentRelations_SkippedTablesIsNotARelation(t *testing.T) {
 }
 
 // ASH-D-008: buildASHRow reads the three dimension labels; without them (an
-// older agent) the fields are ''.
+// older agent) the fields are empty.
 func TestASHD008_BuildASHRowDimensions(t *testing.T) {
 	inst := uuid.New()
 	now := time.Now()

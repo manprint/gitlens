@@ -26,7 +26,7 @@ type Key struct {
 	State         string
 	QueryID       int64 // 0 means absent; HasQueryID says whether it is real
 	HasQueryID    bool
-	// Usename, ClientAddr and ApplicationName are '' when unknown or when the
+	// Usename, ClientAddr and ApplicationName are empty when unknown or when the
 	// agent turned that dimension off.
 	Usename         string
 	ClientAddr      string

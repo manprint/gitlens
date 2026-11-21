@@ -385,6 +385,9 @@ components:
         wait_event: { type: string }
         state: { type: string }
         queryid: { type: [string, 'null'], pattern: '^-?[0-9]+$', description: PostgreSQL query ID as a decimal string. }
+        usename: { type: string, description: 'User of the samples, empty when unknown. Present when grouped or filtered by usename.' }
+        client_addr: { type: string, description: 'Client address of the samples, empty for a local socket or unknown. Present when grouped or filtered by client_addr.' }
+        application_name: { type: string, description: 'application_name of the samples, empty when unset. Present when grouped or filtered by application_name.' }
     CommandAuditEntry:
       type: object
       required: [audit_id, command_id, instance_id, kind, args, requested_by, executed_at, outcome]
@@ -3642,7 +3645,7 @@ paths:
         fewer when limit rows cannot hold them for every bucket) and the rest
         are folded into one group named other, so the total is conserved.
         Without group_by, the stored rows are returned newest first, every
-        dimension included, and a request with no from reads the last hour
+        wait-event dimension included (not the user, client or application), and a request with no from reads the last hour
         before to, or before now when to is omitted too.
       parameters:
         - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
@@ -3655,7 +3658,7 @@ paths:
         - name: group_by
           in: query
           required: false
-          schema: { type: string, enum: [wait_event_type, wait_event, queryid, state, datname] }
+          schema: { type: string, enum: [wait_event_type, wait_event, queryid, state, datname, usename, client_addr, application_name] }
           description: Grouped by wait_event without wait_event_type, every bucket still carries its event's wait_event_type.
         - { name: database, in: query, required: false, schema: { type: string } }
         - name: wait_event_type
@@ -3668,6 +3671,21 @@ paths:
           required: false
           schema: { type: string }
           description: Only samples of this wait event; echoed on every returned row.
+        - name: usename
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this user; - selects the samples whose user is unknown (empty). Echoed on every grouped row.
+        - name: client_addr
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples from this client address; - selects the samples without one (local socket or unknown). Echoed on every grouped row.
+        - name: application_name
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this application name; - selects the samples without one. Echoed on every grouped row.
         - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 1000, minimum: 1, maximum: 10000 } }
       responses:
         '200':
@@ -3715,6 +3733,21 @@ paths:
           required: false
           schema: { type: string }
           description: Only samples of this wait event.
+        - name: usename
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this user; - selects the samples whose user is unknown (empty).
+        - name: client_addr
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples from this client address; - selects the samples without one (local socket or unknown).
+        - name: application_name
+          in: query
+          required: false
+          schema: { type: string }
+          description: Only samples of this application name; - selects the samples without one.
         - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 20, minimum: 1, maximum: 1000 } }
       responses:
         '200':
