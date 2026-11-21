@@ -17,6 +17,7 @@ tags:
   - name: statements
   - name: ash
   - name: commands
+  - name: workbooks
   - name: alerts
   - name: findings
   - name: agent
@@ -2096,6 +2097,79 @@ components:
       type: string
       enum: [enable_seqscan, enable_indexscan, enable_indexonlyscan, enable_bitmapscan, enable_tidscan, enable_nestloop, enable_hashjoin, enable_mergejoin, enable_hashagg, enable_sort, enable_incremental_sort, enable_material, enable_memoize, enable_gathermerge, enable_parallel_append, enable_parallel_hash, enable_partition_pruning, enable_partitionwise_join, enable_partitionwise_aggregate, jit, work_mem, effective_cache_size, random_page_cost, seq_page_cost, cpu_tuple_cost, cpu_index_tuple_cost, cpu_operator_cost, hash_mem_multiplier, join_collapse_limit, from_collapse_limit, max_parallel_workers_per_gather, plan_cache_mode]
       description: A planner setting a tuning-workbook variant may change.
+    WorkbookVariantRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        settings:
+          type: object
+          maxProperties: 16
+          propertyNames: { $ref: '#/components/schemas/WorkbookSettingName' }
+          additionalProperties: { type: string, maxLength: 16 }
+        hints: { type: string, maxLength: 1024 }
+        params:
+          type: array
+          items: { type: string, nullable: true }
+        analyze: { type: boolean }
+    WorkbookVariant:
+      type: object
+      required: [variant_id, position, name, settings, hints, params, analyze, status, command_id, error, plan_hash, total_cost, planning_ms, execution_ms, ran_at]
+      properties:
+        variant_id: { type: string, format: uuid }
+        position: { type: integer }
+        name: { type: string }
+        settings: { type: object, additionalProperties: { type: string } }
+        hints: { type: string }
+        params:
+          type: array
+          nullable: true
+          items: { type: string, nullable: true }
+        analyze: { type: boolean }
+        status: { type: string, enum: [never, pending, done, failed] }
+        command_id: { type: string, format: uuid, nullable: true }
+        error: { type: string }
+        plan: { description: EXPLAIN (FORMAT JSON) output of the last run; left out of lists. }
+        plan_hash: { type: string, nullable: true }
+        total_cost: { type: number, nullable: true }
+        planning_ms: { type: number, nullable: true }
+        execution_ms: { type: number, nullable: true, description: Only with ANALYZE. }
+        ran_at: { type: string, format: date-time, nullable: true }
+    Workbook:
+      type: object
+      required: [workbook_id, instance_id, database, queryid, name, notes, created_at, updated_at, variants]
+      properties:
+        workbook_id: { type: string, format: uuid }
+        instance_id: { type: string, format: uuid }
+        database: { type: string }
+        queryid: { type: string, description: pg_stat_statements queryid as a decimal string. }
+        name: { type: string }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        variants: { type: array, items: { $ref: '#/components/schemas/WorkbookVariant' } }
+    WorkbookList:
+      type: object
+      required: [workbooks]
+      properties:
+        workbooks: { type: array, items: { $ref: '#/components/schemas/Workbook' } }
+    CreateWorkbookRequest:
+      type: object
+      required: [instance_id, database, queryid, name]
+      additionalProperties: false
+      properties:
+        instance_id: { type: string, format: uuid }
+        database: { type: string }
+        queryid: { type: string, pattern: '^-?[0-9]+$' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        notes: { type: string, maxLength: 4000 }
+    UpdateWorkbookRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        notes: { type: string, maxLength: 4000 }
     CreateCommandRequest:
       type: object
       required: [kind, args]
@@ -5463,6 +5537,202 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/workbooks:
+    get:
+      tags: [workbooks]
+      operationId: listWorkbooks
+      summary: List the tuning workbooks of an instance, optionally of one statement.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: queryid, in: query, required: false, schema: { type: string, pattern: '^-?[0-9]+$' } }
+      responses:
+        '200':
+          description: Workbooks with their variants; plans are left out.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkbookList' }
+              examples:
+                default:
+                  value: { workbooks: [{ workbook_id: 33333333-3333-3333-3333-333333333333, instance_id: 11111111-1111-1111-1111-111111111111, database: app, queryid: '123456789', name: Lookup by key, notes: '', created_at: '2026-11-21T10:00:00Z', updated_at: '2026-11-21T10:00:00Z', variants: [{ variant_id: 44444444-4444-4444-4444-444444444444, position: 0, name: Baseline, settings: {}, hints: '', params: [], analyze: false, status: never, command_id: null, error: '', plan_hash: null, total_cost: null, planning_ms: null, execution_ms: null, ran_at: null }] }] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '503':
+          description: Workbook storage unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [workbooks]
+      operationId: createWorkbook
+      summary: Create a tuning workbook for one statement; it starts with a Baseline variant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWorkbookRequest' }
+            examples:
+              default:
+                value: { instance_id: 11111111-1111-1111-1111-111111111111, database: app, queryid: '123456789', name: Lookup by key, notes: '' }
+      responses:
+        '201':
+          description: The new workbook with its Baseline variant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workbook' }
+              examples:
+                default:
+                  value: { workbook_id: 33333333-3333-3333-3333-333333333333, instance_id: 11111111-1111-1111-1111-111111111111, database: app, queryid: '123456789', name: Lookup by key, notes: '', created_at: '2026-11-21T10:00:00Z', updated_at: '2026-11-21T10:00:00Z', variants: [{ variant_id: 44444444-4444-4444-4444-444444444444, position: 0, name: Baseline, settings: {}, hints: '', params: [], analyze: false, status: never, command_id: null, error: '', plan_hash: null, total_cost: null, planning_ms: null, execution_ms: null, ran_at: null }] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: limit_reached, the instance already has the most workbooks allowed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+  /api/v1/workbooks/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [workbooks]
+      operationId: getWorkbook
+      summary: Read a workbook with every variant and its last plan.
+      responses:
+        '200':
+          description: The workbook.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workbook' }
+              examples:
+                default:
+                  value: { workbook_id: 33333333-3333-3333-3333-333333333333, instance_id: 11111111-1111-1111-1111-111111111111, database: app, queryid: '123456789', name: Lookup by key, notes: '', created_at: '2026-11-21T10:00:00Z', updated_at: '2026-11-21T10:05:00Z', variants: [{ variant_id: 44444444-4444-4444-4444-444444444444, position: 0, name: Baseline, settings: {}, hints: '', params: [], analyze: false, status: done, command_id: 22222222-2222-2222-2222-222222222222, error: '', plan: [{ Plan: { Node Type: Index Scan, Total Cost: 8.3 } }], plan_hash: ab12, total_cost: 8.3, planning_ms: null, execution_ms: null, ran_at: '2026-11-21T10:05:00Z' }] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [workbooks]
+      operationId: updateWorkbook
+      summary: Rename a workbook or change its notes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateWorkbookRequest' }
+            examples:
+              default:
+                value: { notes: Index scans off doubles the cost. }
+      responses:
+        '200':
+          description: The updated workbook.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workbook' }
+              examples:
+                default:
+                  value: { workbook_id: 33333333-3333-3333-3333-333333333333, instance_id: 11111111-1111-1111-1111-111111111111, database: app, queryid: '123456789', name: Lookup by key, notes: Index scans off doubles the cost., created_at: '2026-11-21T10:00:00Z', updated_at: '2026-11-21T10:06:00Z', variants: [] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [workbooks]
+      operationId: deleteWorkbook
+      summary: Delete a workbook and its variants.
+      responses:
+        '204': { description: Deleted. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/workbooks/{id}/variants:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [workbooks]
+      operationId: addWorkbookVariant
+      summary: Add a variant (settings, hints, values, ANALYZE) to a workbook.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkbookVariantRequest' }
+            examples:
+              default:
+                value: { name: No index scans, settings: { enable_indexscan: 'off' }, hints: '', params: ['42'], analyze: false }
+      responses:
+        '201':
+          description: The new variant, never run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkbookVariant' }
+              examples:
+                default:
+                  value: { variant_id: 55555555-5555-5555-5555-555555555555, position: 1, name: No index scans, settings: { enable_indexscan: 'off' }, hints: '', params: ['42'], analyze: false, status: never, command_id: null, error: '', plan_hash: null, total_cost: null, planning_ms: null, execution_ms: null, ran_at: null }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: limit_reached, the workbook already has the most variants allowed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/workbooks/{id}/variants/{variant_id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: variant_id, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [workbooks]
+      operationId: updateWorkbookVariant
+      summary: Replace a variant; its last result is cleared and its status returns to never.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkbookVariantRequest' }
+            examples:
+              default:
+                value: { name: Seq scan hint, settings: {}, hints: SeqScan(items), params: ['42'], analyze: true }
+      responses:
+        '200':
+          description: The updated variant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkbookVariant' }
+              examples:
+                default:
+                  value: { variant_id: 55555555-5555-5555-5555-555555555555, position: 1, name: Seq scan hint, settings: {}, hints: SeqScan(items), params: ['42'], analyze: true, status: never, command_id: null, error: '', plan_hash: null, total_cost: null, planning_ms: null, execution_ms: null, ran_at: null }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [workbooks]
+      operationId: deleteWorkbookVariant
+      summary: Delete a variant.
+      responses:
+        '204': { description: Deleted. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/workbooks/{id}/variants/{variant_id}/run:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: variant_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [workbooks]
+      operationId: runWorkbookVariant
+      summary: Queue the variant as an explain command; its result is stored on the variant.
+      responses:
+        '202':
+          description: Command queued; the variant is pending.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateCommandResponse' }
+              examples:
+                default:
+                  value: { command_id: 22222222-2222-2222-2222-222222222222 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: variant_pending, the variant's previous run has not finished.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: The agent's command queue is full.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/commands/{id}:
     get:
       tags: [commands]

@@ -108,6 +108,7 @@ func (s *CommandService) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/commands/{id}", s.get)
 	r.Get("/api/v1/agents/{agent_id}/commands", s.poll)
 	r.Post("/api/v1/commands/{id}/result", s.result)
+	s.registerWorkbookRoutes(r)
 }
 
 type enqueueRequest struct {
@@ -178,58 +179,73 @@ func (s *CommandService) enqueue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := args.Validate(req.Kind); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid command", err.Error())
+	commandID, failure := s.insertCommand(r, instanceID, req.Kind, args)
+	if failure != nil {
+		failure.write(w)
 		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]uuid.UUID{"command_id": commandID})
+}
+
+// apiFailure is an error response not yet written.
+type apiFailure struct {
+	status int
+	title  string
+	detail string
+}
+
+func (f *apiFailure) write(w http.ResponseWriter) { writeError(w, f.status, f.title, f.detail) }
+
+// insertCommand validates a command and queues it for the instance's agent,
+// with its audit row. The commands route and a workbook variant's run share
+// it, so both refuse alike.
+func (s *CommandService) insertCommand(r *http.Request, instanceID uuid.UUID, kind command.Kind, args command.Args) (uuid.UUID, *apiFailure) {
+	ctx := r.Context()
+	if err := args.Validate(kind); err != nil {
+		return uuid.Nil, &apiFailure{http.StatusBadRequest, "invalid command", err.Error()}
 	}
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid command args", err.Error())
-		return
+		return uuid.Nil, &apiFailure{http.StatusBadRequest, "invalid command args", err.Error()}
 	}
 	var agentID uuid.UUID
 	var clusterID int64
 	var tenantID string
-	err = s.pool.QueryRow(r.Context(), `SELECT agent_id, cluster_id, tenant_id FROM instances WHERE instance_id=$1`, instanceID).Scan(&agentID, &clusterID, &tenantID)
+	err = s.pool.QueryRow(ctx, `SELECT agent_id, cluster_id, tenant_id FROM instances WHERE instance_id=$1`, instanceID).Scan(&agentID, &clusterID, &tenantID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "instance not found", instanceID.String())
-		return
+		return uuid.Nil, &apiFailure{http.StatusNotFound, "instance not found", instanceID.String()}
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "instance lookup failed", err.Error())
-		return
+		return uuid.Nil, &apiFailure{http.StatusInternalServerError, "instance lookup failed", err.Error()}
 	}
 	// The claim serves an agent's queue across all its instances, first in
 	// first out, so the bound is per agent. Two enqueues in flight can both
 	// pass the count, which overshoots the limit by at most that many: the
 	// bound is on the damage a flood can do, not an exact count.
 	var pending int64
-	err = s.pool.QueryRow(r.Context(), `SELECT count(*) FROM commands WHERE tenant_id=$1 AND agent_id=$2 AND state='pending' AND expires_at > now()`, tenantID, agentID).Scan(&pending)
+	err = s.pool.QueryRow(ctx, `SELECT count(*) FROM commands WHERE tenant_id=$1 AND agent_id=$2 AND state='pending' AND expires_at > now()`, tenantID, agentID).Scan(&pending)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "command queue check failed", err.Error())
-		return
+		return uuid.Nil, &apiFailure{http.StatusInternalServerError, "command queue check failed", err.Error()}
 	}
 	if pending >= commandQueueLimit {
-		writeError(w, http.StatusTooManyRequests, "command queue full", fmt.Sprintf("the agent already has %d pending commands; retry once they run or expire", commandQueueLimit))
-		return
+		return uuid.Nil, &apiFailure{http.StatusTooManyRequests, "command queue full", fmt.Sprintf("the agent already has %d pending commands; retry once they run or expire", commandQueueLimit)}
 	}
 	commandID := uuid.New()
 	expiresAt := s.now().UTC().Add(s.ttl)
 	// The request is audited in the same statement. Only results used to
 	// be: a command that never reached the agent left no trace, and
 	// requested_by was always the column default.
-	_, err = s.pool.Exec(r.Context(), `WITH cmd AS (
+	_, err = s.pool.Exec(ctx, `WITH cmd AS (
 		INSERT INTO commands (command_id, tenant_id, agent_id, instance_id, cluster_id, kind, args, state, expires_at, requested_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$9)
 		RETURNING tenant_id, command_id, instance_id, kind, args, requested_by)
 		INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome)
 		SELECT tenant_id, command_id, instance_id, kind, args, requested_by, 'requested' FROM cmd`,
-		commandID, tenantID, agentID, instanceID, clusterID, req.Kind, argsJSON, expiresAt, requesterOf(r, s.auth))
+		commandID, tenantID, agentID, instanceID, clusterID, kind, argsJSON, expiresAt, requesterOf(r, s.auth))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "command enqueue failed", err.Error())
-		return
+		return uuid.Nil, &apiFailure{http.StatusInternalServerError, "command enqueue failed", err.Error()}
 	}
-	writeJSON(w, http.StatusAccepted, map[string]uuid.UUID{"command_id": commandID})
+	return commandID, nil
 }
 
 func (s *CommandService) get(w http.ResponseWriter, r *http.Request) {
@@ -387,7 +403,13 @@ func expireCommands(ctx context.Context, db dbPool) error {
 	_, err := db.Exec(ctx, `WITH expired AS (
 		UPDATE commands SET state='expired', finished_at=now()
 		 WHERE tenant_id=$1 AND state IN ('pending','claimed') AND expires_at <= now()
-		RETURNING tenant_id, command_id, instance_id, kind, args, requested_by, claimed_at)
+		RETURNING tenant_id, command_id, instance_id, kind, args, requested_by, claimed_at),
+		variants AS (
+		UPDATE workbook_variants v SET status='failed', ran_at=now(),
+		       error = CASE WHEN e.claimed_at IS NULL THEN 'the command expired before the agent claimed it'
+		                    ELSE 'the agent claimed the command but sent no result before it expired' END
+		  FROM expired e
+		 WHERE v.command_id = e.command_id AND v.status = 'pending')
 		INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome, detail)
 		SELECT tenant_id, command_id, instance_id, kind, args, requested_by, 'expired',
 		       CASE WHEN claimed_at IS NULL THEN 'expired before the agent claimed it'
@@ -525,6 +547,12 @@ func (s *CommandService) result(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if kind == command.KindExplain {
+		if err := store.LinkVariantResult(ctx, tx, commandID, variantResultOf(state, req.Result, req.Error, s.now())); err != nil {
+			writeError(w, http.StatusInternalServerError, "workbook variant update failed", err.Error())
+			return
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO command_audit (tenant_id, command_id, instance_id, kind, args, requested_by, outcome, detail) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, tenantID, commandID, instanceID, kind, args, requestedBy, req.Outcome, nullableText(req.Error)); err != nil {
 		writeError(w, http.StatusInternalServerError, "command audit failed", err.Error())
 		return
@@ -552,6 +580,11 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 			return fmt.Errorf("decode explain result: %w", err)
 		}
 		if len(payload.Plan) == 0 || payload.PlanHash == "" || args.QueryID == nil {
+			return nil
+		}
+		// A plan made with workbook settings or hints is an experiment, kept
+		// on its variant only: plan history shows the real workload's plans.
+		if len(args.Settings) > 0 || args.Hints != "" {
 			return nil
 		}
 		// A plan is only meaningful under its database, and the command often

@@ -49,6 +49,7 @@ type commandFakeTx struct {
 	row       pgx.Row
 	revoked   bool // the agent's revoked_at flag, answered to the revocation lookup
 	execCalls int
+	execSQL   []string
 	committed bool
 }
 
@@ -58,8 +59,9 @@ func (t *commandFakeTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Ro
 	}
 	return t.row
 }
-func (t *commandFakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (t *commandFakeTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	t.execCalls++
+	t.execSQL = append(t.execSQL, sql)
 	return pgconn.NewCommandTag("OK"), nil
 }
 func (t *commandFakeTx) Commit(context.Context) error {
@@ -369,7 +371,16 @@ func TestResult_WritesAuditRow(t *testing.T) {
 	commandRouter(s).ServeHTTP(rec, req)
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.True(t, tx.committed)
-	require.Equal(t, 1, tx.execCalls)
+	audits := 0
+	for _, sql := range tx.execSQL {
+		if strings.Contains(sql, "INSERT INTO command_audit") {
+			audits++
+		}
+	}
+	require.Equal(t, 1, audits)
+	// An explain result also links the workbook variant that ran it, if any.
+	require.Equal(t, 2, tx.execCalls)
+	require.Contains(t, tx.execSQL[0], "workbook_variants")
 }
 
 // A revoked agent gets no commands, as its pushes are refused. The poll checks

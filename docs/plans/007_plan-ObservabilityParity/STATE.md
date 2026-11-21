@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 16:21 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 16:33 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 10f6a504082b44be8b31b04744ed3aa5e35fb4c3 + tree 6df24580a3c8fc706ea5218455b208a39faddc6c · branch main · last WIP tree none
-- Last closure: unit:13.2:1
-- Next: open 13.3 · next eligible: 13.3
+- Base: HEAD c830cde4da147e7c494560b9d3f69c9883551b7a + tree 9fc6444975fa3f129892b9aab83cace1584063cd · branch main · last WIP tree none
+- Last closure: unit:13.3:1
+- Next: open 13.4 · next eligible: 13.4
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -99,6 +99,7 @@ none
 - A42 (P12 review → 12.2 attempt 2, tests only): `TestINTPROC001/host-pid` starts PostgreSQL 18 with `PidMode=host`, whose processes are in the test's `/proc`, and must not skip; it also asserts the phase rule "no command line or path in any fact" (label keys and value keys whitelisted, no label starting with `/`). `moby/moby/api` becomes a direct test dependency.
 - A43 (13.1): TestWBK002 asks that a body with keys `sql`/`statement` decode to the same Args as without them; Args already decodes with DisallowUnknownFields (TestArgsUnmarshalJSONRejectsUnknownFields), so such a body is refused instead. Stricter than the plan and the same I-3 guarantee (no SQL text can reach the agent); the test asserts the error. Added TestWBK014 (OpenAPI WorkbookSettingName enum equals command.WorkbookSettings).
 - A44 (13.2): TestINTWBK003 needs pglens-pgext:18 with `shared_preload_libraries=pg_stat_statements,pg_hint_plan`; rather than a second container, `pgtest.PGExt` now preloads pg_hint_plan too (getOrCreateImage takes the preload list). Without a hint comment pg_hint_plan changes no plan, so the index_check tests on PGExt are unaffected (re-run green). The stock half of TestINTWBK003 runs on every version under test (15.19 and 18.6), not only 18. Unit tests live in a new `exec_explain_workbook_test.go` beside `exec_explain_test.go` (fake extended there). The analyze guard inspects the hinted statement, so the plan it checks is the plan ANALYZE runs.
+- A45 (13.3): migration is `0043_workbooks.sql` (0041/0042 taken; locator drift); column `"analyze"` quoted (reserved word); workbook routes live on `CommandService` via `registerWorkbookRoutes` (no http.go change) with an injected store and the shared `insertCommand`; TestWBK007/012 drive the handlers over an in-memory store and the SQL limits/reset are proven in TestINTWBK004 (plus an expiry subtest); a run that loses the MarkPending race returns 409 and its queued command finds no variant.
 
 ## 9. Blockers
 none

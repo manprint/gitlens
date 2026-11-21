@@ -1323,6 +1323,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workbooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the tuning workbooks of an instance, optionally of one statement. */
+        get: operations["listWorkbooks"];
+        put?: never;
+        /** Create a tuning workbook for one statement; it starts with a Baseline variant. */
+        post: operations["createWorkbook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workbooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Read a workbook with every variant and its last plan. */
+        get: operations["getWorkbook"];
+        put?: never;
+        post?: never;
+        /** Delete a workbook and its variants. */
+        delete: operations["deleteWorkbook"];
+        options?: never;
+        head?: never;
+        /** Rename a workbook or change its notes. */
+        patch: operations["updateWorkbook"];
+        trace?: never;
+    };
+    "/api/v1/workbooks/{id}/variants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a variant (settings, hints, values, ANALYZE) to a workbook. */
+        post: operations["addWorkbookVariant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workbooks/{id}/variants/{variant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                variant_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace a variant; its last result is cleared and its status returns to never. */
+        put: operations["updateWorkbookVariant"];
+        post?: never;
+        /** Delete a variant. */
+        delete: operations["deleteWorkbookVariant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workbooks/{id}/variants/{variant_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                variant_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue the variant as an explain command; its result is stored on the variant. */
+        post: operations["runWorkbookVariant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/commands/{id}": {
         parameters: {
             query?: never;
@@ -3316,6 +3415,72 @@ export interface components {
          * @enum {string}
          */
         WorkbookSettingName: "enable_seqscan" | "enable_indexscan" | "enable_indexonlyscan" | "enable_bitmapscan" | "enable_tidscan" | "enable_nestloop" | "enable_hashjoin" | "enable_mergejoin" | "enable_hashagg" | "enable_sort" | "enable_incremental_sort" | "enable_material" | "enable_memoize" | "enable_gathermerge" | "enable_parallel_append" | "enable_parallel_hash" | "enable_partition_pruning" | "enable_partitionwise_join" | "enable_partitionwise_aggregate" | "jit" | "work_mem" | "effective_cache_size" | "random_page_cost" | "seq_page_cost" | "cpu_tuple_cost" | "cpu_index_tuple_cost" | "cpu_operator_cost" | "hash_mem_multiplier" | "join_collapse_limit" | "from_collapse_limit" | "max_parallel_workers_per_gather" | "plan_cache_mode";
+        WorkbookVariantRequest: {
+            name: string;
+            settings?: {
+                [key: string]: string;
+            };
+            hints?: string;
+            params?: (string | null)[];
+            analyze?: boolean;
+        };
+        WorkbookVariant: {
+            /** Format: uuid */
+            variant_id: string;
+            position: number;
+            name: string;
+            settings: {
+                [key: string]: string;
+            };
+            hints: string;
+            params: (string | null)[] | null;
+            analyze: boolean;
+            /** @enum {string} */
+            status: "never" | "pending" | "done" | "failed";
+            /** Format: uuid */
+            command_id: string | null;
+            error: string;
+            /** @description EXPLAIN (FORMAT JSON) output of the last run; left out of lists. */
+            plan?: unknown;
+            plan_hash: string | null;
+            total_cost: number | null;
+            planning_ms: number | null;
+            /** @description Only with ANALYZE. */
+            execution_ms: number | null;
+            /** Format: date-time */
+            ran_at: string | null;
+        };
+        Workbook: {
+            /** Format: uuid */
+            workbook_id: string;
+            /** Format: uuid */
+            instance_id: string;
+            database: string;
+            /** @description pg_stat_statements queryid as a decimal string. */
+            queryid: string;
+            name: string;
+            notes: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            variants: components["schemas"]["WorkbookVariant"][];
+        };
+        WorkbookList: {
+            workbooks: components["schemas"]["Workbook"][];
+        };
+        CreateWorkbookRequest: {
+            /** Format: uuid */
+            instance_id: string;
+            database: string;
+            queryid: string;
+            name: string;
+            notes?: string;
+        };
+        UpdateWorkbookRequest: {
+            name?: string;
+            notes?: string;
+        };
         /** @description A command request contains identifiers and options only; query text is never sent. */
         CreateCommandRequest: {
             /** @enum {string} */
@@ -5974,6 +6139,281 @@ export interface operations {
             };
             /** @description Command storage is unavailable. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listWorkbooks: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                queryid?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Workbooks with their variants; plans are left out. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbookList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description Workbook storage unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createWorkbook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkbookRequest"];
+            };
+        };
+        responses: {
+            /** @description The new workbook with its Baseline variant. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workbook"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description limit_reached, the instance already has the most workbooks allowed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+        };
+    };
+    getWorkbook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workbook. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workbook"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteWorkbook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateWorkbook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWorkbookRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated workbook. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workbook"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    addWorkbookVariant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkbookVariantRequest"];
+            };
+        };
+        responses: {
+            /** @description The new variant, never run. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbookVariant"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description limit_reached, the workbook already has the most variants allowed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateWorkbookVariant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                variant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkbookVariantRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated variant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbookVariant"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteWorkbookVariant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                variant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    runWorkbookVariant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                variant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Command queued; the variant is pending. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateCommandResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description variant_pending, the variant's previous run has not finished. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The agent's command queue is full. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

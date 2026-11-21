@@ -97,6 +97,20 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 | GET | `/api/v1/commands/{id}` | `getCommand` | Read the state and result of a command. |
 | POST | `/api/v1/instances/{id}/commands` | `createCommand` | Queue a command for an instance. |
 
+## workbooks
+
+| METHOD | Path | operationId | Summary |
+|---|---|---|---|
+| GET | `/api/v1/workbooks` | `listWorkbooks` | List the tuning workbooks of an instance, optionally of one statement. |
+| GET | `/api/v1/workbooks/{id}` | `getWorkbook` | Read a workbook with every variant and its last plan. |
+| POST | `/api/v1/workbooks` | `createWorkbook` | Create a tuning workbook for one statement; it starts with a Baseline variant. |
+| POST | `/api/v1/workbooks/{id}/variants` | `addWorkbookVariant` | Add a variant (settings, hints, values, ANALYZE) to a workbook. |
+| POST | `/api/v1/workbooks/{id}/variants/{variant_id}/run` | `runWorkbookVariant` | Queue the variant as an explain command; its result is stored on the variant. |
+| PUT | `/api/v1/workbooks/{id}/variants/{variant_id}` | `updateWorkbookVariant` | Replace a variant; its last result is cleared and its status returns to never. |
+| PATCH | `/api/v1/workbooks/{id}` | `updateWorkbook` | Rename a workbook or change its notes. |
+| DELETE | `/api/v1/workbooks/{id}` | `deleteWorkbook` | Delete a workbook and its variants. |
+| DELETE | `/api/v1/workbooks/{id}/variants/{variant_id}` | `deleteWorkbookVariant` | Delete a variant. |
+
 ## alerts
 
 | METHOD | Path | operationId | Summary |
