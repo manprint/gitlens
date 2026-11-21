@@ -39,6 +39,7 @@ export const HELP_CATALOG: readonly { id: string; group: HelpGroup; title: LangT
   },
   { id: 'wait-events', group: 'instance', title: { en: 'Wait events', it: 'Wait events' } },
   { id: 'locks', group: 'instance', title: { en: 'Locks and activity', it: 'Lock e attività' } },
+  { id: 'logs', group: 'instance', title: { en: 'PostgreSQL logs', it: 'Log di PostgreSQL' } },
   { id: 'alerts', group: 'alerting', title: { en: 'Alerts', it: 'Alert' } },
   { id: 'events', group: 'alerting', title: { en: 'Events', it: 'Eventi' } },
   { id: 'alert-rules', group: 'alerting', title: { en: 'Alert rules', it: 'Regole di alert' } },

@@ -120,5 +120,21 @@
   "readiness.set03.impact": "Testo completo degli statement lunghi nell’attività",
   "readiness.set03.evidence": "track_activity_query_size = {size}",
   "readiness.set03.fix.title": "Aumenta la dimensione",
-  "readiness.set03.fix.step": "Imposta il valore qui sotto in postgresql.conf."
+  "readiness.set03.fix.step": "Imposta il valore qui sotto in postgresql.conf.",
+  "readiness.log01.title": "La lettura del log PostgreSQL è limitata",
+  "readiness.log01.summary": "Il lettore del log dell’agent (checks.logs) segnala una nota: alcune righe del log non vengono lette o non vengono classificate come dovrebbero.",
+  "readiness.log01.impact.other": "Il lettore del log segnala la nota {note}.",
+  "readiness.log01.step.connect": "Connettiti al server come superuser.",
+  "readiness.log01.logs_no_structured_format.impact": "Nessuna riga del log viene letta: il server non scrive alcun file jsonlog o csvlog.",
+  "readiness.log01.logs_no_structured_format.fix": "Scrivi il log come jsonlog (PostgreSQL 15 o successivo) o csvlog",
+  "readiness.log01.logs_sql_denied.impact": "Nessuna riga del log viene letta: il ruolo di monitoraggio non può leggere il log via SQL.",
+  "readiness.log01.logs_sql_denied.fix": "Consenti al ruolo di monitoraggio di leggere il file di log",
+  "readiness.log01.logs_file_unreadable.impact": "Nessuna riga del log viene letta: l’agent non riesce ad aprire il file di log su questo host.",
+  "readiness.log01.logs_file_unreadable.fix": "Dai all’agent accesso al file di log, oppure leggilo via SQL",
+  "readiness.log01.logs_file_unreadable.step1": "Esegui l’agent sull’host del database con un utente che può leggere la directory dei log, oppure",
+  "readiness.log01.logs_file_unreadable.step2": "imposta checks.logs.source: sql nella configurazione dell’agent e riavvia l’agent.",
+  "readiness.log01.logs_messages_not_english.impact": "Le righe classificate dal testo del messaggio (checkpoint, autovacuum, statement lenti, file temporanei) vanno perse: lc_messages non è in inglese.",
+  "readiness.log01.logs_messages_not_english.fix": "Scrivi i messaggi del server in inglese",
+  "readiness.log01.logs_timezone_unknown.impact": "Gli orari del log possono essere sfasati: l’agent non riesce a leggere log_timezone.",
+  "readiness.log01.logs_timezone_unknown.fix": "Consenti al ruolo di monitoraggio di leggere le impostazioni del server"
 }

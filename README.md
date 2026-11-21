@@ -2315,6 +2315,7 @@ GET    /api/v1/readiness/summary
 GET    /api/v1/locks
 GET    /api/v1/metrics/query
 GET    /api/v1/events
+GET    /api/v1/logs|logs/classes
 GET    /api/v1/statements
 GET    /api/v1/ash|ash/top
 POST   /api/v1/push
@@ -2472,6 +2473,47 @@ Configuration: `ash.interval` (default `1s`). Lower the interval for sensitive i
 Each sample also keeps three text dimensions: the user (`usename`), the client address (`client_addr`, the host without netmask, empty for a Unix socket) and the application (`application_name`). Values longer than 64 bytes are cut. `checks.ash.dimensions` lists the ones to keep (default all three); `[]` turns them all off, and an unknown name is a configuration error. A dimension that is off, or a value that is unknown, sends no label, so those samples merge.
 
 `/api/v1/ash` takes `group_by=usename`, `client_addr` or `application_name`, and both `/api/v1/ash` and `/api/v1/ash/top` take the filters `usename=`, `client_addr=` and `application_name=`; the value `-` selects the samples whose dimension is empty. In the console, Wait events › Group by offers User, Client address and Application; an empty value reads `(unknown)`, and selecting a series filters the page on it (a removable chip, kept in the URL).
+
+## PostgreSQL logs
+
+The agent can read the PostgreSQL server log, keep its notable lines and ship them to the server. The console shows them under **PostgreSQL logs** on each instance (`/instances/<id>/logs`), and four alert rules fire on the severe ones. The reader is off by default.
+
+**What it reads.** Only structured logs: `jsonlog` (PostgreSQL 15 or later) or `csvlog`. Each line gets a class; ordinary lines are dropped and auto_explain plans are never shipped. The shipped classes are `auth.failed`, `autovacuum.run`, `checkpoint`, `checkpoint.frequent`, `connection.limit`, `corruption`, `disk.full`, `error.statement`, `fatal.other`, `idle_tx.timeout`, `lock.deadlock`, `lock.timeout`, `lock.wait`, `memory.out`, `panic`, `replication.conflict`, `serialization.failure`, `server.crash`, `server.recovery`, `server.start`, `slow.statement`, `statement.canceled`, `statement.timeout`, `temp_file`, `warning.other`, `wraparound.warning`.
+
+**Server settings.**
+
+```sql
+ALTER SYSTEM SET logging_collector = on;      -- restart required
+ALTER SYSTEM SET log_destination = 'jsonlog'; -- or 'csvlog'
+ALTER SYSTEM SET lc_messages = 'C';           -- checkpoint, autovacuum, slow-statement and temp-file lines are matched by their English text
+```
+
+**Agent configuration** (`checks.logs`):
+
+```yaml
+checks:
+  logs: { enabled: true, interval: 15s, source: file, statement_text: false, max_bytes_per_interval: 1048576 }
+```
+
+| Source | How it reads | Needs |
+|--------|--------------|-------|
+| `file` | `log_directory` on the database host | the agent user can read the directory |
+| `sql` | the current log file through `pg_read_binary_file`, from any host | the grants below |
+
+```sql
+GRANT EXECUTE ON FUNCTION pg_read_binary_file(text, bigint, bigint, boolean) TO <monitoring_role>;
+GRANT EXECUTE ON FUNCTION pg_current_logfile(text) TO <monitoring_role>;  -- PostgreSQL 15
+```
+
+The agent saves its position in each file, so a restart neither repeats nor skips lines; on its first run it starts at the end of the current file, so older lines are not read. Each interval it reads at most `max_bytes_per_interval` bytes and ships at most 200 lines.
+
+**What is never shipped.** A message is cut at 2000 bytes. `detail`, `hint`, `context` and `statement` are shipped only with `statement_text: true`. A text that may hold a credential is always replaced by `[withheld: may hold a credential]`. Reading the log never writes to the server.
+
+**Alert rules.** `log.panic` (classes `panic`, `server.crash`), `log.corruption` and `log.disk_full` are critical, `log.out_of_memory` is a warning; each fires on the first matching line, and its notification quotes up to three of the latest matching lines.
+
+**When it does not work.** The readiness report shows `RDY-LOG-01` with the agent's note and its fix (`logs_no_structured_format`, `logs_sql_denied`, `logs_file_unreadable`, `logs_messages_not_english`, `logs_timezone_unknown`); see [docs/MONITORING_READINESS.md](docs/MONITORING_READINESS.md).
+
+API: `GET /api/v1/logs?instance_id=&from=&to=&class=&severity=&database=&q=&before=&limit=` (newest first, `limit` up to 500) and `GET /api/v1/logs/classes?instance_id=&from=&to=` (lines per class).
 
 ## Events
 

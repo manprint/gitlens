@@ -84,6 +84,7 @@ func TestRDY002_RulesTriggerAndDoNotTrigger(t *testing.T) {
 		{"RDY-SIG-01", SeverityInfo, func(in *Input) { in.Flags.AllowSignal = ptr(false) }, false},
 		{"RDY-SESS-01", SeverityInfo, func(in *Input) { in.Flags.SessionQueryText = ptr(false) }, false},
 		{"RDY-SET-03", SeverityInfo, func(in *Input) { in.Settings["track_activity_query_size"] = "1024" }, false},
+		{"RDY-LOG-01", SeverityInfo, func(in *Input) { in.Skips = []CheckSkip{{Check: "logs", Reason: "logs_sql_denied"}} }, false},
 	}
 	for _, c := range cases {
 		in := healthy()
@@ -114,7 +115,7 @@ func TestRDY003_ItemShape(t *testing.T) {
 		Extensions:      map[string][]string{"app": {}},
 		ExtensionsKnown: true,
 		Role:            Role{HasPgMonitor: ptr(false), HasReadAllStats: ptr(false)},
-		Skips:           []CheckSkip{{Check: "bloat", Reason: "missing extension pgstattuple"}, {Check: "x", Reason: "something odd"}},
+		Skips:           []CheckSkip{{Check: "bloat", Reason: "missing extension pgstattuple"}, {Check: "x", Reason: "something odd"}, {Check: "logs", Reason: "logs_file_unreadable"}},
 		FailingChecks:   []string{"locks"},
 		Flags: wire.AgentFlags{
 			CommandsEnabled: ptr(false), AllowSignal: ptr(false), ByApplication: ptr(false),

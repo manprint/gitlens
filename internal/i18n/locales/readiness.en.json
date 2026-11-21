@@ -120,5 +120,21 @@
   "readiness.set03.impact": "Full text of long statements in activity",
   "readiness.set03.evidence": "track_activity_query_size = {size}",
   "readiness.set03.fix.title": "Raise the size",
-  "readiness.set03.fix.step": "Set the value below in postgresql.conf."
+  "readiness.set03.fix.step": "Set the value below in postgresql.conf.",
+  "readiness.log01.title": "PostgreSQL log reading is limited",
+  "readiness.log01.summary": "The agent's log reader (checks.logs) reports a note: some log lines are not read or not classified as they should be.",
+  "readiness.log01.impact.other": "The log reader reports the note {note}.",
+  "readiness.log01.step.connect": "Connect to the server as a superuser.",
+  "readiness.log01.logs_no_structured_format.impact": "No log line is read: the server writes no jsonlog or csvlog file.",
+  "readiness.log01.logs_no_structured_format.fix": "Write the log as jsonlog (PostgreSQL 15 or later) or csvlog",
+  "readiness.log01.logs_sql_denied.impact": "No log line is read: the monitoring role may not read the log through SQL.",
+  "readiness.log01.logs_sql_denied.fix": "Let the monitoring role read the log file",
+  "readiness.log01.logs_file_unreadable.impact": "No log line is read: the agent cannot open the log file on this host.",
+  "readiness.log01.logs_file_unreadable.fix": "Give the agent the log file, or read it through SQL",
+  "readiness.log01.logs_file_unreadable.step1": "Run the agent on the database host as a user that may read the log directory, or",
+  "readiness.log01.logs_file_unreadable.step2": "set checks.logs.source: sql in the agent configuration and restart the agent.",
+  "readiness.log01.logs_messages_not_english.impact": "Lines classified by their message text (checkpoints, autovacuum, slow statements, temporary files) are missed: lc_messages is not English.",
+  "readiness.log01.logs_messages_not_english.fix": "Write the server messages in English",
+  "readiness.log01.logs_timezone_unknown.impact": "Log times may be shifted: the agent cannot read log_timezone.",
+  "readiness.log01.logs_timezone_unknown.fix": "Let the monitoring role read the server settings"
 }

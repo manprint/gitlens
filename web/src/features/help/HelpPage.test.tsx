@@ -37,7 +37,7 @@ describe('HelpPage', () => {
       'href',
       '/help/indexes',
     )
-    expect(within(chapters).getAllByRole('link')).toHaveLength(15)
+    expect(within(chapters).getAllByRole('link')).toHaveLength(16)
   })
 
   it('HELP-UI-002 a chapter shows its contents, sections and the current menu entry', () => {

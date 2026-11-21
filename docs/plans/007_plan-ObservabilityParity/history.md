@@ -104,3 +104,6 @@ Gates: G-GO-FOCUS ok (agent, cmd agent, wire, pglog); G-GO-INT cmd/pglens-agent 
 
 ## 2026-11-21 6.5/1 complete unit:6.5:1
 Gates: G-GO-FOCUS server/store ok; INT-PGL-004 ok; RETINT001-003, RLP ok; store integration ok; vitest retention/settings 114 ok; typecheck ok; lint 0; review: self-review (agent:opus) accepted; changes: migration 0036 log_events; store LogEventRow/WriteLogEvents; pipeline routes log_event facts (server withhold, class check); retention family log_events 14d (API enum, generated.ts, console label); notes: A22
+
+## 2026-11-21 6.6/1 complete unit:6.6:1
+Gates: G-GO-FOCUS (readiness, server, i18n, store, pglog, alert, agent, deploy), golangci-lint 0 issues, G-GO-INT TestINTPGL001-005 PASS, G-RO PASS, G-API no diff, G-WEB-STATIC (tsc, eslint 0 errors, prettier), vitest full 2072 (2 route inventories fixed, rerun green); review: self-review (agent:opus) accepted; changes: migration 0037 log.* alert rules; describer quotes log lines; /api/v1/logs + classes; console Logs page; RDY-LOG-01 readiness rule; help chapter logs en/it; README PostgreSQL logs; notes: A23

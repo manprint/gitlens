@@ -3,6 +3,7 @@ package readiness
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ var rules = []Rule{
 	{ID: "RDY-SIG-01", Severity: SeverityInfo, Applies: appliesSig01, Build: buildSig01},
 	{ID: "RDY-SESS-01", Severity: SeverityInfo, Applies: appliesSess01, Build: buildSess01},
 	{ID: "RDY-SET-03", Severity: SeverityInfo, Applies: appliesSet03, Build: buildSet03},
+	{ID: "RDY-LOG-01", Severity: SeverityInfo, Applies: appliesLog01, Build: buildLog01},
 }
 
 var plainIdent = regexp.MustCompile(`^[a-z_][a-z0-9_$]*$`)
@@ -282,7 +284,7 @@ func relevantSkips(in Input) []CheckSkip {
 	ext01 := appliesExt01(in)
 	var out []CheckSkip
 	for _, s := range in.Skips {
-		if isDesignSkip(s.Reason) {
+		if isDesignSkip(s.Reason) || isLogNote(s) {
 			continue
 		}
 		if ext01 && s.Reason == "missing extension pg_stat_statements" {
@@ -516,5 +518,74 @@ func buildSet03(in Input) Item {
 		Fixes: []Fix{{Channel: ChannelPostgresConfig, Title: in.say("set03.fix.title", nil), RequiresRestart: true,
 			Steps:   in.sayAll("set03.fix.step", "step.restart_pg_at_start"),
 			Snippet: "track_activity_query_size = 4096"}},
+	}
+}
+
+// RDY-LOG-01 — the agent's log reader reports a coverage note (plan 007 6.6).
+
+// logNotes are the notes the log reader files, each with its fix.
+var logNotes = []string{"logs_no_structured_format", "logs_sql_denied", "logs_file_unreadable", "logs_messages_not_english", "logs_timezone_unknown"}
+
+func isLogNote(s CheckSkip) bool {
+	return s.Check == "logs" && strings.HasPrefix(s.Reason, "logs_")
+}
+
+func logNotesOf(in Input) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in.Skips {
+		if isLogNote(s) && !seen[s.Reason] {
+			seen[s.Reason] = true
+			out = append(out, s.Reason)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func appliesLog01(in Input) bool { return len(logNotesOf(in)) > 0 }
+
+func buildLog01(in Input) Item {
+	notes := logNotesOf(in)
+	var impact, evidence []string
+	var fixes []Fix
+	for _, note := range notes {
+		evidence = append(evidence, "logs: "+note)
+		if !slices.Contains(logNotes, note) {
+			impact = append(impact, in.say("log01.impact.other", i18n.Args{"note": note}))
+			continue
+		}
+		key := "log01." + note
+		impact = append(impact, in.say(key+".impact", nil))
+		switch note {
+		case "logs_no_structured_format":
+			fixes = append(fixes, Fix{Channel: ChannelPostgresConfig, Title: in.say(key+".fix", nil), RequiresRestart: true,
+				Steps:   in.sayAll("log01.step.connect", "step.run_below", "step.restart_pg_at_start"),
+				Snippet: "ALTER SYSTEM SET logging_collector = on;\nALTER SYSTEM SET log_destination = 'jsonlog';"})
+		case "logs_sql_denied":
+			role := roleName(in)
+			fixes = append(fixes, Fix{Channel: ChannelSQL, Title: in.say(key+".fix", nil),
+				Steps: in.sayAll("log01.step.connect", "step.run_below"),
+				Snippet: "GRANT EXECUTE ON FUNCTION pg_read_binary_file(text, bigint, bigint, boolean) TO " + role + ";\n" +
+					"GRANT EXECUTE ON FUNCTION pg_current_logfile(text) TO " + role + ";"})
+		case "logs_file_unreadable":
+			fixes = append(fixes, Fix{Channel: ChannelAgentConfig, Title: in.say(key+".fix", nil),
+				Steps: in.sayAll(key+".step1", key+".step2")})
+		case "logs_messages_not_english":
+			fixes = append(fixes, Fix{Channel: ChannelPostgresConfig, Title: in.say(key+".fix", nil),
+				Steps:   in.sayAll("log01.step.connect", "step.run_below"),
+				Snippet: "ALTER SYSTEM SET lc_messages = 'C';\nSELECT pg_reload_conf();"})
+		case "logs_timezone_unknown":
+			fixes = append(fixes, Fix{Channel: ChannelSQL, Title: in.say(key+".fix", nil),
+				Steps:   in.sayAll("log01.step.connect", "step.run_below"),
+				Snippet: "GRANT pg_read_all_settings TO " + roleName(in) + ";"})
+		}
+	}
+	return Item{
+		Title:    in.say("log01.title", nil),
+		Summary:  in.say("log01.summary", nil),
+		Impact:   impact,
+		Evidence: strings.Join(evidence, "; "),
+		Fixes:    fixes,
 	}
 }

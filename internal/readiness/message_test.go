@@ -28,7 +28,7 @@ func worstInput() Input {
 		Extensions:      map[string][]string{"app": {}},
 		ExtensionsKnown: true,
 		Role:            Role{HasPgMonitor: ptr(false), HasReadAllStats: ptr(false)},
-		Skips:           []CheckSkip{{Check: "bloat", Reason: "missing extension pgstattuple"}, {Check: "x", Reason: "something odd"}},
+		Skips:           []CheckSkip{{Check: "bloat", Reason: "missing extension pgstattuple"}, {Check: "x", Reason: "something odd"}, {Check: "logs", Reason: "logs_messages_not_english"}},
 		FailingChecks:   []string{"locks"},
 		Flags: wire.AgentFlags{
 			CommandsEnabled: ptr(false), AllowSignal: ptr(false), ByApplication: ptr(false),

@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:16 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:47 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -9,10 +9,10 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Settings: autonomy true (explicit (prompt) `full-autonomous:true`) · WIP on (explicit (prompt) `--wip-commit`) · deadline none
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
-- Unit: 6.6 attempt 1 · OPEN · step S1 · assigned agent-2 → actual agent:opus (claude-opus-5-5)
+- Unit: none
 - Base: HEAD 9df747293847551697d7e3083f1da37a38c9f338 + tree c6f08b221aab21629f899f81753316568a5fd07d · branch main · last WIP tree none
-- Last closure: unit:6.5:1
-- Next: finish 6.6 · next eligible: 6.6
+- Last closure: unit:6.6:1
+- Next: open P6 · next eligible: P6
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-6.6: internal/server/api_logs.go internal/store/migrations/0037_log_alerts.sql web/src/features/logs
+none
 
 ## 6. Checkpoint
 none
@@ -77,6 +77,7 @@ none
 - A20 (6.4 wiring plan, approved by agent-1): one goroutine per target started in `run.go` right after `startASH`, only when `checks.logs.enabled: true`; it ticks at `checks.logs.interval` (default 15s) and appends its `wire.Result` (check `logs`) to `pending[target]` under the shared `mu`, like the watcher, so the existing pusher ships it. Coverage notes are `wire.Result{Check: "logs", SkipReason: <code>}`, which the server already files as `check_skip` facts keyed by check. Each query takes `mgr.Shared` and releases it at once (no dedicated connection). Settings read, the driver-free `pglog.Querier` adapter and `LogSettings` live in `internal/agent/logs.go` so the read-only audit (G-RO) runs the same statements; fact building is a pure function in `cmd/pglens-agent/logs_build.go`. `logs` is not a registered check, so the scheduler ignores it.
 - A21 (6.4): PostgreSQL 15's pg_monitor lacks EXECUTE on pg_current_logfile (16+ has it), so the SQL source there needs that grant too; the loop reports logs_sql_denied, example config and 6.6 docs say so. INT-PGL-002/003 run through the SQL source (the file source is covered by pglog unit tests; bind-mounting the container log dir is not portable in the sandbox). Saved positions are one shared store per state file (sharedLogState) so multi-target loops never write back another target's stale position.
 - A22 (6.5): migration 0035 is the rollups, so log events take 0036 (alert seeds of 6.6 take 0037). The server keeps the spec's withheld constant "[withheld: may hold a credential]" (redact.Withheld is "[redacted]") and re-checks application_name too. log_events joins the retention whitelist (default 14, no compression, floor 3), so the OpenAPI enum, generated types and the console family label (en/it) change with it.
+- A23 (6.6): agent log notes (check `logs`, reason `logs_*`) leave RDY-CHK-02 and get their own info rule RDY-LOG-01 with one fix per note (an unknown note still lists, no fix); the log page help is a new chapter `logs` (group instance), so the help home lists 16 chapters.
 
 ## 9. Blockers
 none
@@ -101,7 +102,7 @@ none
 | · 6.3 | DONE | 1 | — | unit:6.3:1 |
 | · 6.4 | DONE | 1 | — | unit:6.4:1 |
 | · 6.5 | DONE | 1 | — | unit:6.5:1 |
-| · 6.6 | IN_PROGRESS | 1 | — | — |
+| · 6.6 | DONE | 1 | — | unit:6.6:1 |
 | · P6 closure | TODO | 1 | — | — |
 | 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |
 | 8 Autovacuum history | TODO | 1 | 8.1–8.3 | — |

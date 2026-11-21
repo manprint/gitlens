@@ -287,3 +287,46 @@ GRANT pg_read_all_data TO <monitoring_role>;
 GRANT pg_signal_backend TO <monitoring_role>;
 ```
 
+### RDY-LOG-01 — PostgreSQL log reading is limited
+
+*Info.* The agent's log reader (`checks.logs`) reports a note: some log lines are not read or not classified as they should be. One fix per note.
+
+**What you lose:** Log lines in the Logs page and the log alert rules (`log.*`), or part of them.
+
+**Fix — `logs_no_structured_format`: write the log as jsonlog (PostgreSQL 15 or later) or csvlog (restart required)** (`postgres_config`)
+
+1. Connect to the server as a superuser.
+2. Run the statements below.
+3. Restart PostgreSQL: logging_collector is read at start.
+
+```
+ALTER SYSTEM SET logging_collector = on;
+ALTER SYSTEM SET log_destination = 'jsonlog';
+```
+
+**Fix — `logs_sql_denied`: let the monitoring role read the log file** (`sql`)
+
+```
+GRANT EXECUTE ON FUNCTION pg_read_binary_file(text, bigint, bigint, boolean) TO <monitoring_role>;
+GRANT EXECUTE ON FUNCTION pg_current_logfile(text) TO <monitoring_role>;
+```
+
+**Fix — `logs_file_unreadable`: give the agent the log file, or read it through SQL** (`agent_config`)
+
+1. Run the agent on the database host as a user that may read the log directory, or
+2. set `checks.logs.source: sql` in the agent configuration and restart the agent.
+
+**Fix — `logs_messages_not_english`: write the server messages in English** (`postgres_config`)
+
+Lines classified by their message text (checkpoints, autovacuum, slow statements, temporary files) are missed otherwise.
+
+```
+ALTER SYSTEM SET lc_messages = 'C';
+SELECT pg_reload_conf();
+```
+
+**Fix — `logs_timezone_unknown`: let the monitoring role read the server settings** (`sql`)
+
+```
+GRANT pg_read_all_settings TO <monitoring_role>;
+```

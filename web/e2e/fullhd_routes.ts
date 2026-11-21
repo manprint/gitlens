@@ -116,6 +116,7 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
     name: index === 0 ? 'Locks and activity' : `Locks and activity: ${label}`,
     kind: 'fit',
   })),
+  { path: '/instances/:instanceId/logs', name: 'PostgreSQL logs', kind: 'fit' },
   // One entry per findings tab (15.3); the default tab has no `view` in its URL.
   ...FINDINGS_VIEWS.map(({ id, label }, index): FullHdRoute => ({
     path: index === 0 ? '/findings' : `/findings?view=${id}`,
