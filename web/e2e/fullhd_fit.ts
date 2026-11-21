@@ -66,6 +66,8 @@ export function routeUrl(route: FullHdRoute, values: RouteValues): string {
     .replace(':instanceId', values.instanceId)
     .replace(':clusterId', values.clusterId)
     .replace(':queryid', values.queryid)
+    // A fresh stack has no workbook: the page then fits with its error state.
+    .replace(':workbookId', '00000000-0000-0000-0000-000000000000')
   // The index pages pick the server from the URL; the others ignore the extra parameter.
   return url.startsWith('/indexes') || url.startsWith('/queries')
     ? `${url}${url.includes('?') ? '&' : '?'}instance=${values.instanceId}`

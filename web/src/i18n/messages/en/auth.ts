@@ -55,6 +55,7 @@ export const auth = {
   'auth.surface.ash': 'ASH and wait analysis',
   'auth.surface.queryInspector': 'Query inspector',
   'auth.surface.queryDetail': 'Query detail and plan history',
+  'auth.surface.workbook': 'Tuning workbook',
   'auth.surface.locks': 'Locks and activity',
   'auth.surface.logs': 'PostgreSQL logs',
   'auth.surface.findings': 'Advisor findings',

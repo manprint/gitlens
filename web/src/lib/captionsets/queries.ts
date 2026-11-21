@@ -274,6 +274,15 @@ export const queriesCaptions = {
     howToRead:
       'A lower average and p95 after a change means the new plan is faster for this workload.',
   },
+  'queries.workbook-variants': {
+    what: 'The variants of one statement side by side: what each changes, its status, cost, times and ratio to the Baseline.',
+    source:
+      'The workbook stored by the server; each run is an EXPLAIN command the agent ran in a read-only transaction.',
+    unit: 'cost in planner units, time in ms, ratios against the Baseline',
+    window: 'The last run of each variant.',
+    howToRead:
+      'A ratio below 1× means the variant is cheaper or faster than the Baseline. Editing a variant clears its result.',
+  },
   'queries.plan-comparison': {
     what: 'The operations of two captured plans side by side, matched by their place in the tree, with what changed.',
     source:

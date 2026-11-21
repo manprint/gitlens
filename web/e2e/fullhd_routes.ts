@@ -110,6 +110,11 @@ export const FULLHD_ROUTES: readonly FullHdRoute[] = [
     name: 'Query detail and plan history',
     kind: 'fit',
   },
+  {
+    path: '/instances/:instanceId/queries/:queryid/workbooks/:workbookId',
+    name: 'Tuning workbook',
+    kind: 'fit',
+  },
   // One entry per Locks tab (16.3); the default tab has no `view` in its URL.
   ...LOCKS_VIEWS.map(({ id, label }, index): FullHdRoute => ({
     path: index === 0 ? '/instances/:instanceId/locks' : `/instances/:instanceId/locks?view=${id}`,

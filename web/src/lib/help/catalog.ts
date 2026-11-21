@@ -37,6 +37,11 @@ export const HELP_CATALOG: readonly { id: string; group: HelpGroup; title: LangT
     group: 'instance',
     title: { en: 'Query performance', it: 'Prestazioni delle query' },
   },
+  {
+    id: 'workbook',
+    group: 'instance',
+    title: { en: 'Tuning workbook', it: 'Quaderno di tuning' },
+  },
   { id: 'wait-events', group: 'instance', title: { en: 'Wait events', it: 'Wait events' } },
   { id: 'locks', group: 'instance', title: { en: 'Locks and activity', it: 'Lock e attività' } },
   { id: 'logs', group: 'instance', title: { en: 'PostgreSQL logs', it: 'Log di PostgreSQL' } },

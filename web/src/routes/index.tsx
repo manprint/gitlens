@@ -34,6 +34,7 @@ const QueryInspectorPage = lazy(() =>
 const QueryDetailPage = lazy(() =>
   import('./pages').then(({ QueryDetailPage: Page }) => ({ default: Page })),
 )
+const WorkbookPage = lazy(() => import('@/features/workbook/WorkbookPage'))
 const LocksPage = lazy(() => import('./pages').then(({ LocksPage: Page }) => ({ default: Page })))
 const LogsPage = lazy(() => import('./pages').then(({ LogsPage: Page }) => ({ default: Page })))
 const FindingsPage = lazy(() =>
@@ -119,6 +120,11 @@ const dataRoutes: RouteDefinition[] = [
   lazyRoute('/instances/:instanceId/ash', 'auth.surface.ash', AshPage),
   lazyRoute('/instances/:instanceId/queries', 'auth.surface.queryInspector', QueryInspectorPage),
   lazyRoute('/instances/:instanceId/queries/:queryid', 'auth.surface.queryDetail', QueryDetailPage),
+  lazyRoute(
+    '/instances/:instanceId/queries/:queryid/workbooks/:workbookId',
+    'auth.surface.workbook',
+    WorkbookPage,
+  ),
   lazyRoute('/instances/:instanceId/locks', 'auth.surface.locks', LocksPage),
   lazyRoute('/instances/:instanceId/logs', 'auth.surface.logs', LogsPage),
   lazyRoute('/findings', 'auth.surface.findings', FindingsPage),

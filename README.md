@@ -2611,6 +2611,18 @@ The console's Plan history (statement page) compares the plans of one statement,
 
 API: `GET /api/v1/plans/stats?instance_id=&queryid=&database=&from=&to=` (`queryid` required, last 7 days by default) returns `plans` (newest-seen first) and `changes`.
 
+## Tuning workbook
+
+A workbook tries variants of one statement side by side: planner settings, `pg_hint_plan` hints and parameter values, each run as an EXPLAIN (optionally `ANALYZE`) in a read-only transaction, compared against the variant `Baseline` (created with the workbook, no setting and no hint). Open it from the statement page (button `Tuning workbook`); the table shows per variant the changed settings, hints, parameter count, status, total cost, planning and execution time, plan hash and the cost and time ratios to `Baseline`. Ticking two variants that ran opens the same plan comparison as Plan history. Limits: 100 workbooks per server, 20 variants per workbook.
+
+Settings are applied with `SET LOCAL`, so they last only for that transaction. A variant changes at most 16 of: `enable_seqscan`, `enable_indexscan`, `enable_indexonlyscan`, `enable_bitmapscan`, `enable_tidscan`, `enable_nestloop`, `enable_hashjoin`, `enable_mergejoin`, `enable_hashagg`, `enable_sort`, `enable_incremental_sort`, `enable_material`, `enable_memoize`, `enable_gathermerge`, `enable_parallel_append`, `enable_parallel_hash`, `enable_partition_pruning`, `enable_partitionwise_join`, `enable_partitionwise_aggregate`, `jit` (on/off); `work_mem` (64–262144 kB), `effective_cache_size` (8–1073741824 kB); `random_page_cost`, `seq_page_cost`, `cpu_tuple_cost`, `cpu_index_tuple_cost`, `cpu_operator_cost` (0–9999.999999); `hash_mem_multiplier` (1–1000); `join_collapse_limit`, `from_collapse_limit` (1–100); `max_parallel_workers_per_gather` (0–8); `plan_cache_mode` (`auto`, `force_generic_plan`, `force_custom_plan`). The server and the console refuse anything else.
+
+Hints: at most 1024 bytes of letters, digits, space and `_ , ( ) # + - . "`; no `*` (so no comment markers) and no `Set` hint (use the settings). Hints need `pg_hint_plan` in `shared_preload_libraries` or `session_preload_libraries`; pglens never loads it, and a run without it fails with `hint_plan_inactive` (`hint_plan_disabled` when `pg_hint_plan.enable_hint` is off).
+
+Parameters: up to 100 values (each at most 8 KiB, or NULL) bound to `$1`, `$2`, …; they are stored with the variant in the server database (`workbook_variants.params`), so do not use secrets. `ANALYZE` executes the statement and needs tier T2; plain EXPLAIN needs T1. A run with settings or hints is kept on its variant only and never written to Plan history; one without (such as `Baseline`) is stored there like any EXPLAIN. No step of the agent part (13.2) was skipped.
+
+API: `GET|POST /api/v1/workbooks` (`instance_id`, `queryid`), `GET|PATCH|DELETE /api/v1/workbooks/{id}`, `POST /api/v1/workbooks/{id}/variants`, `PUT|DELETE /api/v1/workbooks/{id}/variants/{variant_id}`, `POST /api/v1/workbooks/{id}/variants/{variant_id}/run` (409 `variant_pending` while it runs, 409 `limit_reached`).
+
 ## Autovacuum history
 
 With the log reader on (`checks.logs.enabled: true`), the agent turns each autovacuum and autoanalyze log line into one run: table, kind (`vacuum` or `analyze`), the `aggressive` and "to prevent wraparound" flags, pages, rows removed and not removable, buffers, WAL, CPU and elapsed time (PostgreSQL 15 and 18 formats). The server stores them in `autovacuum_runs` (90 days, retention family `autovacuum_runs`); a run seen twice is stored once. At most 500 runs ship per scrape; `pg_log_autovacuum_dropped` counts the rest.

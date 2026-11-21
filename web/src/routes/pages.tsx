@@ -9,6 +9,7 @@ import { isMonitoredDatabase } from '@/lib/databases'
 import { QueryExplainPanel } from '@/features/queries/ExplainPanel'
 import PlanHistory from '@/features/queries/PlanHistory'
 import { QueryOverview } from '@/features/queries/QueryOverview'
+import { WorkbookLauncher } from '@/features/workbook/WorkbookLauncher'
 import QueryListPageComponent from '@/features/queries/QueryListPage'
 import SlowQueriesPageComponent from '@/features/queries/SlowQueriesPage'
 import IndexAnalysisPageComponent from '@/features/indexes/IndexAnalysisPage'
@@ -119,6 +120,11 @@ export function QueryDetailPage() {
       />
       <QueryExplainPanel
         currentTier={instanceQuery.data?.perm_tier ?? 'T0'}
+        {...(datname === undefined ? {} : { datname })}
+        instanceId={instanceId}
+        queryid={queryid}
+      />
+      <WorkbookLauncher
         {...(datname === undefined ? {} : { datname })}
         instanceId={instanceId}
         queryid={queryid}

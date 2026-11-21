@@ -7,6 +7,7 @@ import { indexesTopic } from './indexes'
 import { findingsTopic } from './findings'
 import { instanceOverviewTopic } from './instance-overview'
 import { queryPerformanceTopic } from './query-performance'
+import { workbookTopic } from './workbook'
 import { waitEventsTopic } from './wait-events'
 import { locksTopic } from './locks'
 import { logsTopic } from './logs'
@@ -27,6 +28,7 @@ export const topics: readonly HelpTopic[] = [
   findingsTopic,
   instanceOverviewTopic,
   queryPerformanceTopic,
+  workbookTopic,
   waitEventsTopic,
   locksTopic,
   logsTopic,

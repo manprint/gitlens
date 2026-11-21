@@ -15,6 +15,7 @@ import { queries } from './queries'
 import { readiness } from './readiness'
 import { settings } from './settings'
 import { shell } from './shell'
+import { workbook } from './workbook'
 
 export const messages: Catalog = {
   ...alerts,
@@ -32,4 +33,5 @@ export const messages: Catalog = {
   ...readiness,
   ...settings,
   ...shell,
+  ...workbook,
 }

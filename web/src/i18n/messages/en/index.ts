@@ -13,6 +13,7 @@ import { queries } from './queries'
 import { readiness } from './readiness'
 import { settings } from './settings'
 import { shell } from './shell'
+import { workbook } from './workbook'
 
 /** The reference catalog (plan 006 D2): its keys are the keys of every language. */
 export const messages = {
@@ -31,6 +32,7 @@ export const messages = {
   ...readiness,
   ...settings,
   ...shell,
+  ...workbook,
 } as const
 
 export type MessageKey = keyof typeof messages

@@ -274,6 +274,15 @@ export const queries: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     howToRead:
       'Media e p95 più bassi dopo un cambio indicano che il nuovo piano è più veloce per questo carico.',
   },
+  'queries.workbook-variants': {
+    what: 'Le varianti di uno statement affiancate: cosa cambia ciascuna, stato, costo, tempi e rapporto con la Baseline.',
+    source:
+      'Il quaderno memorizzato dal server; ogni esecuzione è un comando EXPLAIN eseguito dall’agente in una transazione di sola lettura.',
+    unit: 'costo in unità del planner, tempo in ms, rapporti rispetto alla Baseline',
+    window: 'L’ultima esecuzione di ogni variante.',
+    howToRead:
+      'Un rapporto sotto 1× indica una variante più economica o più veloce della Baseline. Modificare una variante ne cancella il risultato.',
+  },
   'queries.plan-comparison': {
     what: 'Le operazioni di due piani catturati affiancate, abbinate per posizione nell’albero, con ciò che è cambiato.',
     source:

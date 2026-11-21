@@ -162,7 +162,32 @@ function comparisonToolbar(t: Translate): TableToolbarSpec<PlanDiffRow> {
   }
 }
 
-function PlanComparison({ older, newer }: { older: Capture; newer: Capture }) {
+/** One side of a plan comparison: its label, parsed plan and shape hash. */
+export interface ComparedPlan {
+  label: string
+  parsed: ParsedPlan | null
+  hash: string
+}
+
+function comparedCapture(capture: Capture, t: Translate): ComparedPlan {
+  return { label: captureLabel(capture, t), parsed: capture.parsed, hash: capture.plan.plan_hash }
+}
+
+/**
+ * Two plans node by node. The plan history compares an older capture with a
+ * newer one; the tuning workbook compares two variants under its own headings.
+ */
+export function PlanComparison({
+  older,
+  newer,
+  olderHeading,
+  newerHeading,
+}: {
+  older: ComparedPlan
+  newer: ComparedPlan
+  olderHeading?: string
+  newerHeading?: string
+}) {
   const t = useT()
   const toolbar = useMemo(() => comparisonToolbar(t), [t])
   const left = older.parsed
@@ -250,7 +275,7 @@ function PlanComparison({ older, newer }: { older: Capture; newer: Capture }) {
   }, [bothAnalyzed, t])
 
   const changed = rows.filter((row) => row.change !== 'same').length
-  const sameShape = older.plan.plan_hash === newer.plan.plan_hash
+  const sameShape = older.hash === newer.hash
 
   return (
     <section aria-labelledby="plan-comparison-title" className="space-y-3">
@@ -264,10 +289,10 @@ function PlanComparison({ older, newer }: { older: Capture; newer: Capture }) {
         aria-label={t('queries.planHistory.comparedCaptures')}
         className="grid grid-cols-[auto_1fr] gap-x-3 text-sm"
       >
-        <dt className="text-muted-foreground">{t('queries.planHistory.older')}</dt>
-        <dd>{captureLabel(older, t)}</dd>
-        <dt className="text-muted-foreground">{t('queries.planHistory.newer')}</dt>
-        <dd>{captureLabel(newer, t)}</dd>
+        <dt className="text-muted-foreground">{olderHeading ?? t('queries.planHistory.older')}</dt>
+        <dd>{older.label}</dd>
+        <dt className="text-muted-foreground">{newerHeading ?? t('queries.planHistory.newer')}</dt>
+        <dd>{newer.label}</dd>
       </dl>
       <p role="note" className="text-sm font-medium">
         {sameShape
@@ -589,7 +614,12 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
               {...(datname === undefined ? {} : { datname })}
             />
           )}
-          {pair && <PlanComparison older={pair.older} newer={pair.newer} />}
+          {pair && (
+            <PlanComparison
+              older={comparedCapture(pair.older, t)}
+              newer={comparedCapture(pair.newer, t)}
+            />
+          )}
           {olderStats && newerStats && olderStats !== newerStats && (
             <PlanStatsCompare older={olderStats} newer={newerStats} />
           )}

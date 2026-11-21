@@ -22,6 +22,7 @@ describe('application route registry', () => {
       '/instances/:instanceId/ash',
       '/instances/:instanceId/queries',
       '/instances/:instanceId/queries/:queryid',
+      '/instances/:instanceId/queries/:queryid/workbooks/:workbookId',
       '/instances/:instanceId/locks',
       '/instances/:instanceId/logs',
       '/findings',

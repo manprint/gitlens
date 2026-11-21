@@ -58,6 +58,7 @@ export const auth: Translation<typeof english> = {
   'auth.surface.ash': 'Analisi ASH e wait event',
   'auth.surface.queryInspector': 'Ispettore delle query',
   'auth.surface.queryDetail': 'Dettaglio query e storico dei piani',
+  'auth.surface.workbook': 'Quaderno di tuning',
   'auth.surface.locks': 'Lock e attività',
   'auth.surface.logs': 'Log PostgreSQL',
   'auth.surface.findings': 'Segnalazioni dell’advisor',
