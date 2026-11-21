@@ -92,7 +92,10 @@ var factKinds = map[string]FactKind{
 	"check_skip": {},
 	// log_event is one classified line of the server log (plan 007 phase 6):
 	// an event, never replaced by a later scrape.
-	"log_event":                 {Check: "logs"},
+	"log_event": {Check: "logs"},
+	// autovacuum_run is one autovacuum or autoanalyze run read from the
+	// server log (plan 007 phase 8): an event, never replaced.
+	"autovacuum_run":            {Check: "logs"},
 	"monitoring_role":           {Check: "monitoring_role", Replace: true},
 	"trigger":                   {Check: "trigger_inventory", Replace: true},
 	"fk_unindexed":              {Check: "fk_indexes", Replace: true},

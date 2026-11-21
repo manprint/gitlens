@@ -104,13 +104,15 @@ func gauge(name string, v float64, labels map[string]string) wire.Metric {
 
 // logResult builds the logs check result of one scrape: per-class line
 // counts, the always-present problem counters, byte counts, at most
-// logFactsPerScrape log_event facts and at most planFactsPerScrape plan facts.
+// logFactsPerScrape log_event facts, at most autovacuumFactsPerScrape
+// autovacuum_run facts and at most planFactsPerScrape plan facts.
 // formatNotJSON reports an auto_explain plan written in another format.
 func logResult(s logScrape, now time.Time) (r wire.Result, formatNotJSON bool) {
 	perClass := map[string]int{}
 	plans := newPlanScrape(s.plans, now)
 	plans.parameters = s.planParameters
-	var facts []wire.Fact
+	var facts, runs []wire.Fact
+	runsDropped := 0
 	dropped := 0
 	for _, e := range s.entries {
 		class := pglog.Classify(e)
@@ -118,6 +120,15 @@ func logResult(s logScrape, now time.Time) (r wire.Result, formatNotJSON bool) {
 			continue
 		}
 		perClass[class]++
+		if class == pglog.ClassAutovacuumRun {
+			if f, ok := autovacuumFact(e); ok {
+				if len(runs) < autovacuumFactsPerScrape {
+					runs = append(runs, f)
+				} else {
+					runsDropped++
+				}
+			}
+		}
 		if class == pglog.ClassAutoExplainPlan {
 			plans.add(e)
 			continue
@@ -150,8 +161,10 @@ func logResult(s logScrape, now time.Time) (r wire.Result, formatNotJSON bool) {
 		gauge("pg_log_bytes_read", float64(s.bytesRead), nil),
 		gauge("pg_log_bytes_skipped", float64(s.bytesSkipped), nil),
 		gauge("pg_log_events_dropped", float64(dropped), nil),
+		gauge("pg_log_autovacuum_dropped", float64(runsDropped), nil),
 	)
 	metrics = append(metrics, plans.metrics()...)
+	facts = append(facts, runs...)
 	facts = append(facts, plans.facts...)
 	return wire.Result{Check: logsCheck, TS: now, Metrics: metrics, Facts: facts}, plans.formatNotJSON
 }

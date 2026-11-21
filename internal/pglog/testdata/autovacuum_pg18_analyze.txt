@@ -1,0 +1,5 @@
+automatic analyze of table "postgres.public.avh"
+avg read rate: 25.670 MB/s, avg write rate: 3.348 MB/s
+buffer usage: 155 hits, 23 reads, 3 dirtied
+WAL usage: 4 records, 3 full page images, 13010 bytes, 0 buffers full
+system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s

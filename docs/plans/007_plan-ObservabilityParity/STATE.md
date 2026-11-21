@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:41 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:44 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 7fac816350359bcd194350d1c3af96486d94cc93 + tree c0105cd81771267bde0b9257ac8ac32121d1a2ed · branch main · last WIP tree none
-- Last closure: unit:P7:1
-- Next: open 8.1 · next eligible: 8.1
+- Base: HEAD 3a6d8400f09ed5db67f96744a699a1a57477c41d + tree d065de166c2f3e2a88000ea5c84304b8f890e137 · branch main · last WIP tree none
+- Last closure: unit:8.1:1
+- Next: open 8.2 · next eligible: 8.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-P7: none (closure)
+none
 
 ## 6. Checkpoint
 none
@@ -81,6 +81,7 @@ none
 - A24 (7.1): TestINTAEX001 reads the log through the SQL source (shared helper `sqlLogLoop`) instead of a mounted log directory: same parser and loop, no bind mount in the sandbox. A parse error without the prefix also counts as reason `format`; only ErrPlanFormat raises the note. Phase 7's migration "0036" takes the next free number, 0038 (0036/0037 used by phase 6, A22).
 - A25 (7.2): `plan_samples` is a retention family like `log_events` (default 30, no compression), so the family enum also changes in `api/openapi.yaml`, `web/src/api/generated.ts`, `web/src/lib/retention.ts` and the settings catalogs (en/it), beyond the unit's listed files; a credential hit in a pushed plan body counts as `pglens_ingest_rejected{reason="plan_credential"}`; `truncateAll` now clears `query_plans` and `plan_samples`.
 - A26 (7.3): design note (self-approved by agent-1): parameter values travel only in the fact value; never in labels, keys, metrics, agent or server log lines, error texts (fixed texts in the purge handler) or audit rows (`args` holds only `{"cleared": n}`); the agent checks parameters for credentials only when it ships them (off: a parameter credential no longer drops the sample); the server checks again and stores NULL; the purge writes a `command_audit` row (no CHECK on `kind`). TestAEX013 is the unit part (400, no storage); the count, audit row and log checks run in TestINTAEX004.
+- A27 (8.1, 2026-11-21): autovacuum_run ValueJSON keys are the autovacuum_runs column names (so `wal_fpi`, not `wal_full_page_images`), letting the server map keys 1:1; TestINTAVH001 reads the log through the SQL source (`sqlLogLoop`, as TestINTAEX001) instead of a mounted directory: same parser path, no host mount. Fixtures captured from postgres:15.19-alpine and 18.6-alpine (PG 18 analyze also logs WAL usage).
 
 ## 9. Blockers
 none
@@ -103,7 +104,8 @@ none
 | · P6 closure | TODO | 1 | — | — |
 | 7 Automatic plans | DONE | 1 | 7.1–7.4 | unit:P7:1 |
 | · P7 closure: full gates + self-review | IN_PROGRESS | 1 | — | — |
-| 8 Autovacuum history | TODO | 1 | 8.1–8.3 | — |
+| 8 Autovacuum history | IN_PROGRESS | 1 | 8.1–8.3 | — |
+| · Autovacuum history per table | TODO | 1 | — | — |
 | 9 Plan insights | TODO | 1 | 9.1–9.3 | — |
 | 10 Validated index suggestions | TODO | 1 | 10.1–10.4 | — |
 | 11 Query to service link | TODO | 1 | 11.1–11.4 | — |

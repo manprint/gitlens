@@ -1,0 +1,9 @@
+automatic vacuum of table "postgres.public.avh": index scans: 0
+pages: 205 removed, 2 remain, 207 scanned (100.00% of total)
+tuples: 19900 removed, 100 remain, 0 are dead but not yet removable
+removable cutoff: 737, which was 1 XIDs old when operation ended
+index scan not needed: 206 pages from table (99.52% of total) had 19900 dead item identifiers removed
+avg read rate: 2.244 MB/s, avg write rate: 4.487 MB/s
+buffer usage: 649 hits, 2 misses, 4 dirtied
+WAL usage: 622 records, 1 full page images, 121298 bytes
+system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s

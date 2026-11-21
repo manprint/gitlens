@@ -125,3 +125,6 @@ Gates: G-GO-FOCUS ok (readiness, server, i18n, agent); G-GO-INT plan tests ok (I
 
 ## 2026-11-21 P7/1 complete unit:P7:1
 Gates: G-GO-FULL rc=0, G-GO-INT TestINTAEX001-005 + TestAEX015 + RLP ok (agent/server/store), G-RO TestINTRO001 ok, G-API no diff, G-WEB-FULL rc=0 (2076 tests, coverage gate, budget), G-I18N rc=0 (at 7.4, no change since); review: self-review (agent:opus) accepted; changes: none (closure); notes: review: integration INTAEX001-005; I-1 G-RO; I-4 TestINTAEX003/TestAEX012 (credential in plan or parameters never stored); parameters opt-in agent+server, shown only with include_parameters, purge audited (INTAEX004); README Automatic plans, help automatic-plans EN/IT, MONITORING_READINESS RDY-AEX-01 checked; note: samples API filters tenant_id='default' like logs API (pre-existing pattern)
+
+## 2026-11-21 8.1/1 complete unit:8.1:1
+Gates: G-GO-FOCUS pglog/wire/agent (race, shuffle) ok, TestAVH001-006; G-GO-INT TestINTAVH001 PASS; G-RO PASS; lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW pglog.ParseAutovacuum (R5 regexes) + 4 real fixtures; fact kind autovacuum_run (Check logs); log loop ships autovacuum_run facts (500 per scrape, pg_log_autovacuum_dropped); notes: A27; self-review: each line matched alone, header required, nil numbers left out of the value
