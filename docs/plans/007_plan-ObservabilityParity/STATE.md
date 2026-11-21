@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:29 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:41 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 5d902bc61b3ee1e6b67c1b384280910641133a60 + tree 370bee45e0925edec5e9af1319f68e6200e85f1f · branch main · last WIP tree none
-- Last closure: unit:7.4:1
-- Next: open P7 · next eligible: P7
+- Base: HEAD 7fac816350359bcd194350d1c3af96486d94cc93 + tree c0105cd81771267bde0b9257ac8ac32121d1a2ed · branch main · last WIP tree none
+- Last closure: unit:P7:1
+- Next: open 8.1 · next eligible: 8.1
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-none
+P7: none (closure)
 
 ## 6. Checkpoint
 none
@@ -101,7 +101,8 @@ none
 | · P5 closure | IN_PROGRESS | 1 | — | — |
 | 6 Log ingest | DONE | 1 | 6.1–6.6 | unit:P6:1 |
 | · P6 closure | TODO | 1 | — | — |
-| 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |
+| 7 Automatic plans | DONE | 1 | 7.1–7.4 | unit:P7:1 |
+| · P7 closure: full gates + self-review | IN_PROGRESS | 1 | — | — |
 | 8 Autovacuum history | TODO | 1 | 8.1–8.3 | — |
 | 9 Plan insights | TODO | 1 | 9.1–9.3 | — |
 | 10 Validated index suggestions | TODO | 1 | 10.1–10.4 | — |

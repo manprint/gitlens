@@ -122,3 +122,6 @@ Gates: G-GO-FOCUS server/store/agent ok (AEX-010..013); G-GO-INT TestINTAEX002..
 
 ## 2026-11-21 7.4/1 complete unit:7.4:1
 Gates: G-GO-FOCUS ok (readiness, server, i18n, agent); G-GO-INT plan tests ok (INTAEX002-005, AEX015); lint 0; G-API rc=0; G-WEB-STATIC ok (2 pre-existing warnings); vitest queries+help 109 ok; i18n-check rc=0; review: self-review (agent:opus) accepted; changes: GET /api/v1/plans/samples; Plan.source; PlanSamples + AutoPlanSetup console; RDY-AEX-01; help automatic-plans EN/IT; README Automatic plans; notes: AEX014 is a unit test (validation without storage); AEX015 is integration (needs query_plans).
+
+## 2026-11-21 P7/1 complete unit:P7:1
+Gates: G-GO-FULL rc=0, G-GO-INT TestINTAEX001-005 + TestAEX015 + RLP ok (agent/server/store), G-RO TestINTRO001 ok, G-API no diff, G-WEB-FULL rc=0 (2076 tests, coverage gate, budget), G-I18N rc=0 (at 7.4, no change since); review: self-review (agent:opus) accepted; changes: none (closure); notes: review: integration INTAEX001-005; I-1 G-RO; I-4 TestINTAEX003/TestAEX012 (credential in plan or parameters never stored); parameters opt-in agent+server, shown only with include_parameters, purge audited (INTAEX004); README Automatic plans, help automatic-plans EN/IT, MONITORING_READINESS RDY-AEX-01 checked; note: samples API filters tenant_id='default' like logs API (pre-existing pattern)
