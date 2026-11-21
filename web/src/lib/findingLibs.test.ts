@@ -176,6 +176,14 @@ describe('findingCheck', () => {
     expect(any!.database).toBeNull()
   })
 
+  it('UI-MXW-002 checks multixact age read-only per database and per table', () => {
+    const check = sqlOf('txn.multixact_wraparound_risk', null)!
+    expect(check.sql.startsWith('BEGIN TRANSACTION READ ONLY;')).toBe(true)
+    expect(check.sql.trimEnd().endsWith('ROLLBACK;')).toBe(true)
+    expect(check.sql).toContain('mxid_age(datminmxid) AS multixact_age FROM pg_database')
+    expect(check.sql).toContain('mxid_age(c.relminmxid) AS multixact_age')
+  })
+
   it('UI-FIND-059 has no check for a rule it does not know', () => {
     expect(sqlOf('made.up_rule', 'public.orders')).toBeNull()
   })

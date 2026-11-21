@@ -1266,6 +1266,7 @@ How the rules read the collected data:
 | `txn.idle_in_transaction` | warning | A session has been idle in transaction for more than 5 minutes. |
 | `txn.prepared_orphan` | critical | A prepared transaction older than one hour can hold back vacuum. |
 | `txn.wraparound_risk` | critical | A database's frozen transaction ID age is above one billion. |
+| `txn.multixact_wraparound_risk` | critical | A database's oldest multixact ID age is above one billion. |
 | `txn.high_rollback_ratio` | info | More than 10% of a database's transactions roll back. |
 | `archive.disabled` | info | WAL archiving is disabled. |
 | `archive.failing` | critical | Archive failures dominate the observed archive attempts. |

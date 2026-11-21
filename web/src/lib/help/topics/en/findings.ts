@@ -706,6 +706,12 @@ export const findingsTopic: HelpTopic = {
                     'The oldest transaction ID in a database is getting old. Threshold: age of 1,000,000,000 transactions. Severity: Critical.',
                   action: 'Run maintenance immediately, and resolve the vacuum starvation.',
                 },
+                {
+                  term: '`txn.multixact_wraparound_risk`',
+                  meaning:
+                    'The oldest multixact ID in a database is getting old. Threshold: age of 1,000,000,000 multixacts. Severity: Critical.',
+                  action: 'Run a freezing vacuum on the tables with the oldest multixact IDs.',
+                },
               ],
             },
           ],

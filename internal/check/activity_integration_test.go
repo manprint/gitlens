@@ -96,6 +96,38 @@ func TestINTMXW001_MultixactAgeMetric(t *testing.T) {
 	})
 }
 
+// multixactCheckSQL copies the "How to verify" statements of
+// txn.multixact_wraparound_risk in web/src/lib/findingCheck.ts.
+var multixactCheckSQL = []string{
+	`SELECT datname, mxid_age(datminmxid) AS multixact_age FROM pg_database ORDER BY 2 DESC;`,
+	`SELECT c.oid::regclass AS relation, mxid_age(c.relminmxid) AS multixact_age
+  FROM pg_class c WHERE c.relkind IN ('r','m','t') AND c.relminmxid <> '0'
+ ORDER BY 2 DESC LIMIT 20;`,
+}
+
+// INT-MXW-003: the console's multixact verification SQL runs read-only on
+// every supported version.
+func TestINTMXW003_MultixactCheckSQLRuns(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		ctx := context.Background()
+		pool := pg.Pool(t, "app", pgtest.RoleT0)
+		tx, err := pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(ctx) }()
+		for _, sql := range multixactCheckSQL {
+			rows, err := tx.Query(ctx, sql)
+			require.NoError(t, err, sql)
+			n := 0
+			for rows.Next() {
+				n++
+			}
+			rows.Close()
+			require.NoError(t, rows.Err(), sql)
+			require.Positive(t, n, sql)
+		}
+	})
+}
+
 // TestINTACT005_IdleInTransactionCountsAbortedSessions: a session whose
 // transaction failed and that was left idle keeps the transaction open, so it
 // is reported as 'idle in transaction (aborted)'. It is an idle-in-transaction

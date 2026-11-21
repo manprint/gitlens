@@ -17,6 +17,7 @@ describe('thresholdText', () => {
     ['conn.idle_in_transaction', 300, 'above 300 s'],
     ['txn.long_running', 900, 'above 900 s'],
     ['txn.wraparound_risk', 1e9, 'above 1,000,000,000 transactions'],
+    ['txn.multixact_wraparound_risk', 1e9, 'above 1,000,000,000 multixacts'],
     ['db.deadlock_rate', 0, 'any deadlock'],
     ['db.deadlock_rate', 0.1, 'above 0.1 deadlocks per second'],
     ['replica.no_sync_standby', 1, 'below 1 standbys'],
@@ -25,6 +26,13 @@ describe('thresholdText', () => {
     ['some.custom_rule', 7, '7'],
   ])('%s at %s reads %s', (id, threshold, text) => {
     expect(thresholdText(rule(id, threshold))).toBe(text)
+  })
+
+  it('UI-MXW-003 reads the multixact rule in the same count unit as the XID rule', () => {
+    expect(thresholdText(rule('txn.multixact_wraparound_risk', 2e9))).toBe(
+      'above 2,000,000,000 multixacts',
+    )
+    expect(thresholdText(rule('txn.wraparound_risk', 2e9))).toMatch(/^above 2,000,000,000 /)
   })
 
   it('shows a dash without a threshold', () => {

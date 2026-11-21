@@ -248,6 +248,13 @@ export const alertRulesTopic: HelpTopic = {
                 'Find the database with the check in [Read-only checks](/help/alert-rules#checks), remove the blockers (long transactions, idle sessions), then run `VACUUM (FREEZE)` on that database in a maintenance window.',
             },
             {
+              term: 'txn.multixact_wraparound_risk',
+              meaning:
+                'Default: critical, scope instance. The age of the oldest multixact ID above 1,000,000,000 for 300 seconds. The oldest multixact ID in a database is getting old: it needs a freezing vacuum.',
+              action:
+                'Find the database and the tables with the check in [Read-only checks](/help/alert-rules#checks), remove the blockers (long transactions, idle sessions), then run `VACUUM (FREEZE)` on those tables in a maintenance window.',
+            },
+            {
               term: 'db.deadlock_rate',
               meaning:
                 'Default: warning, scope instance. Any deadlock, so the threshold is 0 and the duration is 0 seconds. Deadlocks are occurring.',

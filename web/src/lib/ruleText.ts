@@ -83,6 +83,8 @@ const ADVISOR_RULE_TEXT = {
   'txn.high_rollback_ratio': 'A large share of transactions end in a rollback.',
   'txn.idle_in_transaction': 'A session has been idle inside an open transaction for a long time.',
   'txn.long_running': 'A transaction has been open for a long time.',
+  'txn.multixact_wraparound_risk':
+    'The oldest multixact ID in a database is getting old: it needs a freezing vacuum.',
   'txn.prepared_orphan': 'A prepared transaction has been left open for a long time.',
   'txn.wraparound_risk':
     'The oldest transaction ID in a database is getting old: it needs a freezing vacuum.',

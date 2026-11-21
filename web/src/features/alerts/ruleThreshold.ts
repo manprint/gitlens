@@ -34,6 +34,7 @@ const FORMATTERS: Readonly<Record<string, Formatter>> = {
   'conn.idle_in_transaction': seconds,
   'txn.long_running': seconds,
   'txn.wraparound_risk': (threshold) => `above ${number(threshold)} transactions`,
+  'txn.multixact_wraparound_risk': (threshold) => `above ${number(threshold)} multixacts`,
   'db.deadlock_rate': anyWhenZero(
     'any deadlock',
     (threshold) => `above ${number(threshold)} deadlocks per second`,

@@ -93,6 +93,8 @@ export const rules: Readonly<Record<RuleTextId, string>> = {
   'txn.idle_in_transaction':
     'Una sessione è rimasta inattiva dentro una transazione aperta per molto tempo.',
   'txn.long_running': 'Una transazione è aperta da molto tempo.',
+  'txn.multixact_wraparound_risk':
+    'L’ID multixact più vecchio di un database sta invecchiando: serve un vacuum di congelamento.',
   'txn.prepared_orphan': 'Una transazione preparata è rimasta aperta per molto tempo.',
   'txn.wraparound_risk':
     'L’ID di transazione più vecchio di un database sta invecchiando: serve un vacuum di congelamento.',

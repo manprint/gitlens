@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { rules as itRules } from '@/i18n/domain/it/rules'
+
 import { ADVISOR_RULE_IDS, ALERT_RULE_IDS, needText, needsText, ruleText } from './ruleText'
 
 const FIXTURE_RULE_IDS = [
@@ -17,7 +19,7 @@ const FIXTURE_RULE_IDS = [
 
 describe('ruleText', () => {
   it('knows every advisor rule and every alert rule', () => {
-    expect(ADVISOR_RULE_IDS).toHaveLength(72)
+    expect(ADVISOR_RULE_IDS).toHaveLength(73)
     expect(ALERT_RULE_IDS).toHaveLength(19)
     expect(ALERT_RULE_IDS).toContain('replica.redundancy_reduced')
   })
@@ -31,6 +33,14 @@ describe('ruleText', () => {
       expect(text).not.toContain(id)
     },
   )
+
+  it('UI-MXW-001 has its own multixact wraparound sentence in en and it', () => {
+    const id = 'txn.multixact_wraparound_risk'
+    expect(ruleText(id)).toMatch(/multixact/)
+    expect(itRules[id]).toMatch(/multixact/)
+    expect(ruleText(id)).not.toBe(ruleText('txn.wraparound_risk'))
+    expect(itRules[id]).not.toBe(itRules['txn.wraparound_risk'])
+  })
 
   it('returns undefined for an unknown id', () => {
     expect(ruleText('no.such_rule')).toBeUndefined()

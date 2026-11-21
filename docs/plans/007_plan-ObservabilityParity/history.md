@@ -20,3 +20,6 @@ Plan-006 working tree committed separately as bf38f97 (528 paths) because plan-0
 
 ## 2026-11-21 1.2/1 complete unit:1.2:1
 Gates: G-GO-FOCUS pass (MXW-003, MXW-004, MXW-005, TestCatalogParity, seeded-rule test); package tests advisor/server/i18n/store/alert ok; G-GO-INT pass (INT-MXW-002); review: self-review (agent:opus) accepted; changes: internal/advisor/rules_query.go(+test), internal/i18n/locales/{advisor_query,en,it}*.json, internal/server/api_locks.go, internal/store/migrations/0032_multixact_rule.sql, internal/store/migrate{,_integration}_test.go; notes: migration 0032 (D19); notification texts rule.txn.multixact_wraparound_risk.* added (describer title/problem/actions); describe_evidence.go unchanged: its frozen-table evidence orders by relfrozenxid, metrics_tables has no relminmxid; api_locks.go lists the new metric for the activity view
+
+## 2026-11-21 1.3/1 complete unit:1.3:1
+Gates: G-WEB-STATIC pass; G-WEB-UNIT 249 pass (UI-MXW-001/002/003 discovered); G-GO-INT TestINTMXW003 pg15+pg18 pass; review: self-review (agent:opus) accepted; changes: ruleText/it rules, findingCheck multixact case, ruleThreshold, help en/it alert-rules+findings, README rules row, TestINTMXW003; notes: self-review agent:opus: SQL read-only, catalog skeleton en/it equal; B1 no longer reproduces (make web-lint green)

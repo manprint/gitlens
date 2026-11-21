@@ -250,6 +250,13 @@ export const alertRulesTopic: HelpTopic = {
                 'Trova il database con il controllo in [Controlli di sola lettura](/help/alert-rules#checks), rimuovi i blocchi (transazioni lunghe, sessioni inattive), poi esegui `VACUUM (FREEZE)` su quel database in una finestra di manutenzione.',
             },
             {
+              term: 'txn.multixact_wraparound_risk',
+              meaning:
+                'Predefinito: critical, ambito istanza. L’età dell’ID multixact più vecchio sopra 1.000.000.000 per 300 secondi. L’ID multixact più vecchio di un database sta invecchiando: serve un vacuum di freeze.',
+              action:
+                'Trova il database e le tabelle con il controllo in [Controlli di sola lettura](/help/alert-rules#checks), rimuovi i blocchi (transazioni lunghe, sessioni inattive), poi esegui `VACUUM (FREEZE)` su quelle tabelle in una finestra di manutenzione.',
+            },
+            {
               term: 'db.deadlock_rate',
               meaning:
                 'Predefinito: warning, ambito istanza. Qualsiasi deadlock: la soglia è 0 e la durata è 0 secondi. Si stanno verificando deadlock.',

@@ -854,6 +854,22 @@ function instanceCheck(ruleId: string, ctx: Context): FindingCheck | null {
           'SELECT gid, prepared, owner, database, age(transaction) AS xid_age FROM pg_prepared_xacts ORDER BY prepared;',
         ),
       )
+    case 'txn.multixact_wraparound_risk':
+      return one(
+        [
+          'multixact_age per database is how far it is from its last freeze; the tables below hold the oldest multixact IDs and need a freezing vacuum first.',
+        ],
+        block(
+          'Multixact ID age per database.',
+          `SELECT datname, mxid_age(datminmxid) AS multixact_age FROM pg_database ORDER BY 2 DESC;`,
+        ),
+        block(
+          'Tables with the oldest multixact IDs.',
+          `SELECT c.oid::regclass AS relation, mxid_age(c.relminmxid) AS multixact_age
+  FROM pg_class c WHERE c.relkind IN ('r','m','t') AND c.relminmxid <> '0'
+ ORDER BY 2 DESC LIMIT 20;`,
+        ),
+      )
     case 'txn.wraparound_risk':
       return one(
         [

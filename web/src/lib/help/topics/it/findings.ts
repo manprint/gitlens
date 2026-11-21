@@ -718,6 +718,13 @@ export const findingsTopic: HelpTopic = {
                     'Il più vecchio ID di transazione di un database sta invecchiando. Soglia: età di 1.000.000.000 di transazioni. Severity: Critical.',
                   action: 'Esegui subito la manutenzione e risolvi lo stallo di vacuum.',
                 },
+                {
+                  term: '`txn.multixact_wraparound_risk`',
+                  meaning:
+                    'Il più vecchio ID multixact di un database sta invecchiando. Soglia: età di 1.000.000.000 di multixact. Severity: Critical.',
+                  action:
+                    'Esegui un vacuum di congelamento sulle tabelle con gli ID multixact più vecchi.',
+                },
               ],
             },
           ],
