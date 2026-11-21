@@ -194,3 +194,6 @@ Gates: G-WEB-STATIC (tsc, eslint 0 errors, prettier); G-WEB-UNIT full 241 files 
 
 ## 2026-11-21 12.2 attempt 2/1 complete unit:12.2 attempt 2:1
 Gates: TestINTPROC001 host-pid PASS (pg15/pg18 pgtest cases skip, documented); lint 0; review: self-review (agent:opus) accepted; changes: TestINTPROC001 host-pid case with PidMode=host; fact content assertions; go.mod moby/moby/api direct; notes: A42; found during P12 review
+
+## 2026-11-21 P12/1 complete unit:P12:1
+Gates: G-GO-FULL 0 issues; G-GO-INT TestINTPROC001 (host-pid PASS, pgtest cases skip documented) + TestINTPROC002 PASS; G-RO INTRO001 pg15/pg18 + INTRO003 PASS; G-API no diff; G-WEB-FULL EXIT 0 (2 pre-existing eslint warnings); G-I18N PASS; full vitest 241 files; review: self-review (agent:opus) accepted; changes: none (closure); notes: Review agent-1 (opus): /proc stat parsing from last ')' with spaces/parens tested (PROC001); pid reuse via start ticks; I-1 holds: process queries on agent.Manager covered by TestINTRO001; no command line/path shipped, asserted in TestINTPROC001/host-pid; skip record corrected (A40, A42); README Per-process metrics + help host-processes. Accepted.
