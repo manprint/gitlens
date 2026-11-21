@@ -39,10 +39,13 @@ type UIConfig struct {
 	// defaults the session endpoint hands the browser; empty reads as UTC and en.
 	TimeZone string
 	Language string
+	// TraceURLTemplate (PGLENS_TRACE_URL_TEMPLATE) links a trace id to the
+	// tracing tool: an http(s) URL holding {trace_id}; empty turns links off.
+	TraceURLTemplate string
 }
 
 func (c UIConfig) String() string {
-	return fmt.Sprintf("UIConfig{Enabled:%t Password:[redacted] SessionTTL:%s CookieSecure:%s TimeZone:%s Language:%s}", c.Enabled, c.SessionTTL, c.CookieSecure, c.TimeZone, c.Language)
+	return fmt.Sprintf("UIConfig{Enabled:%t Password:[redacted] SessionTTL:%s CookieSecure:%s TimeZone:%s Language:%s TraceURLTemplate:%s}", c.Enabled, c.SessionTTL, c.CookieSecure, c.TimeZone, c.Language, c.TraceURLTemplate)
 }
 
 // LoadBootstrapToken resolves the agent bearer token from
@@ -258,6 +261,11 @@ func LoadUIConfig(getenv func(string) string, readFile func(string) ([]byte, err
 			return UIConfig{}, fmt.Errorf("invalid PGLENS_UI_COOKIE_SECURE %q: accepted values are auto, true, false", raw)
 		}
 		config.CookieSecure = secure
+	}
+
+	config.TraceURLTemplate = strings.TrimSpace(getenv("PGLENS_TRACE_URL_TEMPLATE"))
+	if err := validateTraceURLTemplate(config.TraceURLTemplate); err != nil {
+		return UIConfig{}, err
 	}
 
 	return config, nil

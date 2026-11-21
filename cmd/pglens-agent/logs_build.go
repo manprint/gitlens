@@ -11,6 +11,7 @@ import (
 	"github.com/manprint/pglens/internal/pglog"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/internal/redact"
+	"github.com/manprint/pglens/internal/sqltag"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -88,6 +89,11 @@ func logEventFact(e pglog.Entry, class string, statementText bool) (wire.Fact, b
 	}
 	if e.QueryID != 0 {
 		labels["queryid"] = strconv.FormatInt(e.QueryID, 10)
+	}
+	// Only the trace id of the statement's sqlcommenter tags travels, also
+	// when statement_text is off.
+	if id := sqltag.TraceID(sqltag.Parse(e.Statement)); id != "" {
+		labels["trace_id"] = id
 	}
 	for k, v := range labels {
 		if v == "" {

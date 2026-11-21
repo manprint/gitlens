@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 14:52 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 14:58 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 8d7b9ca6bdd867fdec7651cafd9bdce62d249a09 + tree 079defc51cb1051efeffdd49a059afcb72acd9ba · branch main · last WIP tree none
-- Last closure: unit:11.2:1
-- Next: open 11.3 · next eligible: 11.3
+- Base: HEAD 1aa528a4605bc012a5a41d4d8373536e911b72a3 + tree 2aff8ba1f2669649919207bce9a2e401367c5612 · branch main · last WIP tree none
+- Last closure: unit:11.3:1
+- Next: open 11.4 · next eligible: 11.4
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -92,6 +92,7 @@ none
 - A35 (10.3): migration is 0040_index_validations.sql (0038/0039 already taken by earlier phases); persistCommandArtifact takes the command_id to store in index_validations; a suggestion matches a validation only with the same database, schema, table, key columns in order and no INCLUDE columns (suggestions have none); cost_ratio and index_size_bytes are nullable (cost_before 0, size unknown); index_validations has no retention entry, like query_plans.
 - A36 (10.4): the action lives in a new `web/src/features/indexes/IndexValidation.tsx` rendered at the end of the expanded suggestion (no own caption, like the statement analysis it belongs to); `web/src/api/commands.ts` needed no change (generic `useCreateCommand`); "commands off" is the instance `perm_tier` below T1, shown through `NotPermitted` as on EXPLAIN; a fresh result shows the browser time of receipt until the next load returns the stored `validated_at`; `index_include` is sent as `[]` (suggestions have no INCLUDE).
 - A37 (11.2): migration is 0041_ash_service.sql (0039/0040 taken); `CheckConfig.ASHTagDimensions()` is a separate method so the phase 2 dimension filter stays unchanged; tag labels are cut at 128 bytes (sqltag), not the 64 of phase 2 dimensions; INTQTAG001 runs on PG 15 and 18; INTQTAG002 checks `group_by=service` on `/api/v1/ash` (`/ash/top` has no group_by, it ranks queries).
+- A38 (11.3): `trace_url_template` is sent only on the signed-in `/api/v1/session` answer (the sign-in page has no trace to link, and the tracing URL stays private); `PGLENS_TRACE_URL_TEMPLATE` is read in `LoadUIConfig` (start-up error through it); plan samples answer `trace_id` (nullable) so the console can link them; unit 11.3 was opened after its edits began, base = HEAD tree 1aa528a, diff reconciled against it.
 
 ## 9. Blockers
 none

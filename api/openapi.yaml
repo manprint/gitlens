@@ -80,6 +80,10 @@ components:
           type: string
           description: Default console language (PGLENS_LANG, en when unset).
           example: it
+        trace_url_template:
+          type: string
+          description: Link to the tracing tool for a trace id (PGLENS_TRACE_URL_TEMPLATE), with {trace_id} to replace; empty when unset. Sent only to a signed-in console.
+          example: https://tempo.example/explore?trace={trace_id}
     ClusterId:
       type: string
       pattern: '^[0-9]+$'
@@ -561,7 +565,7 @@ components:
     PlanSample:
       type: object
       description: One execution that auto_explain logged.
-      required: [ts, datname, queryid, plan_hash, duration_ms, analyzed, has_parameters]
+      required: [ts, datname, queryid, plan_hash, duration_ms, analyzed, has_parameters, trace_id]
       properties:
         ts: { $ref: '#/components/schemas/Timestamp' }
         datname: { type: string }
@@ -573,6 +577,9 @@ components:
         parameters:
           type: string
           description: The Query Parameters text; returned only with include_parameters=true.
+        trace_id:
+          type: [string, 'null']
+          description: W3C trace id from the statement's sqlcommenter traceparent tag; null when untagged.
     PlanSamplesResponse:
       type: object
       required: [samples]
@@ -3863,6 +3870,7 @@ paths:
         - { name: severity, in: query, required: false, schema: { type: string } }
         - { name: database, in: query, required: false, schema: { type: string } }
         - { name: q, in: query, required: false, schema: { type: string } }
+        - { name: trace_id, in: query, required: false, description: 'Exact W3C trace id from sqlcommenter tags: 32 lowercase hexadecimal characters, not all zeros; anything else is a 400.', schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
         - name: limit
           in: query
           required: false
@@ -4393,6 +4401,7 @@ paths:
         - { name: queryid, in: query, required: true, schema: { type: string, pattern: '^-?[0-9]+$' } }
         - { name: database, in: query, required: false, schema: { type: string } }
         - { name: plan_hash, in: query, required: false, schema: { type: string } }
+        - { name: trace_id, in: query, required: false, description: 'Exact W3C trace id from sqlcommenter tags: 32 lowercase hexadecimal characters, not all zeros; anything else is a 400.', schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
         - { name: from, in: query, required: false, description: Start of the range; seven days before to when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
         - { name: to, in: query, required: false, description: End of the range; now when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
         - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 200, minimum: 1, maximum: 1000 } }
@@ -4414,6 +4423,7 @@ paths:
                         duration_ms: 12.5
                         analyzed: false
                         has_parameters: false
+                        trace_id: 5bd66ef5095369c7b0d1f8f4bd33716a
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/plans/stats:

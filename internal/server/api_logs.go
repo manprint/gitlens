@@ -131,6 +131,13 @@ FROM log_events WHERE tenant_id='default' AND instance_id=$1 AND ts >= $2 AND ts
 	if s := q.Get("q"); s != "" {
 		add(" AND position(lower($%d) in lower(message)) > 0", s)
 	}
+	if s := q.Get("trace_id"); s != "" {
+		if !validTraceID(s) {
+			writeError(w, http.StatusBadRequest, "invalid trace_id", traceIDRule)
+			return
+		}
+		add(" AND trace_id = $%d", s)
+	}
 	if s := q.Get("before"); s != "" {
 		before, err := time.Parse(time.RFC3339Nano, s)
 		if err != nil {

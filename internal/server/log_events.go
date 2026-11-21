@@ -51,6 +51,7 @@ func logEventRow(f wire.Fact, tenantID string, clusterID int64, instanceID uuid.
 		ApplicationName: withholdLogText(f.Labels["application_name"]),
 		Severity:        severity, SQLState: f.Labels["sqlstate"], Class: class,
 		Message: withholdLogText(body["message"]),
+		TraceID: traceIDLabel(f.Labels["trace_id"]),
 	}
 	if i := strings.LastIndexByte(f.Key, '/'); i >= 0 {
 		row.SessionID = f.Key[:i]

@@ -1506,6 +1506,11 @@ export interface components {
              * @example it
              */
             language?: string;
+            /**
+             * @description Link to the tracing tool for a trace id (PGLENS_TRACE_URL_TEMPLATE), with {trace_id} to replace; empty when unset. Sent only to a signed-in console.
+             * @example https://tempo.example/explore?trace={trace_id}
+             */
+            trace_url_template?: string;
         };
         /** @description A uint64 rendered as a decimal string because it exceeds the exact integer range of IEEE-754 numbers. */
         ClusterId: string;
@@ -1911,6 +1916,8 @@ export interface components {
             has_parameters: boolean;
             /** @description The Query Parameters text; returned only with include_parameters=true. */
             parameters?: string;
+            /** @description W3C trace id from the statement's sqlcommenter traceparent tag; null when untagged. */
+            trace_id: string | null;
         };
         PlanSamplesResponse: {
             samples: components["schemas"]["PlanSample"][];
@@ -4631,6 +4638,8 @@ export interface operations {
                 severity?: string;
                 database?: string;
                 q?: string;
+                /** @description Exact W3C trace id from sqlcommenter tags: 32 lowercase hexadecimal characters, not all zeros; anything else is a 400. */
+                trace_id?: string;
                 limit?: number;
                 before?: components["schemas"]["Timestamp"];
             };
@@ -4964,6 +4973,8 @@ export interface operations {
                 queryid: string;
                 database?: string;
                 plan_hash?: string;
+                /** @description Exact W3C trace id from sqlcommenter tags: 32 lowercase hexadecimal characters, not all zeros; anything else is a 400. */
+                trace_id?: string;
                 /** @description Start of the range; seven days before to when absent. */
                 from?: components["schemas"]["Timestamp"];
                 /** @description End of the range; now when absent. */

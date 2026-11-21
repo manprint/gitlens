@@ -274,6 +274,8 @@ func registerSessionRoutes(r chi.Router, cfg UIConfig, store *SessionStore, limi
 						"expires_at":    expiresAt.Format(time.RFC3339Nano),
 						"time_zone":     consoleTimeZone(cfg),
 						"language":      consoleLanguage(cfg),
+						// Only a signed-in console learns where traces live.
+						"trace_url_template": cfg.TraceURLTemplate,
 					})
 					return
 				}

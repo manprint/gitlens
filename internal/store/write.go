@@ -196,6 +196,8 @@ type PlanSampleRow struct {
 	Analyzed   bool
 	// Parameters is the opt-in Query Parameters text; nil stores NULL.
 	Parameters *string
+	// TraceID is the statement's W3C trace id; nil stores NULL.
+	TraceID *string
 }
 
 type ObjectFactRow struct {
@@ -692,6 +694,8 @@ type LogEventRow struct {
 	QueryID         *int64
 	Message         string
 	Extra           []byte
+	// TraceID is the statement's W3C trace id; nil stores NULL.
+	TraceID *string
 }
 
 // WriteLogEvents writes log events ON CONFLICT DO NOTHING: a result pushed
@@ -706,9 +710,9 @@ func WriteLogEvents(ctx context.Context, tx pgx.Tx, rows []LogEventRow) error {
 		if len(r.Extra) > 0 {
 			extra = string(r.Extra)
 		}
-		batch.Queue(`INSERT INTO log_events (ts, tenant_id, cluster_id, instance_id, datname, usename, application_name, pid, session_id, line_num, severity, sqlstate, class, queryid, message, extra)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb) ON CONFLICT DO NOTHING`,
-			r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Usename, r.ApplicationName, r.PID, r.SessionID, r.LineNum, r.Severity, r.SQLState, r.Class, r.QueryID, r.Message, extra)
+		batch.Queue(`INSERT INTO log_events (ts, tenant_id, cluster_id, instance_id, datname, usename, application_name, pid, session_id, line_num, severity, sqlstate, class, queryid, message, extra, trace_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17) ON CONFLICT DO NOTHING`,
+			r.TS, r.TenantID, r.ClusterID, r.InstanceID, r.Datname, r.Usename, r.ApplicationName, r.PID, r.SessionID, r.LineNum, r.Severity, r.SQLState, r.Class, r.QueryID, r.Message, extra, r.TraceID)
 	}
 	br := tx.SendBatch(ctx, batch)
 	for range rows {
@@ -728,9 +732,9 @@ func WritePlanSamples(ctx context.Context, tx pgx.Tx, rows []PlanSampleRow) erro
 	}
 	batch := &pgx.Batch{}
 	for _, r := range rows {
-		batch.Queue(`INSERT INTO plan_samples (ts, tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, duration_ms, analyzed, parameters)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
-			r.TS, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.PlanHash, r.DurationMS, r.Analyzed, r.Parameters)
+		batch.Queue(`INSERT INTO plan_samples (ts, tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, duration_ms, analyzed, parameters, trace_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
+			r.TS, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.PlanHash, r.DurationMS, r.Analyzed, r.Parameters, r.TraceID)
 	}
 	br := tx.SendBatch(ctx, batch)
 	for range rows {

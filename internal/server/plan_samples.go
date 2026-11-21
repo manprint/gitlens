@@ -66,6 +66,7 @@ func autoPlanFromFact(labels map[string]string, value json.RawMessage, tenantID 
 	p.sample = store.PlanSampleRow{
 		TS: ts, TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID,
 		Datname: labels["datname"], QueryID: queryID, PlanHash: hash, DurationMS: duration, Analyzed: analyzed,
+		TraceID: traceIDLabel(labels["trace_id"]),
 	}
 	// Parameters that may hold a credential store NULL; the sample is kept.
 	if body.Parameters != nil && *body.Parameters != "" && !redact.MayHoldCredential(*body.Parameters) {

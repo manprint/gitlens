@@ -170,3 +170,6 @@ Gates: G-GO-FOCUS ./internal/sqltag ok; FuzzParse 10s clean (1.46M execs); lint 
 
 ## 2026-11-21 11.2/1 complete unit:11.2:1
 Gates: G-GO-FOCUS ok (ash, sqltag, agent, cmd/pglens-agent, server, store); TestINTQTAG001 pg15+pg18 PASS; TestINTQTAG002 PASS; TestINTASHD002-004 PASS; lint 0; tsc ok; G-API regenerated; review: self-review (agent:opus) accepted; changes: sampler reads right(query,700) only when service/endpoint on; SampleRow/Key Service+Endpoint; labels service/endpoint; migration 0041; store writers; buildASHRow; /api/v1/ash group_by+filters service,endpoint; OpenAPI; notes: A37
+
+## 2026-11-21 11.3/1 complete unit:11.3:1
+Gates: G-GO-FOCUS ok (cmd/pglens-agent, server, store, sqltag); TestINTQTAG002/003 PASS; TestINTPGL002/003, TestINTAEX001 PASS; lint 0; tsc ok; G-API regenerated; review: self-review (agent:opus) accepted; changes: agent trace_id label on log_event and plan facts (also with statement_text off); store LogEventRow/PlanSampleRow TraceID; pipeline stores valid ids, else NULL; PGLENS_TRACE_URL_TEMPLATE validated at start-up; session trace_url_template; trace_id= filters on /logs and /plans/samples (400 on bad value); plan samples answer trace_id; notes: A38

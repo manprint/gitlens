@@ -19,6 +19,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/manprint/pglens/internal/store"
+	"github.com/manprint/pglens/internal/wire"
 )
 
 // TestINTQTAG002: migration 0041 applies over compressed metrics_ash chunks,
@@ -94,4 +95,52 @@ VALUES ($1, 'default', 1, $2, 'app', 'CPU', 'CPU', 'active', 2, 10, 10)`, base.A
 		byService[*b.Service] += b.Samples
 	}
 	require.Equal(t, map[string]int{"": 4, "shop": 5}, byService)
+}
+
+// TestINTQTAG003: a pushed log event and plan sample that carry a trace id are
+// found by trace_id=; another id finds neither.
+func TestINTQTAG003_TraceIDFilters(t *testing.T) {
+	router, count := planRouter(t)
+	instance := uuid.NewString()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	const trace = "5bd66ef5095369c7b0d1f8f4bd33716a"
+	plan := autoPlanFact(now.Add(-2*time.Second), "")
+	plan.Labels["trace_id"] = trace
+	untagged := autoPlanFact(now.Add(-3*time.Second), "")
+	logEvent := wire.Fact{
+		Kind: "log_event", Key: "s1/1",
+		Labels: map[string]string{
+			"ts": now.Add(-time.Second).Format(time.RFC3339Nano), "class": "error.statement", "severity": "ERROR",
+			"sqlstate": "42P01", "datname": "app", "trace_id": trace,
+		},
+		ValueJSON: []byte(`{"message":"relation \"nope\" does not exist"}`),
+	}
+	pushPlanFacts(t, router, instance, now, plan, untagged, logEvent)
+	require.Equal(t, 2, count("plan_samples", instance))
+	require.Equal(t, 1, count("log_events", instance))
+
+	var samples struct {
+		Samples []struct {
+			TraceID *string `json:"trace_id"`
+		} `json:"samples"`
+	}
+	getPlanJSON(t, router, "/api/v1/plans/samples?queryid=77&instance_id="+instance+"&trace_id="+trace, &samples)
+	require.Len(t, samples.Samples, 1)
+	require.Equal(t, trace, *samples.Samples[0].TraceID)
+
+	var logs []struct {
+		TraceID *string `json:"trace_id"`
+	}
+	from := "&from=" + now.Add(-time.Hour).Format(time.RFC3339)
+	getPlanJSON(t, router, "/api/v1/logs?instance_id="+instance+from+"&trace_id="+trace, &logs)
+	require.Len(t, logs, 1)
+	require.Equal(t, trace, *logs[0].TraceID)
+
+	const other = "0123456789abcdef0123456789abcdef"
+	logs = nil
+	getPlanJSON(t, router, "/api/v1/logs?instance_id="+instance+from+"&trace_id="+other, &logs)
+	require.Empty(t, logs)
+	samples.Samples = nil
+	getPlanJSON(t, router, "/api/v1/plans/samples?queryid=77&instance_id="+instance+"&trace_id="+other, &samples)
+	require.Empty(t, samples.Samples)
 }

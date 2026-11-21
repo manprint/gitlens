@@ -31,6 +31,8 @@ type planSampleJSON struct {
 	Analyzed      bool      `json:"analyzed"`
 	HasParameters bool      `json:"has_parameters"`
 	Parameters    *string   `json:"parameters,omitempty"`
+	// TraceID is the W3C trace id of the statement's sqlcommenter tags.
+	TraceID *string `json:"trace_id"`
 }
 
 type planSamplesResponse struct {
@@ -107,13 +109,18 @@ func (a *API) handlePlanSamples(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	traceID := q.Get("trace_id")
+	if traceID != "" && !validTraceID(traceID) {
+		writeError(w, http.StatusBadRequest, "invalid trace_id", traceIDRule)
+		return
+	}
 	out := planSamplesResponse{Samples: []planSampleJSON{}}
 	if a.pool == nil {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
 	var sb strings.Builder
-	sb.WriteString(`SELECT ts, datname, queryid, plan_hash, duration_ms, analyzed, parameters FROM plan_samples
+	sb.WriteString(`SELECT ts, datname, queryid, plan_hash, duration_ms, analyzed, parameters, trace_id FROM plan_samples
 WHERE tenant_id='default' AND instance_id=$1 AND queryid=$2 AND ts >= $3 AND ts < $4`)
 	args := []any{instanceID, queryID, from, to}
 	if s := q.Get("database"); s != "" {
@@ -123,6 +130,10 @@ WHERE tenant_id='default' AND instance_id=$1 AND queryid=$2 AND ts >= $3 AND ts 
 	if s := q.Get("plan_hash"); s != "" {
 		args = append(args, s)
 		fmt.Fprintf(&sb, " AND plan_hash=$%d", len(args))
+	}
+	if traceID != "" {
+		args = append(args, traceID)
+		fmt.Fprintf(&sb, " AND trace_id=$%d", len(args))
 	}
 	args = append(args, limit)
 	fmt.Fprintf(&sb, " ORDER BY ts DESC LIMIT $%d", len(args))
@@ -136,7 +147,7 @@ WHERE tenant_id='default' AND instance_id=$1 AND queryid=$2 AND ts >= $3 AND ts 
 		var row planSampleJSON
 		var qid int64
 		var params *string
-		if err := rows.Scan(&row.TS, &row.Datname, &qid, &row.PlanHash, &row.DurationMS, &row.Analyzed, &params); err != nil {
+		if err := rows.Scan(&row.TS, &row.Datname, &qid, &row.PlanHash, &row.DurationMS, &row.Analyzed, &params, &row.TraceID); err != nil {
 			writeError(w, http.StatusInternalServerError, "plan samples decode failed", err.Error())
 			return
 		}

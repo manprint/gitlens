@@ -10,6 +10,7 @@ import (
 	"github.com/manprint/pglens/internal/agent"
 	"github.com/manprint/pglens/internal/pglog"
 	"github.com/manprint/pglens/internal/redact"
+	"github.com/manprint/pglens/internal/sqltag"
 	"github.com/manprint/pglens/internal/wire"
 )
 
@@ -122,18 +123,22 @@ func (ps *planScrape) add(e pglog.Entry) {
 		ps.dropped["format"]++
 		return
 	}
+	labels := map[string]string{
+		"source":      "auto_explain",
+		"ts":          e.Time.UTC().Format(time.RFC3339Nano),
+		"datname":     e.Database,
+		"queryid":     queryID,
+		"plan_hash":   hash,
+		"analyzed":    strconv.FormatBool(p.Analyzed),
+		"duration_ms": strconv.FormatFloat(p.DurationMS, 'f', -1, 64),
+	}
+	if id := sqltag.TraceID(sqltag.Parse(p.QueryText)); id != "" {
+		labels["trace_id"] = id
+	}
 	ps.facts = append(ps.facts, wire.Fact{
-		Kind: planFactKind,
-		Key:  queryID + ":" + hash + ":" + strconv.FormatInt(e.Time.UnixNano(), 10),
-		Labels: map[string]string{
-			"source":      "auto_explain",
-			"ts":          e.Time.UTC().Format(time.RFC3339Nano),
-			"datname":     e.Database,
-			"queryid":     queryID,
-			"plan_hash":   hash,
-			"analyzed":    strconv.FormatBool(p.Analyzed),
-			"duration_ms": strconv.FormatFloat(p.DurationMS, 'f', -1, 64),
-		},
+		Kind:      planFactKind,
+		Key:       queryID + ":" + hash + ":" + strconv.FormatInt(e.Time.UnixNano(), 10),
+		Labels:    labels,
 		ValueJSON: value,
 	})
 }
