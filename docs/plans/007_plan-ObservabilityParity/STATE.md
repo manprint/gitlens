@@ -9,10 +9,10 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Settings: autonomy true (explicit (prompt) `full-autonomous:true`) · WIP on (explicit (prompt) `--wip-commit`) · deadline none
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
-- Unit: none
-- Base: HEAD 13c2d8cbbda71d2d5acd1282ce98631f382fa6f8 + tree 2da12e835711c5745a91566dbce05918221a50c6 · branch main · last WIP tree none
+- Unit: P12 attempt 1 · OPEN · step S1 · assigned agent-2 → actual agent:opus (claude-opus-5-5)
+- Base: HEAD db08a184555b883803bd135feb50f4be4df516d6 + tree d2462eb50d059100b4f4fb66b43a602a398e461a · branch main · last WIP tree none
 - Last closure: unit:12.4:1
-- Next: open P12 · next eligible: P12
+- Next: finish P12 · next eligible: P12
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-none
+P12: none
 
 ## 6. Checkpoint
 none
@@ -94,8 +94,9 @@ none
 - A37 (11.2): migration is 0041_ash_service.sql (0039/0040 taken); `CheckConfig.ASHTagDimensions()` is a separate method so the phase 2 dimension filter stays unchanged; tag labels are cut at 128 bytes (sqltag), not the 64 of phase 2 dimensions; INTQTAG001 runs on PG 15 and 18; INTQTAG002 checks `group_by=service` on `/api/v1/ash` (`/ash/top` has no group_by, it ranks queries).
 - A38 (11.3): `trace_url_template` is sent only on the signed-in `/api/v1/session` answer (the sign-in page has no trace to link, and the tracing URL stays private); `PGLENS_TRACE_URL_TEMPLATE` is read in `LoadUIConfig` (start-up error through it); plan samples answer `trace_id` (nullable) so the console can link them; unit 11.3 was opened after its edits began, base = HEAD tree 1aa528a, diff reconciled against it.
 - A39 (12.1): the per-process fixtures live as pid folders in `internal/host/testdata/proc/`; `copyFixtureProc` in `collector_test.go` (outside the unit file list) now skips folders so the host collector tests keep copying only the flat files. A postmaster that is gone yields an empty list, not an error; only the postmaster's own unreadable stat/status fails `Processes`.
-- A40 (12.2): the two process queries live on `agent.Manager` (`BackendPID`, `ProcessSessions`, `internal/agent/processes.go`) so `TestINTRO001` runs them; `host.Collector.ProcessName` added. The postmaster pid is cached and asked again after any `/proc` failure (a pooled connection gives no "new connection" signal; every backend has the same parent). Guard: the backend and its parent must be named `postgres`/`postmaster` in the agent's `/proc`, else the target is skipped (kind `namespace`, logged once per hour) so a server in another PID namespace never reports unrelated host processes. `TestINTPROC001` case: SKIPPED here (`container processes not visible in /proc`: the Docker daemon runs in another PID namespace); coverage by `TestPROC007`.
+- A40 (12.2): the two process queries live on `agent.Manager` (`BackendPID`, `ProcessSessions`, `internal/agent/processes.go`) so `TestINTRO001` runs them; `host.Collector.ProcessName` added. The postmaster pid is cached and asked again after any `/proc` failure (a pooled connection gives no "new connection" signal; every backend has the same parent). Guard: the backend and its parent must be named `postgres`/`postmaster` in the agent's `/proc`, else the target is skipped (kind `namespace`, logged once per hour) so a server in another PID namespace never reports unrelated host processes. `TestINTPROC001` pgtest cases skip (`container processes not visible in /proc`: each container has its own PID namespace); its `host-pid` case (A42) runs for real.
 - A41 (12.3): `/host/processes/top` averages each group over every sample time in range (absent = 0), `max_rss_bytes` is the largest single process; I/O average null when no process of the group had counters. metrics_processes joins the retention whitelist (7 d, floor 3, no compression); `limit` > 200 is a 400, not capped.
+- A42 (P12 review → 12.2 attempt 2, tests only): `TestINTPROC001/host-pid` starts PostgreSQL 18 with `PidMode=host`, whose processes are in the test's `/proc`, and must not skip; it also asserts the phase rule "no command line or path in any fact" (label keys and value keys whitelisted, no label starting with `/`). `moby/moby/api` becomes a direct test dependency.
 
 ## 9. Blockers
 none
