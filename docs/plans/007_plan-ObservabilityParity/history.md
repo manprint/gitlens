@@ -1,0 +1,7 @@
+# Plan 007 — history
+
+## 2026-11-21 execute start
+Invocation `/plan-execute-verify execute 007 full-autonomous:true --wip-commit agent:opus`: scope plan 007, autonomy true and WIP on (explicit), roster override agent:opus (claude-opus-5-5) for all positions, reviews labelled self-review. Autonomous decisions A1 (temporary-index commits around foreign staged deletions) and A2 (plan files enter the 0.1 commit) recorded in STATE.md §8.
+
+## 2026-11-21 0.1/1 complete unit:0.1:1
+Gates: G-GO-FULL pass (35 pkgs, 2773 PASS, 0 FAIL, 1 SKIP); G-WEB-FULL pass with B1 (gen-api git-diff check blocked by uncommitted plan-006 generated.ts; gen idempotent; vitest 2027/227; budget PASS); G-I18N pass (48 vitest); G-RO pass; review: agent:opus self-review accepted; changes: STATE.md, history.md (plan files added); notes: A1–A3.

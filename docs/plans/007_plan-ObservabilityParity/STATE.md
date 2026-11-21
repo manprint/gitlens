@@ -1,0 +1,100 @@
+# ObservabilityParity — State
+
+Format: pev-state 2
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:40 UTC by agent:opus (claude-opus-5-5)
+§0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
+
+## 1. Now
+- Run: execute 007 · result RUNNING · style handoff (single session; agent:opus implements and self-reviews) · acting as agent:opus (claude-opus-5-5)
+- Settings: autonomy true (explicit (prompt) `full-autonomous:true`) · WIP on (explicit (prompt) `--wip-commit`) · deadline none
+- Stop latch: none
+- Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
+- Unit: none
+- Base: HEAD b728cb73793b479d4511e57fab1c82f7a71a34af + tree 1d7158a81017f5d5429515bcfd80e14a468384f6 · branch main · last WIP tree none
+- Last closure: unit:0.1:1
+- Next: open 0.2 · next eligible: 0.2
+- Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
+
+## 2. Readiness
+READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fields each; every invariant of the overview has a named guarding test in a phase file; research R1–R12 confirmed or accepted with a guard (R9: `pg_hint_plan` build, guard in units 0.2 and 13.2). Open questions / required unverified claims: none.
+
+## 3. Settings, roster, gates
+- Roster: agent:opus (claude-opus-5-5) for every position (explicit Execute override 2026-11-21; planned roster agent-1:claude-fable-5-2, agent-2:claude-haiku-5-5). Effect: agent:opus implements every unit and performs every review, each labelled self-review.
+- Plan defaults: autonomy true · WIP on · executor power low — set by Plan 2026-11-21; all three given by the Plan invocation
+- Setup: Go 1.27.3; Node 24.22.1, pnpm 12.21.0 (cwd `web/` for web commands); Docker for integration tests (images `postgres:15.19-alpine`, `postgres:18.6-alpine`, `timescale/timescaledb:2.31.0-pg17`, local `pglens-pgext:18` from unit 0.2). Sandbox: outbound proxy `http://gateway.docker.internal:3128`; image builds need `--network host` and the proxy build arguments; `github.com` is TLS-intercepted, so download sources on the host with `curl` and never disable certificate checks. Disk and memory are limited: after each unit that used Docker, remove its containers, networks, volumes and build cache. Lab stack `/home/agent/pglens-odoo-stack` only in unit 15.2 (its `.env` is never printed). No push, no access to the real deploy machines, no network other than localhost and the outbound internet.
+- Baseline note (D20): the working tree had 403 uncommitted paths of plan 006 when this plan was written. Units stage only their own hunks. Recommended before Execute: commit the plan 006 work.
+- Supervisor access: agent-1 runs the session and dispatches each unit to agent-2 as a sub-agent with the unit's phase file section; agent-2 returns its diff and evidence to agent-1, the only state writer. Without sub-agents: session handoff per PROTOCOL.md. Current run: single agent:opus session, no dispatch.
+- Test ID mapping: `ABC-001` ↔ Go `TestABC001`; integration `INT-ABC-001` ↔ `TestINTABC001`; web `UI-ABC-001` is the test title prefix.
+
+| Gate | Active from | Command (cwd) | Must assert / discover |
+|------|-------------|---------------|------------------------|
+| G-BASE | unit 0.1 | G-GO-FULL, G-WEB-FULL, G-I18N, G-RO on the baseline tree (repo) | result and test count per gate recorded in §7; a failure is recorded as pre-existing and reported to agent-1 |
+| G-GO-FOCUS | unit 1.1 | `go test -race -shuffle=on -count=1 <pkgs> -run '<IDs>'` (repo) | every listed test ID discovered and passed; zero discovery = fail |
+| G-GO-INT | unit 1.1 | `go test -tags=integration -race -count=1 <pkg> -run '<IDs>'` (repo, Docker) | every listed `TestINT…` discovered and passed; a skip counts only when the unit names it |
+| G-GO-FULL | baseline | `make fmt-check lint vet-tags test` (repo) | all green |
+| G-GO-INT-ALL | P15 | `go test -tags=integration -race -count=1 ./... -skip 'TestINTRO002\|TestINTGIS001\|TestINTEXT002'` (repo, Docker) | all green; skips only those recorded in phases 10, 12, 13 |
+| G-RO | baseline | `go test -tags integration ./internal/agent/ -run TestINTRO001 -count=1` (repo, Docker) | agent sends no statement outside the allowed read-only list (I-1) |
+| G-WEB-STATIC | baseline | `make web-typecheck web-lint` (repo) | no error |
+| G-WEB-UNIT | unit 1.1 | `TZ=UTC pnpm exec vitest run <paths>` (`web/`) | every listed `UI-…` ID discovered and passed |
+| G-WEB-FULL | baseline | `make web-typecheck web-lint web-coverage-gate web-budget` (repo) | coverage gate and bundle budget green |
+| G-API | first unit that edits `api/openapi.yaml` (phase 2) | `pnpm run gen:api` (`web/`), then `make api-docs` (repo) | `web/src/api/generated.ts` and `docs/api.md` regenerated and staged; second run leaves no diff |
+| G-I18N | baseline | `make i18n-check` (repo) | locale parity, same placeholders (I-5) |
+| G-FINAL | PLAN | G-GO-FULL, G-GO-INT-ALL, G-RO, G-API, G-WEB-FULL, G-I18N on the final tree, plus the recorded reference scenario of unit 15.2 | all green; nine scenario steps passed or deviation accepted by agent-1 |
+
+## 4. Unsettled ledger
+none
+
+## 5. Owned files
+none
+
+## 6. Checkpoint
+none
+
+## 7. Open-phase evidence
+Baseline (0.1, HEAD b728cb7, 404 dirty paths: web 293, internal 89, cmd 9, docs 4, other 9; 76 untracked):
+| Gate | Result | Count |
+|------|--------|-------|
+| G-GO-FULL | pass | fmt-check, golangci-lint 0 issues, vet ×3; `make test` 35 packages ok, 2773 PASS lines (with subtests), 0 FAIL, 1 SKIP |
+| G-WEB-FULL | pass with baseline deviation B1 | typecheck ok; lint + format:check ok; coverage gate all floors OK, vitest 227 files / 2027 tests; bundle budget PASS (entry 246.31 KiB) |
+| G-I18N | pass | 4 Go packages ok; vitest 5 files / 48 tests |
+| G-RO | pass | TestINTRO001_AgentOnlyReads PASS (PG 15 and 18 via pgtest) |
+- B1 (baseline, environmental): `make web-lint` runs `web-gen-api`, whose `git diff --exit-code -- web/src/api/generated.ts` fails while that file holds the uncommitted plan-006 hunks. `pnpm run gen:api` output equals the baseline snapshot (idempotent), so the check itself is green in substance. Rule for this run (A3): G-WEB-FULL = `make web-typecheck`, `pnpm run gen:api` with `git diff --quiet <unit base tree or snapshot> -- web/src/api/generated.ts` replaced by the G-API second-run no-diff check, `pnpm run lint && pnpm run format:check` (web/), `make web-coverage-gate web-budget`.
+
+## 8. Revisions and decisions still needed
+- A1 (autonomous, 2026-11-21): the index holds staged deletions not owned by this plan (`web/src/features/indexes/SuggestionsPanel{,.test}.tsx`). Options: stop as blocker; unstage them; commit through a temporary index. Chosen: every plan-007 commit is built in a temporary index seeded from HEAD with only the unit's owned patch (base tree..closure tree), then the real index is reset for those paths only; the foreign staged entries stay untouched. Risk: none to foreign work; reverse by `git reset --soft` of the plan commits. No hooks exist, so hooks are not bypassed (`GIT_INDEX_FILE=… git commit` runs them anyway).
+- A2 (autonomous): plan files (untracked, written by the planning session for this request) enter the 0.1 completion commit.
+- A3 (autonomous): G-WEB-FULL runs with the B1 substitution of §7 until the plan-006 hunks of `generated.ts` are committed by the user; acceptance unchanged (gen idempotence still asserted).
+
+## 9. Blockers
+none
+
+## 10. Do-not-repeat
+none
+
+## 11. Board
+| Phase | Status | Attempt | Sub-phases | Closure ref |
+|-------|--------|---------|------------|-------------|
+| 0 Baseline and test images | IN_PROGRESS | 1 | 0.1–0.2 | — |
+| · 0.1 Baseline gates recorded | DONE | 1 | — | unit:0.1:1 |
+| · 0.2 Test image hypopg and pg_hint_plan | TODO | 1 | — | — |
+| 1 Multixact wraparound rule | TODO | 1 | 1.1–1.3 | — |
+| 2 ASH dimensions | TODO | 1 | 2.1–2.5 | — |
+| 3 Notification channels | TODO | 1 | 3.1–3.4 | — |
+| 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |
+| 5 Rollups | TODO | 1 | 5.1–5.4 | — |
+| 6 Log ingest | TODO | 1 | 6.1–6.6 | — |
+| 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |
+| 8 Autovacuum history | TODO | 1 | 8.1–8.3 | — |
+| 9 Plan insights | TODO | 1 | 9.1–9.3 | — |
+| 10 Validated index suggestions | TODO | 1 | 10.1–10.4 | — |
+| 11 Query to service link | TODO | 1 | 11.1–11.4 | — |
+| 12 Per-process OS metrics | TODO | 1 | 12.1–12.4 | — |
+| 13 Tuning workbook | TODO | 1 | 13.1–13.4 | — |
+| 14 MCP server | TODO | 1 | 14.1–14.4 | — |
+| 15 Integration and documents | TODO | 1 | 15.1–15.3 | — |
+| PLAN | TODO | 1 | — | — |
+
+Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED (reason kept), BLOCKED.
+
+## 12. Suspended implementation
+none
