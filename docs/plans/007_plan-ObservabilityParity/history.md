@@ -218,3 +218,6 @@ Gates: G-GO-FULL EXIT 0; G-GO-INT TestINTWBK001 (pg15, pg18), 002, 003 (pgext, s
 
 ## 2026-11-21 14.1/1 complete unit:14.1:1
 Gates: G-GO-FOCUS ./internal/mcp/ (race, shuffle) PASS, coverage 94.7%; FuzzHandle 10 s clean; golangci-lint 0 issues; go list -deps shows only internal/mcp; review: self-review (agent:opus) accepted; changes: NEW internal/mcp: protocol.go (codes, versions 2025-11-25/2025-06-18, Negotiate, ResultLimit), server.go (Tool, Server.Handle, Tool.Target), TestMCP001-005, FuzzHandle; notes: review agent-1: Handle recovers panics; id echoed raw (number/string), null/object id -32600; notification = valid message without id (no body, also for unknown methods); undeclared argument, missing or invalid path value -32602 before the Caller; null argument = absent; arrays joined with commas
+
+## 2026-11-21 14.2/1 complete unit:14.2:1
+Gates: G-GO-FOCUS ./internal/server/ (race, shuffle) PASS; TestMCP006/007/008 PASS; mutation (tool on /api/v1/commands with an undeclared argument) fails 3 checks; golangci-lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW internal/server/mcp_tools.go (mcpToolSpecs, mcpTools: 30 read-only tools, JSON Schema per tool with enums from OpenAPI), mcp_tools_test.go; notes: A47: argument names follow openapi.yaml (findings state, plans datname, host id only)
