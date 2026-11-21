@@ -38,9 +38,7 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg, w
 	conn := &ashConn{mgr: mgr, base: ctx, clk: clk}
 
 	agg := ash.New(clk, ashWindow, ashMaxKeys)
-	sampler := ash.NewSampler(conn, clk, func(r ash.SampleRow) {
-		agg.Add(r.Datname, r.State, r.WaitEventType, r.WaitEvent, r.QueryID)
-	})
+	sampler := ash.NewSampler(conn, clk, agg.Add)
 	if cfg.Interval != "" {
 		if d, err := time.ParseDuration(cfg.Interval); err == nil {
 			sampler.SetInterval(d)

@@ -42,6 +42,9 @@ func (r *valueRows) Scan(dest ...any) error {
 	row := r.rows[r.idx]
 	r.idx++
 	for i, d := range dest {
+		if i >= len(row) {
+			break // columns a fixture predates scan as their zero value
+		}
 		switch p := d.(type) {
 		case *string:
 			*p = row[i].(string)

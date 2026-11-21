@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:44 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:45 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 64c7b6571e4501a5a23c90c2d98313980ace3d5d + tree b2c57349a89ce5cdd386d3ff623d2d735e64bbeb · branch main · last WIP tree none
-- Last closure: unit:P1:1
-- Next: open 2.1 · next eligible: 2.1
+- Base: HEAD a3a88e03a42b3487b083000d897427835e89bc43 + tree 4d0f6b783966235e206c2e71c09b5b706995c96a · branch main · last WIP tree none
+- Last closure: unit:2.1:1
+- Next: open 2.2 · next eligible: 2.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-P1: STATE.md, history.md
+none
 
 ## 6. Checkpoint
 none
@@ -71,7 +71,12 @@ none
 |-------|--------|---------|------------|-------------|
 | 0 Baseline and test images | DONE | 1 | 0.1–0.2 | unit:P0:1 |
 | 1 Multixact wraparound rule | DONE | 1 | 1.1–1.3 | unit:P1:1 |
-| 2 ASH dimensions | TODO | 1 | 2.1–2.5 | — |
+| 2 ASH dimensions | IN_PROGRESS | 1 | 2.1–2.5 | — |
+| · 2.1 Sampler and aggregator carry the three dimensions | DONE | 1 | — | unit:2.1:1 |
+| · 2.2 Agent emits the labels, checks.ash.dimensions | TODO | 1 | — | — |
+| · 2.3 Schema, store, pipeline | TODO | 1 | — | — |
+| · 2.4 API: group_by and filters | TODO | 1 | — | — |
+| · 2.5 Console: group and filter controls, help, README | TODO | 1 | — | — |
 | 3 Notification channels | TODO | 1 | 3.1–3.4 | — |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |

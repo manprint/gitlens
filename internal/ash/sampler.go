@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/manprint/pglens/internal/clock"
@@ -18,6 +19,27 @@ type SampleRow struct {
 	WaitEventType string
 	WaitEvent     string
 	QueryID       *int64
+	// Usename, ClientAddr and ApplicationName are '' when unknown; each is cut
+	// to 64 bytes on a UTF-8 boundary.
+	Usename         string
+	ClientAddr      string
+	ApplicationName string
+}
+
+// maxDimensionBytes bounds a text dimension so one long application name
+// cannot blow up the key set or the wire.
+const maxDimensionBytes = 64
+
+// cut64 cuts s to at most 64 bytes without splitting a UTF-8 sequence.
+func cut64(s string) string {
+	if len(s) <= maxDimensionBytes {
+		return s
+	}
+	i := maxDimensionBytes
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return s[:i]
 }
 
 // querier is the subset of *pgxpool.Conn the sampler needs. Narrowing to an
@@ -211,7 +233,10 @@ SELECT COALESCE(datname, '')             AS datname,
        state                             AS state,
        COALESCE(wait_event_type, 'CPU')  AS wait_event_type,
        COALESCE(wait_event, 'CPU')       AS wait_event,
-       query_id
+       query_id,
+       COALESCE(usename, '')             AS usename,
+       COALESCE(host(client_addr), '')   AS client_addr,
+       COALESCE(application_name, '')    AS application_name
   FROM pg_stat_activity
  WHERE backend_type IN ('client backend', 'parallel worker')
    AND state <> 'idle'
@@ -229,19 +254,22 @@ SELECT COALESCE(datname, '')             AS datname,
 	// toward the window's samples either.
 	var batch []SampleRow
 	for rows.Next() {
-		var datname, state, waitEventType, waitEvent string
+		var datname, state, waitEventType, waitEvent, usename, clientAddr, applicationName string
 		var queryID *int64
 
-		if err := rows.Scan(&datname, &state, &waitEventType, &waitEvent, &queryID); err != nil {
+		if err := rows.Scan(&datname, &state, &waitEventType, &waitEvent, &queryID, &usename, &clientAddr, &applicationName); err != nil {
 			return nil, err
 		}
 
 		batch = append(batch, SampleRow{
-			Datname:       datname,
-			State:         state,
-			WaitEventType: waitEventType,
-			WaitEvent:     waitEvent,
-			QueryID:       queryID,
+			Datname:         datname,
+			State:           state,
+			WaitEventType:   waitEventType,
+			WaitEvent:       waitEvent,
+			QueryID:         queryID,
+			Usename:         cut64(usename),
+			ClientAddr:      cut64(clientAddr),
+			ApplicationName: cut64(applicationName),
 		})
 	}
 	if err := rows.Err(); err != nil {

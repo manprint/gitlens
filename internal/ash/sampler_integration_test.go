@@ -411,3 +411,39 @@ func TestINTASH008_ComputeQueryIDSettingReadsServer(t *testing.T) {
 		require.Equal(t, "on", got, "the test containers run with compute_query_id=on")
 	})
 }
+
+// INT-ASH-D-001: a session named ashd-test is sampled with its application
+// name and a user name.
+func TestINTASHD001_SampleCarriesDimensions(t *testing.T) {
+	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		pg.Lock(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		cfg, err := pgxpool.ParseConfig(pg.DSN("app", pgtest.RoleT0))
+		require.NoError(t, err)
+		cfg.ConnConfig.RuntimeParams["application_name"] = "ashd-test"
+		named, err := pgxpool.NewWithConfig(ctx, cfg)
+		require.NoError(t, err)
+		t.Cleanup(named.Close)
+		sleepingSession(t, ctx, named, 3*time.Second)
+		time.Sleep(300 * time.Millisecond)
+
+		samplerConn, err := newTestPool(t, ctx, pg).Acquire(ctx)
+		require.NoError(t, err)
+		defer samplerConn.Release()
+
+		var rows []SampleRow
+		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		require.NoError(t, s.doSample(ctx))
+
+		found := false
+		for _, r := range rows {
+			if r.ApplicationName == "ashd-test" {
+				found = true
+				require.NotEmpty(t, r.Usename)
+			}
+		}
+		require.True(t, found, "no sample with application_name ashd-test: %+v", rows)
+	})
+}

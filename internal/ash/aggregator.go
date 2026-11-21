@@ -26,6 +26,11 @@ type Key struct {
 	State         string
 	QueryID       int64 // 0 means absent; HasQueryID says whether it is real
 	HasQueryID    bool
+	// Usename, ClientAddr and ApplicationName are '' when unknown or when the
+	// agent turned that dimension off.
+	Usename         string
+	ClientAddr      string
+	ApplicationName string
 }
 
 // Bucket is one distinct key's sample count within a window.
@@ -77,13 +82,16 @@ func New(clk clock.Clock, window time.Duration, maxKeys int) *Aggregator {
 	}
 }
 
-// Add records one sample. datname/state/wet/we are the raw sampler fields
-// (already NULL-coalesced upstream); queryID is nil when compute_query_id is
-// off or the row carried no query id.
-func (a *Aggregator) Add(datname, state, wet, we string, queryID *int64) {
-	k := Key{Datname: datname, WaitEventType: wet, WaitEvent: we, State: state}
-	if queryID != nil {
-		k.QueryID = *queryID
+// Add records one sample. The row fields are already NULL-coalesced by the
+// sampler; QueryID is nil when compute_query_id is off or the row carried no
+// query id.
+func (a *Aggregator) Add(r SampleRow) {
+	k := Key{
+		Datname: r.Datname, WaitEventType: r.WaitEventType, WaitEvent: r.WaitEvent, State: r.State,
+		Usename: r.Usename, ClientAddr: r.ClientAddr, ApplicationName: r.ApplicationName,
+	}
+	if r.QueryID != nil {
+		k.QueryID = *r.QueryID
 		k.HasQueryID = true
 	}
 
@@ -220,5 +228,14 @@ func keyLess(a, b Key) bool {
 	if a.HasQueryID != b.HasQueryID {
 		return !a.HasQueryID
 	}
-	return a.QueryID < b.QueryID
+	if a.QueryID != b.QueryID {
+		return a.QueryID < b.QueryID
+	}
+	if a.Usename != b.Usename {
+		return a.Usename < b.Usename
+	}
+	if a.ClientAddr != b.ClientAddr {
+		return a.ClientAddr < b.ClientAddr
+	}
+	return a.ApplicationName < b.ApplicationName
 }

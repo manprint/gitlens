@@ -9,12 +9,14 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	pgxtype "github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/stretchr/testify/require"
 )
 
 // mockRows is a minimal in-memory pgx.Rows for exercising doSample's parsing
@@ -51,6 +53,13 @@ func (m *mockRows) Scan(dest ...any) error {
 	*dest[2].(*string) = row[2].(string)
 	*dest[3].(*string) = row[3].(string)
 	*dest[4].(**int64) = row[4].(*int64)
+	for i := 5; i < len(dest); i++ {
+		v := ""
+		if i < len(row) {
+			v = row[i].(string)
+		}
+		*dest[i].(*string) = v
+	}
 	return nil
 }
 
@@ -621,4 +630,16 @@ func TestSampler_BatchCallback_GetsRowsOfSuccessfulTicksOnly(t *testing.T) {
 	if len(batches) > 1 {
 		t.Fatalf("onBatch called for failed ticks: %d batches", len(batches))
 	}
+}
+
+// ASH-D-002: cut64 keeps 64 bytes of ASCII and never splits a rune.
+func TestASHD002_Cut64(t *testing.T) {
+	require.Len(t, cut64(strings.Repeat("a", 70)), 64)
+	s := strings.Repeat("a", 62) + "€" + "bb" // € is 3 bytes at offsets 62..64
+	got := cut64(s)
+	require.Len(t, got, 62)
+	require.True(t, utf8.ValidString(got))
+	s = strings.Repeat("a", 63) + "€"
+	require.Len(t, cut64(s), 63)
+	require.Equal(t, "short", cut64("short"))
 }

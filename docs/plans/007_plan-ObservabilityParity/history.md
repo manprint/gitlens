@@ -26,3 +26,6 @@ Gates: G-WEB-STATIC pass; G-WEB-UNIT 249 pass (UI-MXW-001/002/003 discovered); G
 
 ## 2026-11-21 P1/1 complete unit:P1:1
 Gates: G-GO-FULL 35 pkgs ok; G-GO-INT TestINTMXW001/002/003 pass (pg15+pg18); G-RO pass; G-WEB-FULL pass (registered command, coverage floors + budget, entry 246.31 KiB); G-I18N pass (48); review: self-review (agent:opus) accepted; changes: none (closure); notes: self-review agent:opus: I-1 (multixact query read-only, pg_database only), I-5 (en/it keys+placeholders, TestMXW004, I18N parity); rule catalogue assertion = advisor registry + TestMXW003/004 (no separate /api/v1/findings catalogue endpoint exists); README row added in 1.3; no regression vs baseline
+
+## 2026-11-21 2.1/1 complete unit:2.1:1
+Gates: G-GO-FOCUS ./internal/ash/ TestASHD001/002/003 pass; ./internal/ash ./cmd/pglens-agent -race pass; G-GO-INT TestINTASHD001 + TestINTASH001-008 pg15+pg18 pass; G-RO pass; go build ./... ok; review: self-review (agent:opus) accepted; changes: SampleRow/Key + Usename, ClientAddr, ApplicationName; query adds usename, host(client_addr), application_name; cut64; Add(r SampleRow); keyLess tie-break; caller passes agg.Add; watch_test mock tolerates extra columns; notes: self-review agent:opus: only callers in cmd/pglens-agent and internal/ash; overflow otherKey keeps '' dimensions (I-2 TestASHD003)

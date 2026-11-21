@@ -1,11 +1,13 @@
 package ash
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/manprint/pglens/internal/clock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAggregator_CountsPerKey(t *testing.T) {
@@ -13,13 +15,13 @@ func TestAggregator_CountsPerKey(t *testing.T) {
 	a := New(clk, 10*time.Second, 100)
 
 	for i := 0; i < 10; i++ {
-		a.Add("app", "active", "Lock", "transactionid", nil)
+		a.Add(row("app", "active", "Lock", "transactionid", nil))
 	}
 	for i := 0; i < 15; i++ {
-		a.Add("app", "active", "CPU", "CPU", nil)
+		a.Add(row("app", "active", "CPU", "CPU", nil))
 	}
 	for i := 0; i < 5; i++ {
-		a.Add("other_db", "idle in transaction", "CPU", "CPU", nil)
+		a.Add(row("other_db", "idle in transaction", "CPU", "CPU", nil))
 	}
 
 	w := a.Flush(clk.Now().Add(10 * time.Second))
@@ -40,7 +42,7 @@ func TestAggregator_CountsPerKey(t *testing.T) {
 func TestAggregator_NullWaitBecomesCPU(t *testing.T) {
 	clk := clock.NewFake(time.Unix(0, 0))
 	a := New(clk, 10*time.Second, 100)
-	a.Add("app", "active", "CPU", "CPU", nil)
+	a.Add(row("app", "active", "CPU", "CPU", nil))
 	w := a.Flush(clk.Now())
 	if len(w.Buckets) != 1 || w.Buckets[0].Key.WaitEventType != "CPU" {
 		t.Fatalf("expected one CPU bucket, got %+v", w.Buckets)
@@ -52,8 +54,8 @@ func TestAggregator_QueryIDNilIsNotZero(t *testing.T) {
 	a := New(clk, 10*time.Second, 100)
 
 	zero := int64(0)
-	a.Add("app", "active", "CPU", "CPU", nil)
-	a.Add("app", "active", "CPU", "CPU", &zero)
+	a.Add(row("app", "active", "CPU", "CPU", nil))
+	a.Add(row("app", "active", "CPU", "CPU", &zero))
 
 	w := a.Flush(clk.Now())
 	if len(w.Buckets) != 2 {
@@ -76,7 +78,7 @@ func TestAggregator_WindowBoundaries(t *testing.T) {
 	clk := clock.NewFake(time.Unix(0, 0))
 	a := New(clk, 10*time.Second, 100)
 
-	a.Add("app", "active", "CPU", "CPU", nil)
+	a.Add(row("app", "active", "CPU", "CPU", nil))
 	w1 := a.Flush(clk.Now().Add(10 * time.Second))
 	if len(w1.Buckets) != 1 {
 		t.Fatalf("expected 1 bucket in first window, got %d", len(w1.Buckets))
@@ -93,7 +95,7 @@ func TestAggregator_WindowBoundaries(t *testing.T) {
 
 	// A sample added after the second Flush belongs to the third window, not
 	// leaking back into w2.
-	a.Add("app", "active", "CPU", "CPU", nil)
+	a.Add(row("app", "active", "CPU", "CPU", nil))
 	w3 := a.Flush(clk.Now().Add(30 * time.Second))
 	if len(w3.Buckets) != 1 {
 		t.Fatalf("expected the post-flush sample to land in the next window, got %d buckets", len(w3.Buckets))
@@ -125,7 +127,7 @@ func TestAggregator_CapConservesTotal(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		n := (i % 7) + 1 // vary counts so the top-99 selection is meaningful
 		for j := 0; j < n; j++ {
-			a.Add("app", "active", "Lock", waitEventName(i), nil)
+			a.Add(row("app", "active", "Lock", waitEventName(i), nil))
 			totalAdds++
 		}
 	}
@@ -153,7 +155,7 @@ func TestAggregator_CapKeepsTopKeys(t *testing.T) {
 	// 150 keys, count = index so the top 99 are deterministic (150..52).
 	for i := 1; i <= 150; i++ {
 		for j := 0; j < i; j++ {
-			a.Add("app", "active", "Lock", waitEventName(i), nil)
+			a.Add(row("app", "active", "Lock", waitEventName(i), nil))
 		}
 	}
 
@@ -193,7 +195,7 @@ func TestAggregator_NoCapNoTruncated(t *testing.T) {
 	a := New(clk, 10*time.Second, 100)
 
 	for i := 0; i < 50; i++ {
-		a.Add("app", "active", "Lock", waitEventName(i), nil)
+		a.Add(row("app", "active", "Lock", waitEventName(i), nil))
 	}
 	w := a.Flush(clk.Now())
 	if w.Truncated {
@@ -219,7 +221,7 @@ func TestAggregator_Concurrent(t *testing.T) {
 				if i%10 == 0 {
 					a.TickSucceeded()
 				}
-				a.Add("app", "active", "Lock", waitEventName(g), nil)
+				a.Add(row("app", "active", "Lock", waitEventName(g), nil))
 			}
 		}(g)
 	}
@@ -259,7 +261,7 @@ func FuzzAggregator_ConservesTotal(f *testing.F) {
 		total := 0
 		for i := 0; i < adds; i++ {
 			k := i % numKeys
-			a.Add("app", "active", "Lock", waitEventName(k), nil)
+			a.Add(row("app", "active", "Lock", waitEventName(k), nil))
 			total++
 		}
 
@@ -318,4 +320,48 @@ func TestAggregator_FailedTicksCounted(t *testing.T) {
 	if w.FailedTicks != 0 {
 		t.Fatalf("expected FailedTicks reset by Flush, got %d", w.FailedTicks)
 	}
+}
+
+func row(datname, state, wet, we string, queryID *int64) SampleRow {
+	return SampleRow{Datname: datname, State: state, WaitEventType: wet, WaitEvent: we, QueryID: queryID}
+}
+
+// ASH-D-001: two rows that differ only by usename are two keys.
+func TestASHD001_UsenameSplitsKeys(t *testing.T) {
+	a := New(clock.NewFake(time.Unix(0, 0)), 10*time.Second, 100)
+	a.Add(SampleRow{Datname: "app", State: "active", WaitEventType: "CPU", WaitEvent: "CPU", Usename: "alice"})
+	a.Add(SampleRow{Datname: "app", State: "active", WaitEventType: "CPU", WaitEvent: "CPU", Usename: "bob"})
+	w := a.Flush(time.Unix(10, 0))
+	require.Len(t, w.Buckets, 2)
+	require.Equal(t, "alice", w.Buckets[0].Key.Usename)
+	require.Equal(t, "bob", w.Buckets[1].Key.Usename)
+}
+
+// ASH-D-003: 120 distinct keys under cap 100 give 100 buckets and keep the
+// sample total (I-2); the overflow bucket has empty dimensions.
+func TestASHD003_CapConservesWithDimensions(t *testing.T) {
+	a := New(clock.NewFake(time.Unix(0, 0)), 10*time.Second, 100)
+	total := 0
+	for i := 0; i < 120; i++ {
+		for j := 0; j <= i%3; j++ {
+			a.Add(SampleRow{Datname: "app", State: "active", WaitEventType: "CPU", WaitEvent: "CPU",
+				Usename: fmt.Sprintf("u%03d", i), ClientAddr: "10.0.0.1", ApplicationName: "svc"})
+			total++
+		}
+	}
+	w := a.Flush(time.Unix(10, 0))
+	require.True(t, w.Truncated)
+	require.Len(t, w.Buckets, 100)
+	sum := 0
+	for _, b := range w.Buckets {
+		sum += b.Samples
+		if b.Key == otherKey {
+			continue
+		}
+		require.Equal(t, "10.0.0.1", b.Key.ClientAddr)
+		require.Equal(t, "svc", b.Key.ApplicationName)
+	}
+	require.Equal(t, total, sum)
+	require.Equal(t, otherKey, w.Buckets[len(w.Buckets)-1].Key)
+	require.Empty(t, otherKey.Usename+otherKey.ClientAddr+otherKey.ApplicationName)
 }
