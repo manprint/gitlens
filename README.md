@@ -2321,6 +2321,7 @@ GET    /api/v1/ash|ash/top
 POST   /api/v1/push
 GET    /api/v1/plans
 GET    /api/v1/plans/samples
+GET    /api/v1/plans/stats
 DELETE /api/v1/plans/samples/parameters
 GET    /api/v1/autovacuum/runs
 GET    /api/v1/autovacuum/summary
@@ -2537,6 +2538,12 @@ SELECT pg_reload_conf();
 **Parameters.** `checks.logs.plan_parameters: true` ships the `Query Parameters` of each plan (cut at 4096 bytes; a text that may hold a credential is never shipped). Off by default: values can hold personal data. They are shown only on request (`include_parameters=true`); `DELETE /api/v1/plans/samples/parameters?instance_id=` clears them for an instance, keeps the samples and writes an audit row.
 
 API: `GET /api/v1/plans/samples?instance_id=&queryid=&plan_hash=&database=&from=&to=&limit=&include_parameters=` (newest first, `limit` up to 1000, last 7 days by default).
+
+## Plan history
+
+The console's Plan history (statement page) compares the plans of one statement, each identified by its shape fingerprint (`plan_hash`: operations, tables, indexes and conditions, not costs). The table of captures lists stored plans; with `auto_explain` samples, Statistics per plan shows for each plan the executions, average and p95 duration (`percentile_cont(0.95)`), first and last seen, and a line `Plan changed at <time>` for each sample whose plan differs from the previous sample in the same database (at most 100, newest first). Ticking two plans compares their trees operation by operation and their statistics side by side; a plan whose body was not captured has statistics but cannot be ticked. Plan insights (slowest node, misestimates, spills, lossy bitmaps, missing parallel workers, join filter discards, JIT and trigger time) are computed in the console from the plan JSON.
+
+API: `GET /api/v1/plans/stats?instance_id=&queryid=&database=&from=&to=` (`queryid` required, last 7 days by default) returns `plans` (newest-seen first) and `changes`.
 
 ## Autovacuum history
 

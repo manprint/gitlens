@@ -143,3 +143,6 @@ Gates: G-WEB-STATIC pass (tsc, eslint 2 pre-existing warnings, prettier); vitest
 
 ## 2026-11-21 9.2/1 complete unit:9.2:1
 Gates: G-GO-FOCUS ./internal/server pass; TestINTPLI001 + TestINTAEX* + TestAEX015 pass; lint 0; G-API regenerated (docs/api.md, generated.ts); review: self-review (agent:opus) accepted; changes: GET /api/v1/plans/stats (api_plan_stats.go), planSampleScope helper, OpenAPI PlanStat/PlanChange/PlanStats + path, TestPLI001/002, TestINTPLI001; notes: Review: tenant + instance filters on both queries and in EXISTS; database bound as parameter; changes capped 100 via constant; pool nil gives empty lists. Decision A31.
+
+## 2026-11-21 9.3/1 complete unit:9.3:1
+Gates: G-WEB-STATIC pass (tsc, eslint 2 pre-existing warnings, prettier); vitest queries 100, help+captions+i18n 160 pass; G-I18N rc=0; review: self-review (agent:opus) accepted; changes: usePlanStats + key; PlanStats.tsx, PlanCompare.tsx; PlanHistory wiring; en/it messages, captions, help subsection plan-stats; README Plan history + endpoint line; UI-PLI-009..013; notes: Review: has_plan false and unloaded captures cannot be ticked; change times use formatTimestamp (session zone, UI-PLI-010); no existing test changed. Decision A32.

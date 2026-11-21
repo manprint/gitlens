@@ -552,6 +552,41 @@ export const queryPerformanceTopic: HelpTopic = {
           ],
         },
         {
+          id: 'plan-stats',
+          title: 'Statistiche per piano',
+          blocks: [
+            {
+              kind: 'text',
+              text: 'La pagina confronta i piani di uno statement, ciascuno identificato dall’impronta della sua forma (`plan_hash`). Con `auto_explain` attivo ogni esecuzione lenta è un campione: la tabella {{ui:queries.planStats.entriesLabel}} raggruppa per piano i campioni degli ultimi sette giorni, dal più recente. Sotto, una riga per ogni momento in cui il piano è cambiato: un campione con un piano diverso dal campione precedente nello stesso database. Spunta due piani per confrontarli: gli alberi come in Confronto dei piani, più le loro statistiche affiancate.',
+            },
+            {
+              kind: 'terms',
+              items: [
+                {
+                  term: '{{ui:queries.planStats.samples}}',
+                  meaning: 'Quante esecuzioni `auto_explain` ha registrato con questo piano.',
+                },
+                {
+                  term: '{{ui:queries.planStats.avg}}, {{ui:queries.planStats.p95}}',
+                  meaning:
+                    'Durata media e durata sotto cui resta il 95% delle esecuzioni (`percentile_cont(0.95)`).',
+                  action:
+                    'Dopo un cambio di piano, un p95 più alto sul nuovo piano indica una regressione; confronta i due piani.',
+                },
+                {
+                  term: '{{ui:queries.planStats.firstSeen}}, {{ui:queries.planStats.lastSeen}}',
+                  meaning: 'La prima e l’ultima esecuzione registrata con questo piano.',
+                },
+                {
+                  term: '{{ui:queries.planStats.noBody}}',
+                  meaning:
+                    'Esistono campioni ma nessun albero memorizzato per questa forma, quindi non si può spuntare né confrontare.',
+                },
+              ],
+            },
+          ],
+        },
+        {
           id: 'plan-comparison',
           title: 'Confronto dei piani',
           blocks: [

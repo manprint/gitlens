@@ -953,6 +953,19 @@ export function usePlanSamples(
   })
 }
 
+export function usePlanStats(
+  params: QueryParameters<'/api/v1/plans/stats'>,
+  options: { enabled?: boolean } = {},
+) {
+  return useApiQuery({
+    policy: REFRESH.statements,
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/plans/stats', { params: { query: params }, signal })),
+    queryKey: qk.planStats(params),
+    enabled: options.enabled ?? true,
+  })
+}
+
 export function useAutovacuumSummary(params: QueryParameters<'/api/v1/autovacuum/summary'>) {
   return useApiQuery({
     policy: REFRESH.statements,

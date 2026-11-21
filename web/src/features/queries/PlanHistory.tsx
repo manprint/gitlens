@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 
-import { usePlans } from '@/api/queries'
+import { usePlanStats, usePlans } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { HelpLink } from '@/components/layout/HelpLink'
 import { InfoHint } from '@/components/layout/InfoHint'
@@ -21,7 +21,9 @@ import {
   type PlanNodeView,
 } from '@/lib/planTree'
 
+import { PlanStatsCompare } from './PlanCompare'
 import { AutoPlanSetup, PlanSamples } from './PlanSamples'
+import { PlanStats } from './PlanStats'
 import { PlanView } from './PlanView'
 
 type Plan = Schemas['Plan']
@@ -334,6 +336,15 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
     limit: 20,
   }
   const plansQuery = usePlans(params)
+  const statsQuery = usePlanStats(
+    {
+      instance_id: instanceId ?? '',
+      queryid: String(queryid),
+      ...(datname === undefined ? {} : { database: datname }),
+    },
+    { enabled: instanceId !== undefined },
+  )
+  const stats = statsQuery.data as Schemas['PlanStats'] | undefined
   const response = plansQuery.data as Schemas['PlansResponse'] | undefined
   const captures = useMemo<Capture[]>(
     () =>
@@ -353,6 +364,18 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
       if (current.includes(capture.key)) return current.filter((key) => key !== capture.key)
       return [...current, capture.key].slice(-2)
     })
+  }
+  const selectedHashes = selected.map((capture) => capture.plan.plan_hash)
+  const captureOf = (hash: string) => captures.find((capture) => capture.plan.plan_hash === hash)
+  const toggleHash = (hash: string) => {
+    if (selectedHashes.includes(hash)) {
+      setSelectedKeys((current) =>
+        current.filter((key) => captures.find((c) => c.key === key)?.plan.plan_hash !== hash),
+      )
+      return
+    }
+    const capture = captureOf(hash)
+    if (capture) toggle(capture)
   }
 
   const columns: SimpleColumn<Capture>[] = [
@@ -475,6 +498,17 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
         : { older: second, newer: first }
       : null
 
+  const statsBlock = stats ? (
+    <PlanStats
+      stats={stats}
+      selectedHashes={selectedHashes}
+      canTick={(hash) => captureOf(hash) !== undefined}
+      onToggle={toggleHash}
+    />
+  ) : null
+  const olderStats = pair && stats?.plans.find((p) => p.plan_hash === pair.older.plan.plan_hash)
+  const newerStats = pair && stats?.plans.find((p) => p.plan_hash === pair.newer.plan.plan_hash)
+
   return (
     <section
       aria-labelledby="plan-history-title"
@@ -502,6 +536,7 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
             {t('queries.planHistory.noHistory')}
           </p>
           <AutoPlanSetup />
+          {statsBlock}
         </div>
       ) : (
         <>
@@ -513,6 +548,7 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
               shapeCount: shapes,
             })}
           </p>
+          {statsBlock}
           <SimpleTable
             ariaLabel={t('queries.planHistory.entriesLabel')}
             captionId="queries.plan-captures"
@@ -554,6 +590,9 @@ export function PlanHistory({ queryid, instanceId, datname }: PlanHistoryProps) 
             />
           )}
           {pair && <PlanComparison older={pair.older} newer={pair.newer} />}
+          {olderStats && newerStats && olderStats !== newerStats && (
+            <PlanStatsCompare older={olderStats} newer={newerStats} />
+          )}
         </>
       )}
     </section>

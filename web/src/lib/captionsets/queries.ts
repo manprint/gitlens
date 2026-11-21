@@ -250,6 +250,30 @@ export const queriesCaptions = {
     howToRead:
       'Compare durations over time for one shape. Not stored means the agent did not ship parameters (checks.logs.plan_parameters off) or they may hold a credential.',
   },
+  'queries.plan-stats': {
+    what: 'Per plan of this statement: executions logged by auto_explain, average and p95 duration, first and last seen, and when the plan changed.',
+    source: 'The plan samples stored by the server, grouped by plan.',
+    unit: 'executions; duration in ms',
+    window: 'The last seven days.',
+    howToRead:
+      'Plans are identified by their structure hash. A change line marks a logged execution whose plan differs from the previous one. Tick two plans to compare them.',
+  },
+  'queries.plan-stats-rows': {
+    what: 'One row per plan: executions, average, p95, first and last seen.',
+    source: 'The plan samples stored by the server.',
+    unit: 'executions; duration in ms',
+    window: 'The last seven days.',
+    howToRead:
+      'A plan whose body was not captured has samples but no stored tree, so it cannot be compared.',
+  },
+  'queries.plan-stats-compare': {
+    what: 'The logged executions of the two compared plans, side by side.',
+    source: 'The plan samples stored by the server.',
+    unit: 'executions; duration in ms',
+    window: 'The last seven days.',
+    howToRead:
+      'A lower average and p95 after a change means the new plan is faster for this workload.',
+  },
   'queries.plan-comparison': {
     what: 'The operations of two captured plans side by side, matched by their place in the tree, with what changed.',
     source:

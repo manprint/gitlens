@@ -7,6 +7,7 @@ import { dataRows, filterTable, searchTable, seq, sortTable } from '@/test/table
 
 import { refreshLocale, setServerLanguage } from '@/i18n/store'
 import { resetPreferences } from '@/lib/preferences'
+import { setServerTimeZone } from '@/lib/timezone'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { renderWithProviders } from '@/test/render'
 import { server } from '@/test/msw/server'
@@ -212,5 +213,142 @@ describe('PlanHistory comparison table controls', () => {
       await waitFor(() => expect(screen.getAllByText('Automatico')).toHaveLength(1))
       expect(screen.getByText('Su richiesta')).toBeInTheDocument()
     })
+  })
+})
+
+function stat(hash: string, avg: number, p95: number, last: string, hasPlan = true) {
+  return {
+    plan_hash: hash,
+    samples: 20,
+    avg_ms: avg,
+    p95_ms: p95,
+    min_ms: avg - 1,
+    max_ms: p95 + 1,
+    first_ts: '2024-01-01T00:00:00Z',
+    last_ts: last,
+    analyzed_samples: 0,
+    has_plan: hasPlan,
+  }
+}
+
+function statsHandler(
+  plans: ReturnType<typeof stat>[],
+  changes: { ts: string; from_plan_hash: string; to_plan_hash: string }[] = [],
+) {
+  return http.get('*/api/v1/plans/stats', () => HttpResponse.json({ plans, changes }))
+}
+
+const STATS = 'Statistics per plan'
+
+describe('PlanHistory statistics and comparison (plan 007 9.3)', () => {
+  afterEach(async () => {
+    setServerTimeZone(undefined)
+    resetPreferences()
+    await setServerLanguage(undefined)
+    await refreshLocale()
+  })
+
+  it('UI-PLI-009 shows samples, average, p95 and first and last seen per plan', async () => {
+    vi.useRealTimers()
+    server.use(
+      plansHandler([plan(1, '2024-01-01T00:00:00Z', 'aaaaaaaa11')]),
+      statsHandler([
+        stat('bbbbbbbb22', 100, 140, '2024-01-03T00:00:00Z'),
+        stat('aaaaaaaa11', 10, 12.5, '2024-01-02T00:00:00Z'),
+      ]),
+    )
+    renderHistory()
+    const table = await screen.findByRole('table', { name: STATS })
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent('bbbbbbbb')
+    expect(rows[0]).toHaveTextContent('100 ms')
+    expect(rows[0]).toHaveTextContent('140 ms')
+    expect(rows[0]).toHaveTextContent('2024-01-03 00:00:00 UTC')
+    expect(rows[1]).toHaveTextContent('12.5 ms')
+    expect(rows[1]).toHaveTextContent('2024-01-01 00:00:00 UTC')
+  })
+
+  it('UI-PLI-010 writes each plan change with its time in the session zone', async () => {
+    vi.useRealTimers()
+    setServerTimeZone('Europe/Rome')
+    server.use(
+      plansHandler([plan(1, '2024-01-01T00:00:00Z', 'aaaaaaaa11')]),
+      statsHandler(
+        [stat('bbbbbbbb22', 100, 140, '2024-01-03T00:00:00Z')],
+        [{ ts: '2024-01-02T10:00:00Z', from_plan_hash: 'aaaaaaaa11', to_plan_hash: 'bbbbbbbb22' }],
+      ),
+    )
+    renderHistory()
+    const changes = await screen.findByRole('list', { name: 'Plan changes' })
+    expect(changes).toHaveTextContent(
+      'Plan changed at 2024-01-02 11:00:00 UTC+1: aaaaaaaa → bbbbbbbb',
+    )
+  })
+
+  it('UI-PLI-011 compares two ticked plans and a third tick replaces the older one', async () => {
+    vi.useRealTimers()
+    server.use(
+      plansHandler([
+        plan(3, '2024-01-03T00:00:00Z', 'cccccccc33', 'Index Scan'),
+        plan(2, '2024-01-02T00:00:00Z', 'bbbbbbbb22', 'Bitmap Heap Scan'),
+        plan(1, '2024-01-01T00:00:00Z', 'aaaaaaaa11'),
+      ]),
+      statsHandler([
+        stat('cccccccc33', 5, 6, '2024-01-03T00:00:00Z'),
+        stat('bbbbbbbb22', 100, 140, '2024-01-02T00:00:00Z'),
+        stat('aaaaaaaa11', 10, 12, '2024-01-01T00:00:00Z'),
+      ]),
+    )
+    renderHistory()
+    await screen.findByRole('table', { name: STATS })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Compare plan aaaaaaaa' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Compare plan bbbbbbbb' }))
+    const compare = await screen.findByRole('table', { name: 'Statistics of the compared plans' })
+    expect(compare).toHaveTextContent('Older plan aaaaaaaa')
+    expect(compare).toHaveTextContent('Newer plan bbbbbbbb')
+    expect(compare).toHaveTextContent('140 ms')
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Compare plan cccccccc' }))
+    expect(screen.getByRole('checkbox', { name: 'Compare plan aaaaaaaa' })).not.toBeChecked()
+    const next = screen.getByRole('table', { name: 'Statistics of the compared plans' })
+    expect(next).toHaveTextContent('Older plan bbbbbbbb')
+    expect(next).toHaveTextContent('Newer plan cccccccc')
+  })
+
+  it('UI-PLI-012 marks a plan without a stored body and does not let it be ticked', async () => {
+    vi.useRealTimers()
+    server.use(
+      plansHandler([plan(1, '2024-01-01T00:00:00Z', 'aaaaaaaa11')]),
+      statsHandler([
+        stat('dddddddd44', 50, 60, '2024-01-03T00:00:00Z', false),
+        stat('aaaaaaaa11', 10, 12, '2024-01-01T00:00:00Z'),
+      ]),
+    )
+    const { container } = renderHistory()
+    await screen.findByRole('table', { name: STATS })
+    expect(screen.getByText('Plan body not captured')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Compare plan dddddddd' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: 'Compare plan aaaaaaaa' })).toBeEnabled()
+    await expectNoA11yViolations(container)
+  })
+
+  it('UI-PLI-013 writes statistics and changes in Italian', async () => {
+    vi.useRealTimers()
+    await setServerLanguage('it')
+    await refreshLocale()
+    server.use(
+      plansHandler([plan(1, '2024-01-01T00:00:00Z', 'aaaaaaaa11')]),
+      statsHandler(
+        [stat('dddddddd44', 50, 60, '2024-01-03T00:00:00Z', false)],
+        [{ ts: '2024-01-02T10:00:00Z', from_plan_hash: 'aaaaaaaa11', to_plan_hash: 'dddddddd44' }],
+      ),
+    )
+    renderHistory()
+    expect(await screen.findByRole('table', { name: 'Statistiche per piano' })).toBeInTheDocument()
+    expect(screen.getByText('Corpo del piano non catturato')).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Cambi di piano' })).toHaveTextContent(
+      'Piano cambiato alle 2024-01-02 10:00:00 UTC: aaaaaaaa → dddddddd',
+    )
   })
 })

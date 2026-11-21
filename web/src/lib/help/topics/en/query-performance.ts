@@ -548,6 +548,41 @@ export const queryPerformanceTopic: HelpTopic = {
           ],
         },
         {
+          id: 'plan-stats',
+          title: 'Statistics per plan',
+          blocks: [
+            {
+              kind: 'text',
+              text: 'The page compares the plans of one statement, each identified by its shape fingerprint (`plan_hash`). With `auto_explain` on, every slow execution is a sample: the table {{ui:queries.planStats.entriesLabel}} groups the samples of the last seven days by plan, newest-seen first. Below it, one line per moment the plan changed: a sample whose plan differs from the sample before it in the same database. Tick two plans to compare them: the trees as in Plan comparison, plus their statistics side by side.',
+            },
+            {
+              kind: 'terms',
+              items: [
+                {
+                  term: '{{ui:queries.planStats.samples}}',
+                  meaning: 'How many executions `auto_explain` logged with this plan.',
+                },
+                {
+                  term: '{{ui:queries.planStats.avg}}, {{ui:queries.planStats.p95}}',
+                  meaning:
+                    'Average duration and the duration 95% of the executions stay under (`percentile_cont(0.95)`).',
+                  action:
+                    'After a plan change, a higher p95 on the new plan points at a regression; compare the two plans.',
+                },
+                {
+                  term: '{{ui:queries.planStats.firstSeen}}, {{ui:queries.planStats.lastSeen}}',
+                  meaning: 'The first and the last logged execution with this plan.',
+                },
+                {
+                  term: '{{ui:queries.planStats.noBody}}',
+                  meaning:
+                    'Samples exist but no plan tree was stored for this shape, so it cannot be ticked or compared.',
+                },
+              ],
+            },
+          ],
+        },
+        {
           id: 'plan-comparison',
           title: 'Plan comparison',
           blocks: [

@@ -250,6 +250,30 @@ export const queries: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     howToRead:
       'Confronta le durate nel tempo per una forma. Non salvati significa che l’agent non ha inviato i parametri (checks.logs.plan_parameters spento) o che potrebbero contenere una credenziale.',
   },
+  'queries.plan-stats': {
+    what: 'Per piano di questo statement: esecuzioni registrate da auto_explain, durata media e p95, prima e ultima volta visto, e quando il piano è cambiato.',
+    source: 'I campioni dei piani memorizzati dal server, raggruppati per piano.',
+    unit: 'esecuzioni; durata in ms',
+    window: 'Gli ultimi sette giorni.',
+    howToRead:
+      'I piani sono identificati dal loro hash di struttura. Una riga di cambio segna un’esecuzione registrata con un piano diverso dalla precedente. Spunta due piani per confrontarli.',
+  },
+  'queries.plan-stats-rows': {
+    what: 'Una riga per piano: esecuzioni, media, p95, prima e ultima volta visto.',
+    source: 'I campioni dei piani memorizzati dal server.',
+    unit: 'esecuzioni; durata in ms',
+    window: 'Gli ultimi sette giorni.',
+    howToRead:
+      'Un piano il cui corpo non è stato catturato ha campioni ma nessun albero memorizzato, quindi non può essere confrontato.',
+  },
+  'queries.plan-stats-compare': {
+    what: 'Le esecuzioni registrate dei due piani confrontati, affiancate.',
+    source: 'I campioni dei piani memorizzati dal server.',
+    unit: 'esecuzioni; durata in ms',
+    window: 'Gli ultimi sette giorni.',
+    howToRead:
+      'Media e p95 più bassi dopo un cambio indicano che il nuovo piano è più veloce per questo carico.',
+  },
   'queries.plan-comparison': {
     what: 'Le operazioni di due piani catturati affiancate, abbinate per posizione nell’albero, con ciò che è cambiato.',
     source:
