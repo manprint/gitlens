@@ -146,3 +146,6 @@ Gates: G-GO-FOCUS ./internal/server pass; TestINTPLI001 + TestINTAEX* + TestAEX0
 
 ## 2026-11-21 9.3/1 complete unit:9.3:1
 Gates: G-WEB-STATIC pass (tsc, eslint 2 pre-existing warnings, prettier); vitest queries 100, help+captions+i18n 160 pass; G-I18N rc=0; review: self-review (agent:opus) accepted; changes: usePlanStats + key; PlanStats.tsx, PlanCompare.tsx; PlanHistory wiring; en/it messages, captions, help subsection plan-stats; README Plan history + endpoint line; UI-PLI-009..013; notes: Review: has_plan false and unloaded captures cannot be ticked; change times use formatTimestamp (session zone, UI-PLI-010); no existing test changed. Decision A32.
+
+## 2026-11-21 P9/1 complete unit:P9:1
+Gates: G-GO-FULL rc=0; G-GO-INT rc=0 (TestINTPLI001, TestINTAEX002-005, TestINTRO001 pg15/pg18); G-API no diff; G-WEB-FULL rc=0 (237 files, 2096 tests, statements 92.54%, budget PASS); G-I18N rc=0 (9.3); review: self-review (agent:opus) accepted; changes: Phase 9 closure review; notes: Review: insight thresholds match the spec table and each has a positive and negative fixture; plan-only plans never yield jit/trigger; I-5 the stats endpoint is read-only, tenant and instance scoped; README Plan history and help plan-stats describe what is compared (plans of one statement by structure hash) and every figure.
