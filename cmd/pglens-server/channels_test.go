@@ -63,8 +63,8 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 		names = append(names, c.Name())
 		configured = append(configured, notify.Configured(c))
 	}
-	require.Equal(t, []string{"slack", "webhook", "google_chat", "teams", "pagerduty"}, names)
-	require.Equal(t, []bool{false, true, false, false, false}, configured)
+	require.Equal(t, []string{"slack", "webhook", "google_chat", "teams", "pagerduty", "email"}, names)
+	require.Equal(t, []bool{false, true, false, false, false, false}, configured)
 
 	r := chi.NewRouter()
 	api.RegisterRoutes(r)
@@ -88,7 +88,8 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 		{"kind":"webhook","configured":true,"source":"env","host":"127.0.0.1","language":null},
 		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"teams","configured":false,"source":"env","host":null,"language":null},
-		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"email","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 }
 

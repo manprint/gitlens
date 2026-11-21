@@ -30,7 +30,7 @@ func envAPI(t *testing.T, pool *pgxpool.Pool, cfg AlertConfig) *API {
 	channels := []notify.Channel{}
 	for _, k := range notificationKinds {
 		if address := k.url(cfg); address != "" {
-			channels = append(channels, NewNotificationChannel(k.Kind, address))
+			channels = append(channels, NewNotificationChannel(cfg, k.Kind, address))
 		}
 	}
 	api := NewAPI(pool)

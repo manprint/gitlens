@@ -53,3 +53,6 @@ Gates: G-GO-FOCUS notify/server/cmd (race, shuffle); G-GO-INT TestINTNCH001 + NO
 
 ## 2026-11-21 3.2/1 complete unit:3.2:1
 Gates: G-GO-FOCUS notify/server/cmd (race, shuffle); lint 0 issues; review: self-review (agent:opus) accepted; changes: notify.NewPagerDuty (R1 Events API v2, endpoint package variable, key redacted from errors), ValidatePagerDutyKey; kind pagerduty with validate and host; PGLENS_PAGERDUTY_ROUTING_KEY(_FILE), invalid key fails start; listings gain the pagerduty row; notes: resolve is Phase "resolve" (notifier); a test message triggers without dedup_key
+
+## 2026-11-21 3.3/1 complete unit:3.3:1
+Gates: G-GO-FOCUS (notify, alert, server, cmd/pglens-server; race, shuffle) green; lint 0; G-GO-INT TestINTNCH00[12] + NOTIINT green; review: self-review (agent:opus) accepted; changes: notify email.go (SMTPSettings, NewEmail, buildEmail, net/smtp transport with injectable dial); server SMTPConfig + LoadSMTPConfig; kind email (validate 1-20 recipients, host N recipients, available smtp_not_configured); NewNotificationChannel takes cfg; notes: A8; tests NCH020-024, INTNCH002

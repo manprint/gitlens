@@ -112,7 +112,8 @@ func TestNOTI001_EnvConfiguredChannelsShowHostOnly(t *testing.T) {
 		{"kind":"webhook","configured":true,"source":"env","host":"alerts.canary.example","language":null},
 		{"kind":"google_chat","configured":true,"source":"env","host":"chat.googleapis.com","language":null},
 		{"kind":"teams","configured":false,"source":"env","host":null,"language":null},
-		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"email","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 
 	// The host is the host name only: no port, user information or path.
@@ -135,7 +136,8 @@ func TestNOTI002_UnconfiguredChannels(t *testing.T) {
 		{"kind":"webhook","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"teams","configured":false,"source":"env","host":null,"language":null},
-		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"email","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 
 	api := NewAPI(nil)
@@ -335,7 +337,7 @@ func TestNOTI004_NoAddressInResponsesOrLogs(t *testing.T) {
 
 	// Unconfigured and unknown kinds.
 	record(NewAPI(nil), http.MethodPost, "/api/v1/notification-channels/google_chat/test")
-	record(ok, http.MethodPost, "/api/v1/notification-channels/email/test")
+	record(ok, http.MethodPost, "/api/v1/notification-channels/sms/test")
 
 	// The real channels on an unreachable address: net/http reports a
 	// *url.Error that quotes the address with its password replaced, after
@@ -389,7 +391,7 @@ func TestNOTI004_NoAddressInResponsesOrLogs(t *testing.T) {
 func TestNOTI005_UnknownKind(t *testing.T) {
 	t.Parallel()
 	api, stubs := stubChannels(nil)
-	for _, kind := range []string{"email", "Slack", "google-chat", "googlechat", "webhooks"} {
+	for _, kind := range []string{"sms", "Slack", "google-chat", "googlechat", "webhooks"} {
 		rec := retentionRequest(t, api, http.MethodPost, "/api/v1/notification-channels/"+kind+"/test", "")
 		requireAPIError(t, rec, http.StatusNotFound, "unknown channel")
 	}

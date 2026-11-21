@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"net/mail"
 	"os"
 	"strconv"
 	"strings"
@@ -22,7 +23,12 @@ type AlertConfig struct {
 	TeamsURL string
 	// PagerDutyRoutingKey is the Events API v2 key of a PagerDuty service.
 	PagerDutyRoutingKey string
+	// SMTP is the mail server of the email channel; an empty Host disables it.
+	SMTP SMTPConfig
 }
+
+// SMTPConfig is the mail server of the email channel (PGLENS_SMTP_*).
+type SMTPConfig = notify.SMTPSettings
 
 type UIConfig struct {
 	Enabled      bool
@@ -142,6 +148,63 @@ func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, 
 		if err := notify.ValidatePagerDutyKey(c.PagerDutyRoutingKey); err != nil {
 			return AlertConfig{}, fmt.Errorf("invalid PGLENS_PAGERDUTY_ROUTING_KEY: %w", err)
 		}
+	}
+	smtpCfg, err := LoadSMTPConfig(getenv, readFile)
+	if err != nil {
+		return AlertConfig{}, err
+	}
+	c.SMTP = smtpCfg
+	return c, nil
+}
+
+// LoadSMTPConfig reads the mail server of the email channel. Without
+// PGLENS_SMTP_HOST the channel is off and nothing else is read. Its errors
+// never quote the password.
+func LoadSMTPConfig(getenv func(string) string, readFile func(string) ([]byte, error)) (SMTPConfig, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+	c := SMTPConfig{Host: strings.TrimSpace(getenv("PGLENS_SMTP_HOST"))}
+	if c.Host == "" {
+		return SMTPConfig{}, nil
+	}
+	c.Port = 587
+	if raw := strings.TrimSpace(getenv("PGLENS_SMTP_PORT")); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil || port < 1 || port > 65535 {
+			return SMTPConfig{}, fmt.Errorf("invalid PGLENS_SMTP_PORT %q: must be 1 to 65535", raw)
+		}
+		c.Port = port
+	}
+	c.Username = strings.TrimSpace(getenv("PGLENS_SMTP_USERNAME"))
+	c.Password = strings.TrimRight(getenv("PGLENS_SMTP_PASSWORD"), "\r\n")
+	if p := strings.TrimSpace(getenv("PGLENS_SMTP_PASSWORD_FILE")); p != "" {
+		b, err := readFile(p)
+		if err != nil {
+			return SMTPConfig{}, fmt.Errorf("read SMTP password file: %w", err)
+		}
+		c.Password = strings.TrimSpace(string(b))
+	}
+	if (c.Username == "") != (c.Password == "") {
+		return SMTPConfig{}, fmt.Errorf("PGLENS_SMTP_USERNAME and PGLENS_SMTP_PASSWORD must be set together")
+	}
+	c.From = strings.TrimSpace(getenv("PGLENS_SMTP_FROM"))
+	if c.From == "" {
+		return SMTPConfig{}, fmt.Errorf("PGLENS_SMTP_FROM is required when PGLENS_SMTP_HOST is set")
+	}
+	if _, err := mail.ParseAddress(c.From); err != nil {
+		return SMTPConfig{}, fmt.Errorf("invalid PGLENS_SMTP_FROM: one address is required")
+	}
+	c.TLS = strings.ToLower(strings.TrimSpace(getenv("PGLENS_SMTP_TLS")))
+	switch c.TLS {
+	case "":
+		c.TLS = notify.SMTPStartTLS
+	case notify.SMTPStartTLS, notify.SMTPTLS, notify.SMTPNoTLS:
+	default:
+		return SMTPConfig{}, fmt.Errorf("invalid PGLENS_SMTP_TLS %q: must be starttls, tls or none", c.TLS)
 	}
 	return c, nil
 }

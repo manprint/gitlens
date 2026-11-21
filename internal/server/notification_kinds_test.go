@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -110,4 +111,105 @@ func TestNCH014_SetPagerDuty(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, canaryPagerDutyKey, cfg.PagerDutyRoutingKey)
+}
+
+const canarySMTPPassword = "smtpPw0601canary"
+
+func smtpEnv(values map[string]string) func(string) string {
+	return func(k string) string { return values[k] }
+}
+
+// NCH-023: each invalid SMTP environment stops the start, without quoting the
+// password; no host means the channel is off.
+func TestNCH023_LoadSMTPConfig(t *testing.T) {
+	base := map[string]string{"PGLENS_SMTP_HOST": "mail.canary.example", "PGLENS_SMTP_FROM": "pglens <alerts@canary.example>"}
+	with := func(k, v string) map[string]string {
+		out := map[string]string{}
+		for key, value := range base {
+			out[key] = value
+		}
+		out[k] = v
+		return out
+	}
+	for name, env := range map[string]map[string]string{
+		"missing from":      with("PGLENS_SMTP_FROM", ""),
+		"from not address":  with("PGLENS_SMTP_FROM", "not an address"),
+		"username only":     with("PGLENS_SMTP_USERNAME", "user"),
+		"password only":     with("PGLENS_SMTP_PASSWORD", canarySMTPPassword),
+		"port zero":         with("PGLENS_SMTP_PORT", "0"),
+		"port too high":     with("PGLENS_SMTP_PORT", "65536"),
+		"port not a number": with("PGLENS_SMTP_PORT", "smtp"),
+		"tls unknown":       with("PGLENS_SMTP_TLS", "ssl"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadSMTPConfig(smtpEnv(env), nil)
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), canarySMTPPassword)
+			_, err = LoadAlertConfig(smtpEnv(env), nil)
+			require.Error(t, err)
+		})
+	}
+
+	off, err := LoadSMTPConfig(smtpEnv(map[string]string{"PGLENS_SMTP_FROM": "a@b.example"}), nil)
+	require.NoError(t, err)
+	require.Equal(t, SMTPConfig{}, off)
+
+	cfg, err := LoadSMTPConfig(smtpEnv(base), nil)
+	require.NoError(t, err)
+	require.Equal(t, SMTPConfig{Host: "mail.canary.example", Port: 587, From: "pglens <alerts@canary.example>", TLS: "starttls"}, cfg)
+
+	full := with("PGLENS_SMTP_PORT", "465")
+	full["PGLENS_SMTP_TLS"] = "TLS"
+	full["PGLENS_SMTP_USERNAME"] = "user"
+	full["PGLENS_SMTP_PASSWORD_FILE"] = "/run/secrets/smtp"
+	cfg, err = LoadSMTPConfig(smtpEnv(full), func(string) ([]byte, error) { return []byte(canarySMTPPassword + "\n"), nil })
+	require.NoError(t, err)
+	require.Equal(t, SMTPConfig{Host: "mail.canary.example", Port: 465, Username: "user", Password: canarySMTPPassword, From: "pglens <alerts@canary.example>", TLS: "tls"}, cfg)
+}
+
+// NCH-024 (I-7): without a mail server the email kind is a 409
+// smtp_not_configured; with one, 21 recipients are a 400 and two are stored
+// and listed as "2 recipients". Neither the recipients nor the password
+// appear in a response or the log.
+func TestNCH024_SetEmail(t *testing.T) {
+	logged := captureLog(t)
+	two := "Ops <ops0601@canary.example>, dba0602@canary.example"
+	bodies := []string{}
+
+	off, offStore := storedAPI(AlertConfig{})
+	rec := retentionRequest(t, off, http.MethodPut, "/api/v1/notification-channels/email", urlBody(t, two))
+	bodies = append(bodies, rec.Body.String())
+	requireAPIError(t, rec, http.StatusConflict, "smtp_not_configured")
+	_, ok := offStore.stored("email")
+	require.False(t, ok)
+
+	smtpCfg := SMTPConfig{Host: "mail.canary.example", Port: 587, Username: "user", Password: canarySMTPPassword, From: "alerts@canary.example", TLS: "starttls"}
+	api, st := storedAPI(AlertConfig{SMTP: smtpCfg})
+	require.False(t, notify.Configured(api.notifications.slots["email"]))
+	many := make([]string, 21)
+	for i := range many {
+		many[i] = "ops0603@canary.example"
+	}
+	for _, bad := range []string{strings.Join(many, ", "), "", "not an address", "ops0604@canary.example\r\nBcc: x@canary.example"} {
+		rec = retentionRequest(t, api, http.MethodPut, "/api/v1/notification-channels/email", urlBody(t, bad))
+		bodies = append(bodies, rec.Body.String())
+		requireAPIError(t, rec, http.StatusBadRequest, "invalid url")
+		require.Contains(t, rec.Body.String(), "between 1 and 20 recipients are required")
+	}
+	_, ok = st.stored("email")
+	require.False(t, ok)
+
+	rec = retentionRequest(t, api, http.MethodPut, "/api/v1/notification-channels/email", urlBody(t, two))
+	bodies = append(bodies, rec.Body.String())
+	require.Equal(t, notificationChannelJSON{Kind: "email", Configured: true, Source: "ui", Host: strPtr("2 recipients")}, decodeChannelRow(t, rec))
+	stored, ok := st.stored("email")
+	require.True(t, ok)
+	require.Equal(t, two, stored)
+	require.True(t, notify.Configured(api.notifications.slots["email"]))
+	listing := retentionRequest(t, api, http.MethodGet, "/api/v1/notification-channels", "")
+	bodies = append(bodies, listing.Body.String())
+	require.Equal(t, strPtr("2 recipients"), rowOf(t, api, "email").Host)
+	require.Contains(t, logged.String(), "; host 2 recipients")
+	require.Equal(t, "1 recipient", emailRecipientsHost("ops@canary.example"))
+	requireNoSecret(t, []string{canarySMTPPassword, "ops0601", "dba0602", "ops0603", "ops0604"}, append(bodies, logged.String())...)
 }

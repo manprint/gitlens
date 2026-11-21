@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:36 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:44 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 1fd5aacbb341350ff706eb8561abc88a3b161e82 + tree f0721b85b69f7a989b4a6c579ba0568335496c3e · branch main · last WIP tree none
-- Last closure: unit:3.2:1
-- Next: open 3.3 · next eligible: 3.3
+- Base: HEAD c1ee6d20606e4efb54506afd8df75b06934383fc + tree 660275af7dd1e07bc2f16b4127df3acde5a3a289 · branch main · last WIP tree none
+- Last closure: unit:3.3:1
+- Next: open 3.4 · next eligible: 3.4
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -62,6 +62,7 @@ none
 - A5 (autonomous, 2026-11-21, unit 2.5): the console had no group-by control, only the wait drill path. Options: add the dimensions as drill levels; one Group by control with the wait drill path as one choice plus the three dimensions. Chosen: the control; selecting a dimension value sets its filter (chip, URL `usename=`/`client_addr=`/`application_name=`) and returns to wait event types, so the drill continues on those sessions. Dimension groups always stack (wait-group cards do not apply).
 - A6 (autonomous, 2026-11-21, unit 3.1): R2 asks for "the same localized texts as Google Chat", which has no localized fact titles. Chosen: with a detail the Teams title and facts are the detail's (already in the channel's language), its sections and footer the monospace block; without one the title is the upper-case severity and the facts are the English Cluster/Instance/Database/Severity/Time, as the chat channels' fallback. Empty facts and an empty FactSet are left out.
 - A7 (autonomous, 2026-11-21, unit 3.1): the database refused the new kinds (check constraint of 0028/0031) and the plan had no migration in phase 3. Chosen: migration 0034_notification_kinds widens both checks to the six kinds at once (test NCH-MIG-001). Existing tests that list every kind gain the new rows; tests that used `teams` or `email` as an unknown kind now use `sms`; no other assertion changed.
+- A8 (autonomous, 2026-11-21, unit 3.3): the email kind needs the SMTP settings, but the kind hooks took only the address. Chosen: `AlertConfig.SMTP` (`SMTPConfig` = `notify.SMTPSettings`) filled by `LoadAlertConfig` through `LoadSMTPConfig(getenv, readFile)`, which also reads `PGLENS_SMTP_PASSWORD_FILE`; `build` and `available` take the config, and `NewNotificationChannel(cfg, kind, address)` gains it. main needs no change. Body = the plain text of the Slack message (summary + context line, or detail title, fields, sections, footer). The email channel removes its recipients and password from its own errors. Listings gain an email row; tests that used `email` as an unknown kind now use `sms`.
 
 ## 9. Blockers
 none
@@ -78,7 +79,7 @@ none
 | 3 Notification channels | IN_PROGRESS | 1 | 3.1–3.4 | — |
 | · 3.1 Kind hooks and the Teams channel | DONE | 1 | — | unit:3.1:1 |
 | · 3.2 PagerDuty channel | DONE | 1 | — | unit:3.2:1 |
-| · 3.3 Email channel | TODO | 1 | — | — |
+| · 3.3 Email channel | DONE | 1 | — | unit:3.3:1 |
 | · 3.4 OpenAPI, console, help, README | TODO | 1 | — | — |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |

@@ -98,7 +98,7 @@ func storedAPI(cfg AlertConfig) (*API, *stubNotificationStore) {
 	channels := []notify.Channel{}
 	for _, k := range notificationKinds {
 		if address := k.url(cfg); address != "" {
-			channels = append(channels, NewNotificationChannel(k.Kind, address))
+			channels = append(channels, NewNotificationChannel(cfg, k.Kind, address))
 		}
 	}
 	api := NewAPI(nil)
@@ -170,7 +170,8 @@ func TestNOTI006_SetValidURL(t *testing.T) {
 		{"kind":"webhook","configured":true,"source":"ui","host":"hooks.stored.example","language":null},
 		{"kind":"google_chat","configured":true,"source":"ui","host":"chat.googleapis.com","language":null},
 		{"kind":"teams","configured":false,"source":"env","host":null,"language":null},
-		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"email","configured":false,"source":"env","host":null,"language":null}
 	]`, listing.Body.String())
 
 	// The store is down: nothing changes, and the error that quotes the
@@ -320,7 +321,7 @@ func TestNOTI008_DeleteFallsBackToTheEnvironment(t *testing.T) {
 func TestNOTI009_UnknownKind(t *testing.T) {
 	t.Parallel()
 	api, st := storedAPI(AlertConfig{})
-	for _, kind := range []string{"email", "Slack", "google-chat", "googlechat", "webhooks"} {
+	for _, kind := range []string{"sms", "Slack", "google-chat", "googlechat", "webhooks"} {
 		rec := retentionRequest(t, api, http.MethodPut, "/api/v1/notification-channels/"+kind, urlBody(t, "https://hooks.example/x"))
 		requireAPIError(t, rec, http.StatusNotFound, "unknown channel")
 		rec = retentionRequest(t, api, http.MethodDelete, "/api/v1/notification-channels/"+kind, "")
@@ -475,7 +476,7 @@ func TestNOTI011_RedirectIsNotFollowed(t *testing.T) {
 	require.False(t, result.Delivered)
 	require.Contains(t, result.Error, "HTTP 307")
 
-	envErr := NewNotificationChannel("webhook", redirector.URL+"/canaryRedirect0402").Send(context.Background(), notify.Message{RuleID: "r"})
+	envErr := NewNotificationChannel(AlertConfig{}, "webhook", redirector.URL+"/canaryRedirect0402").Send(context.Background(), notify.Message{RuleID: "r"})
 	require.Error(t, envErr)
 	require.Contains(t, envErr.Error(), "HTTP 307")
 	require.Empty(t, target.received(), "the redirect target is never posted to")

@@ -20,7 +20,7 @@ func buildChannels(cfg server.AlertConfig) []notify.Channel {
 		{"pagerduty", cfg.PagerDutyRoutingKey},
 	} {
 		if kind.address != "" {
-			channels = append(channels, server.NewNotificationChannel(kind.name, kind.address))
+			channels = append(channels, server.NewNotificationChannel(cfg, kind.name, kind.address))
 		}
 	}
 	return channels

@@ -6,9 +6,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,7 +41,7 @@ type notificationKind struct {
 	// url reads the channel's webhook address from the alert configuration.
 	url func(AlertConfig) string
 	// build makes the channel of an address, as the alert path does.
-	build func(address string) notify.Channel
+	build func(cfg AlertConfig, address string) notify.Channel
 	// validate answers why an address set from the console is refused; nil
 	// means validateWebhookURL. Its error never quotes the address.
 	validate func(address string) error
@@ -48,7 +50,7 @@ type notificationKind struct {
 	host func(address string) string
 	// available answers why the kind cannot be set now; the error is the
 	// API's error code of a 409. nil means always available.
-	available func() error
+	available func(cfg AlertConfig) error
 }
 
 // problem is why address is refused for the kind, "" when it is accepted.
@@ -85,43 +87,110 @@ func (k notificationKind) logHost(address string) string {
 }
 
 // unavailable is why the kind cannot be set now, nil when it can.
-func (k notificationKind) unavailable() error {
+func (k notificationKind) unavailable(cfg AlertConfig) error {
 	if k.available == nil {
 		return nil
 	}
-	return k.available()
+	return k.available(cfg)
 }
 
 // notificationKinds is the whitelist of the kinds, in the order the API lists
 // them (N5).
 var notificationKinds = []notificationKind{
 	{
-		Kind:  "slack",
-		url:   func(c AlertConfig) string { return c.SlackURL },
-		build: func(address string) notify.Channel { return notify.NewSlack(address, notificationHTTPClient) },
+		Kind: "slack",
+		url:  func(c AlertConfig) string { return c.SlackURL },
+		build: func(_ AlertConfig, address string) notify.Channel {
+			return notify.NewSlack(address, notificationHTTPClient)
+		},
 	},
 	{
-		Kind:  "webhook",
-		url:   func(c AlertConfig) string { return c.WebhookURL },
-		build: func(address string) notify.Channel { return notify.NewWebhook(address, notificationHTTPClient) },
+		Kind: "webhook",
+		url:  func(c AlertConfig) string { return c.WebhookURL },
+		build: func(_ AlertConfig, address string) notify.Channel {
+			return notify.NewWebhook(address, notificationHTTPClient)
+		},
 	},
 	{
-		Kind:  "google_chat",
-		url:   func(c AlertConfig) string { return c.GoogleChatURL },
-		build: func(address string) notify.Channel { return notify.NewGoogleChat(address, notificationHTTPClient) },
+		Kind: "google_chat",
+		url:  func(c AlertConfig) string { return c.GoogleChatURL },
+		build: func(_ AlertConfig, address string) notify.Channel {
+			return notify.NewGoogleChat(address, notificationHTTPClient)
+		},
 	},
 	{
-		Kind:  "teams",
-		url:   func(c AlertConfig) string { return c.TeamsURL },
-		build: func(address string) notify.Channel { return notify.NewTeams(address, notificationHTTPClient) },
+		Kind: "teams",
+		url:  func(c AlertConfig) string { return c.TeamsURL },
+		build: func(_ AlertConfig, address string) notify.Channel {
+			return notify.NewTeams(address, notificationHTTPClient)
+		},
 	},
 	{
-		Kind:     "pagerduty",
-		url:      func(c AlertConfig) string { return c.PagerDutyRoutingKey },
-		build:    func(key string) notify.Channel { return notify.NewPagerDuty(key, notificationHTTPClient) },
+		Kind: "pagerduty",
+		url:  func(c AlertConfig) string { return c.PagerDutyRoutingKey },
+		build: func(_ AlertConfig, key string) notify.Channel {
+			return notify.NewPagerDuty(key, notificationHTTPClient)
+		},
 		validate: notify.ValidatePagerDutyKey,
 		host:     func(string) string { return notify.PagerDutyHost },
 	},
+	{
+		// No environment variable sets the recipients: they are set from the
+		// console once the server has a mail server.
+		Kind:      "email",
+		url:       func(AlertConfig) string { return "" },
+		build:     func(c AlertConfig, list string) notify.Channel { return notify.NewEmail(c.SMTP, emailRecipients(list)) },
+		validate:  validateEmailRecipients,
+		host:      emailRecipientsHost,
+		available: smtpAvailable,
+	},
+}
+
+// maxEmailRecipients bounds the recipient list of the email channel.
+const maxEmailRecipients = 20
+
+var errEmailRecipients = errors.New("between 1 and 20 recipients are required")
+
+// emailRecipients is the parsed recipient list, nil when it does not parse.
+func emailRecipients(list string) []string {
+	addresses, err := mail.ParseAddressList(list)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, len(addresses))
+	for i, a := range addresses {
+		out[i] = a.String()
+	}
+	return out
+}
+
+// validateEmailRecipients accepts 1 to 20 comma-separated addresses; the
+// error never quotes them.
+func validateEmailRecipients(list string) error {
+	if strings.ContainsAny(list, "\r\n") {
+		return errEmailRecipients
+	}
+	if n := len(emailRecipients(list)); n < 1 || n > maxEmailRecipients {
+		return errEmailRecipients
+	}
+	return nil
+}
+
+// emailRecipientsHost is what the API shows of a recipient list: its size.
+func emailRecipientsHost(list string) string {
+	n := len(emailRecipients(list))
+	if n == 1 {
+		return "1 recipient"
+	}
+	return strconv.Itoa(n) + " recipients"
+}
+
+// smtpAvailable refuses the email channel while no mail server is configured.
+func smtpAvailable(c AlertConfig) error {
+	if c.SMTP.Host == "" {
+		return errors.New("smtp_not_configured")
+	}
+	return nil
 }
 
 // notificationKindNames lists the kinds for an error detail.
@@ -146,12 +215,12 @@ var notificationHTTPClient = &http.Client{
 // NewNotificationChannel builds the delivery channel of kind for address, with
 // the constructors and HTTP client the alert path uses; nil for an unknown
 // kind. A channel stored from the console is built the same way.
-func NewNotificationChannel(kind, address string) notify.Channel {
+func NewNotificationChannel(cfg AlertConfig, kind, address string) notify.Channel {
 	k, ok := lookupNotificationKind(kind)
 	if !ok {
 		return nil
 	}
-	return k.build(address)
+	return k.build(cfg, address)
 }
 
 func lookupNotificationKind(kind string) (notificationKind, bool) {
@@ -304,7 +373,7 @@ func (a *API) LoadNotificationChannels(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		if err := k.unavailable(); err != nil {
+		if err := k.unavailable(n.cfg); err != nil {
 			log.Printf("notifications: ignoring the address of %s stored from the console: %v", k.Kind, err)
 			continue
 		}
@@ -337,7 +406,7 @@ func (n *notificationChannels) apply(k notificationKind, address string) {
 	}
 	n.stored[k.Kind] = address
 	n.mu.Unlock()
-	n.slots[k.Kind].Store(n.redacting(k.build(address)))
+	n.slots[k.Kind].Store(n.redacting(k.build(n.cfg, address)))
 }
 
 // unapply forgets the kind's stored address and puts the environment's channel
@@ -704,7 +773,7 @@ func (a *API) handleSetNotificationChannel(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid url", "url is required and must be a string")
 		return
 	}
-	if err := k.unavailable(); err != nil {
+	if err := k.unavailable(a.notificationState().cfg); err != nil {
 		writeError(w, http.StatusConflict, err.Error(), "")
 		return
 	}
