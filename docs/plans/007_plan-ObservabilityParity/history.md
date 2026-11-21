@@ -95,3 +95,6 @@ Gates: G-GO-FOCUS ./internal/pglog/ (race, shuffle) ok; lint 0 issues; review: s
 
 ## 2026-11-21 6.2/1 complete unit:6.2:1
 Gates: G-GO-FOCUS ./internal/pglog/ ok; lint 0 issues; review: self-review (agent:opus) accepted; changes: NEW classify.go (Classify, Classes, Shipped, class constants), classify_test.go (PGL-006..008); notes: self-review: SQLSTATE rules first (57014 split by message), then English message rules in spec order, then severity; Classes derived from the rule tables so the test catches a missing case
+
+## 2026-11-21 6.3/1 complete unit:6.3:1
+Gates: G-GO-FOCUS ./internal/pglog/ ok (PGL-009..014); G-GO-INT TestINTPGL001 pass on PG 18.6; lint (integration tag) 0 issues; review: self-review (agent:opus) accepted; changes: NEW internal/pglog source.go (Source, Position, Chunk, Settle, Advance), source_file.go, source_sql.go, position.go, source_test.go, source_sql_integration_test.go; NEW test/pgtest/logging.go (StartLogging); notes: design note A19 approved before code; self-review: names with / or .. refused in both sources, SQL permission error 42501 -> ErrLogReadDenied, positions via temp file + rename

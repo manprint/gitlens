@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 10:58 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 10:59 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 17ecd5027c80a8a7ba1019a21143ffda780d9bc4 + tree 329058daf71c01ae6192f59d63993c66d29c2be6 · branch main · last WIP tree none
-- Last closure: unit:6.2:1
-- Next: open 6.3 · next eligible: 6.3
+- Base: HEAD 4149c5337ddb0f117412b4fa40ab935aa4cf7eda + tree ab3bfb0ca083f34070666144f51f4146be19405b · branch main · last WIP tree none
+- Last closure: unit:6.3:1
+- Next: open 6.4 · next eligible: 6.4
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -73,6 +73,7 @@ none
 - A16 (5.3): pre-existing failure TestINTADV008 (since migration 0030, plan 006): `ensureFindingTables` lacked `findings.message`; added `ALTER TABLE … ADD COLUMN IF NOT EXISTS message jsonb` so G-GO-INT can be green.
 - A17 (5.4): the rollup note and the disabled-control tooltip are shared texts (`shell.rollup.note`, `shell.rollup.dropped`) rendered by one `RollupNote` component instead of per-area keys; rollup rows form a second DataTable (`settings.retention-rollup-table`, captions en+it). The note shows on Queries list, Slowest queries, Wait events (page and top list) and as the subtitle of Overview workload cards; Overview metric charts read raw only (A15) and show none.
 - A18 (P5): `golangci-lint --build-tags=integration` found one pre-existing errcheck (plan 006, `internal/agent/explain_guard_integration_test.go:866`, `defer app.Close(ctx)`). P5 edits no tests, so the one-line fix lands as its own chore commit outside the unit; not a phase-5 defect.
+- A19 (6.3 design note, approved by agent-1): Advance cases — first run (no saved position): next = end of current file, nothing read; same file grown: read [offset, size); truncated (size < offset): read from 0; rotated (saved file != current): rest of the old file (if it still exists), then the new one from 0, in budget order; file gone: new file from 0; backlog (sum of unread spans) > 16 × budget: nothing read, next = end of current file, skipped = backlog. Reads stop at the budget, next = where they stopped. Contract extension: Advance returns `[]Chunk{File, Offset, Data, Ended}` instead of `[][]byte`, and `Settle(next, lastChunk, consumed)` moves the position back to the end of the last complete record of a file still being written (a half record at the end of a rotated-away file is dropped). `NewSQLSource` takes a driver-free `Querier{QueryRow}` (D9: pglog imports no driver); the agent adapts pgx. Integration helper `pgtest.StartLogging` (collector on, `log_directory=log`, RoleT0 as plain pg_monitor). Verified on PG 18.6: pg_monitor already executes `pg_current_logfile` and `pg_ls_logdir`; only `pg_read_binary_file` needs the grant.
 
 ## 9. Blockers
 none
@@ -94,7 +95,7 @@ none
 | 6 Log ingest | IN_PROGRESS | 1 | 6.1–6.6 | — |
 | · 6.1 | DONE | 1 | — | unit:6.1:1 |
 | · 6.2 | DONE | 1 | — | unit:6.2:1 |
-| · 6.3 | TODO | 1 | — | — |
+| · 6.3 | DONE | 1 | — | unit:6.3:1 |
 | · 6.4 | TODO | 1 | — | — |
 | · 6.5 | TODO | 1 | — | — |
 | · 6.6 | TODO | 1 | — | — |
