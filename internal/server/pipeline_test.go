@@ -1195,3 +1195,22 @@ func TestPresentRelations_SkippedTablesIsNotARelation(t *testing.T) {
 	})
 	require.Equal(t, []store.RelationKey{{Schema: "public", Relation: "t", Index: "t_idx"}}, keys)
 }
+
+// ASH-D-008: buildASHRow reads the three dimension labels; without them (an
+// older agent) the fields are ''.
+func TestASHD008_BuildASHRowDimensions(t *testing.T) {
+	inst := uuid.New()
+	now := time.Now()
+	m := wire.Metric{Name: "ash_samples", Value: 4, Labels: map[string]string{
+		"wait_event_type": "CPU", "wait_event": "CPU", "state": "active",
+		"usename": "alice", "client_addr": "10.0.0.7", "application_name": "shop",
+	}}
+	row := buildASHRow(now, "default", 1, inst, "postgres", m, "ash")
+	require.Equal(t, []string{"alice", "10.0.0.7", "shop"}, []string{row.Usename, row.ClientAddr, row.ApplicationName})
+
+	delete(m.Labels, "usename")
+	delete(m.Labels, "client_addr")
+	delete(m.Labels, "application_name")
+	row = buildASHRow(now, "default", 1, inst, "postgres", m, "ash")
+	require.Empty(t, row.Usename+row.ClientAddr+row.ApplicationName)
+}

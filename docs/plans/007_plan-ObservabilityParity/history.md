@@ -32,3 +32,6 @@ Gates: G-GO-FOCUS ./internal/ash/ TestASHD001/002/003 pass; ./internal/ash ./cmd
 
 ## 2026-11-21 2.2/1 complete unit:2.2:1
 Gates: G-GO-FOCUS ./cmd/pglens-agent ./internal/agent TestASHD004-007 pass; both packages -race pass; make lint 0 issues; review: self-review (agent:opus) accepted; changes: CheckConfig.Dimensions + ASHDimensions(); validation (unknown name, non-ash key); ashRowFilter blanks off dimensions before Add; ashWindowToMetrics adds non-empty labels; README + deploy/agent.example.yaml; notes: self-review agent:opus: unknown-dimension error text exact (no validation: prefix, per contract)
+
+## 2026-11-21 2.3/1 complete unit:2.3:1
+Gates: G-GO-FOCUS ./internal/server TestASHD008 pass; server+store -race pass; G-GO-INT TestINTASHD002/003 pass (TimescaleDB 2.31); review: self-review (agent:opus) accepted; changes: migration 0033_ash_dimensions.sql (as designed); ASHRow + both writers (batch, temp-table copy) carry usename, client_addr, application_name; buildASHRow reads labels, missing = ''; notes: self-review agent:opus: migration reviewed before run; R7 exercised live (0033 applied over a compressed chunk, TestINTASHD003); ON CONFLICT DO NOTHING kept

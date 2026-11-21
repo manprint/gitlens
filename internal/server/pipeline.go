@@ -1680,6 +1680,10 @@ func buildASHRow(ts time.Time, tenantID string, clusterID int64, instanceID uuid
 		Samples:       samples,
 		WindowSeconds: windowSec,
 		WindowTicks:   windowTicks,
+		// A missing label (old agent, unknown value, dimension off) is ''.
+		Usename:         m.Labels["usename"],
+		ClientAddr:      m.Labels["client_addr"],
+		ApplicationName: m.Labels["application_name"],
 	}
 }
 
