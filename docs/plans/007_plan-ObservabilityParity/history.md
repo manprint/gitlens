@@ -41,3 +41,6 @@ Gates: G-GO-FOCUS (ASH-D-009..011, server/ash/store/cmd), G-GO-INT TestINTASHD00
 
 ## 2026-11-21 2.5/1 complete unit:2.5:1
 Gates: G-WEB-STATIC (make web-typecheck web-lint), G-WEB-UNIT (features/ash, lib, api, i18n: 728 tests), UI-ASHD-001..004; review: self-review (agent:opus) accepted; changes: AshPage Group by control + filter chips; AshBreakdown dimension groups ((unknown) <-> -); lib/ash dimension helpers; query keys carry filters; captions ash.breakdown-dimension/ash.stack-dimension en+it; help wait-events#session-dimensions en+it; README; notes: A5 recorded
+
+## 2026-11-21 2.5/2 complete unit:2.5:2
+Gates: G-WEB-UNIT testIds + ash 8 files 64 tests; prettier; review: self-review (agent:opus) accepted; changes: two test titles lose their UI-ASHD ID so each ID owns one title; notes: attempt 2 after P2 G-WEB-FULL failure

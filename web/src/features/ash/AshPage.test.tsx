@@ -714,7 +714,7 @@ describe('AshPage session dimensions', () => {
     expect(screen.getByText('User: (unknown)')).toBeInTheDocument()
   })
 
-  it('UI-ASHD-003 the session filters reach the top queries too', () => {
+  it('the session filters of UI-ASHD-003 reach the top queries too', () => {
     renderAsh(
       '/instances/instance-1/ash?range=1h&group=queryid&client_addr=10.0.0.1',
       ashQueryIdResponse,

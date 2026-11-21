@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:04 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:16 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,8 +10,8 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 7b2e5647b55a3feaaad27e76894a1db0a9d389f8 + tree 70847adbf49a3f1fbc61fda85766a6d941b6ea1c · branch main · last WIP tree none
-- Last closure: unit:2.5:1
+- Base: HEAD f437ab5a9be6229abf313ddaa2e0ad4af857eb39 + tree 57114c65b8520b14d8f48397677a20edf747276c · branch main · last WIP tree none
+- Last closure: unit:2.5:2
 - Next: open P2 · next eligible: P2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
@@ -51,7 +51,7 @@ none
 none
 
 ## 7. Open-phase evidence
-none
+- P2 attempt 1 FAILED: G-WEB-FULL testIds (UI-ASHD-003 twice in AshPage.test.tsx, UI-ASHD-004 in AshPage.test.tsx and ash.i18n.test.tsx); 2.5 reopened as attempt 2
 
 ## 8. Revisions and decisions still needed
 - A1 (autonomous, 2026-11-21): the index holds staged deletions not owned by this plan (`web/src/features/indexes/SuggestionsPanel{,.test}.tsx`). Options: stop as blocker; unstage them; commit through a temporary index. Chosen: every plan-007 commit is built in a temporary index seeded from HEAD with only the unit's owned patch (base tree..closure tree), then the real index is reset for those paths only; the foreign staged entries stay untouched. Shared dirty files: each owned file is rebuilt as HEAD plus the unit's base→closure hunks projected line-wise (helper `pevc.py`); a hunk touching foreign lines stops the commit as a conflict. Risk: none to foreign work; reverse by `git reset --soft` of the plan commits. No hooks exist, so hooks are not bypassed (`GIT_INDEX_FILE=… git commit` runs them anyway).
@@ -77,7 +77,7 @@ none
 | · 2.2 Agent emits the labels, checks.ash.dimensions | DONE | 1 | — | unit:2.2:1 |
 | · 2.3 Schema, store, pipeline | DONE | 1 | — | unit:2.3:1 |
 | · 2.4 API: group_by and filters | DONE | 1 | — | unit:2.4:1 |
-| · 2.5 Console: group and filter controls, help, README | DONE | 1 | — | unit:2.5:1 |
+| · 2.5 Console: group and filter controls, help, README | DONE | 2 | — | unit:2.5:2 |
 | 3 Notification channels | TODO | 1 | 3.1–3.4 | — |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |

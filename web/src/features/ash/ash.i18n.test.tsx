@@ -99,7 +99,7 @@ describe('ash i18n (plan 006 F3)', () => {
     }
   })
 
-  it('UI-ASHD-004 an empty dimension reads (sconosciuto) in Italian', async () => {
+  it('the empty dimension of UI-ASHD-004 reads (sconosciuto) in Italian', async () => {
     await setServerLanguage('it')
     renderWithProviders(<AshPage instanceId="instance-1" />, {
       route: '/instances/instance-1/ash?range=1h&usename=-',
