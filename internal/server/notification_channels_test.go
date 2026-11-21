@@ -111,7 +111,8 @@ func TestNOTI001_EnvConfiguredChannelsShowHostOnly(t *testing.T) {
 		{"kind":"slack","configured":true,"source":"env","host":"hooks.slack.com","language":null},
 		{"kind":"webhook","configured":true,"source":"env","host":"alerts.canary.example","language":null},
 		{"kind":"google_chat","configured":true,"source":"env","host":"chat.googleapis.com","language":null},
-		{"kind":"teams","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"teams","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 
 	// The host is the host name only: no port, user information or path.
@@ -133,7 +134,8 @@ func TestNOTI002_UnconfiguredChannels(t *testing.T) {
 		{"kind":"slack","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"webhook","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null},
-		{"kind":"teams","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"teams","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 
 	api := NewAPI(nil)

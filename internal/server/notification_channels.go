@@ -115,6 +115,13 @@ var notificationKinds = []notificationKind{
 		url:   func(c AlertConfig) string { return c.TeamsURL },
 		build: func(address string) notify.Channel { return notify.NewTeams(address, notificationHTTPClient) },
 	},
+	{
+		Kind:     "pagerduty",
+		url:      func(c AlertConfig) string { return c.PagerDutyRoutingKey },
+		build:    func(key string) notify.Channel { return notify.NewPagerDuty(key, notificationHTTPClient) },
+		validate: notify.ValidatePagerDutyKey,
+		host:     func(string) string { return notify.PagerDutyHost },
+	},
 }
 
 // notificationKindNames lists the kinds for an error detail.

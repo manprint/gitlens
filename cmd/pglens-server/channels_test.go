@@ -58,9 +58,13 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 	api := server.NewAPI(nil)
 	channels := wireNotificationChannels(context.Background(), api, server.AlertConfig{WebhookURL: srv.URL + "/hook"})
 	// One slot per kind; only the webhook's holds a channel.
-	require.Len(t, channels, 4)
-	require.Equal(t, []string{"slack", "webhook", "google_chat", "teams"}, []string{channels[0].Name(), channels[1].Name(), channels[2].Name(), channels[3].Name()})
-	require.Equal(t, []bool{false, true, false, false}, []bool{notify.Configured(channels[0]), notify.Configured(channels[1]), notify.Configured(channels[2]), notify.Configured(channels[3])})
+	names, configured := []string{}, []bool{}
+	for _, c := range channels {
+		names = append(names, c.Name())
+		configured = append(configured, notify.Configured(c))
+	}
+	require.Equal(t, []string{"slack", "webhook", "google_chat", "teams", "pagerduty"}, names)
+	require.Equal(t, []bool{false, true, false, false, false}, configured)
 
 	r := chi.NewRouter()
 	api.RegisterRoutes(r)
@@ -83,7 +87,8 @@ func TestNotificationChannelWiringReachesTheAlertChannel(t *testing.T) {
 		{"kind":"slack","configured":false,"source":"env","host":null,"language":null},
 		{"kind":"webhook","configured":true,"source":"env","host":"127.0.0.1","language":null},
 		{"kind":"google_chat","configured":false,"source":"env","host":null,"language":null},
-		{"kind":"teams","configured":false,"source":"env","host":null,"language":null}
+		{"kind":"teams","configured":false,"source":"env","host":null,"language":null},
+		{"kind":"pagerduty","configured":false,"source":"env","host":null,"language":null}
 	]`, rec.Body.String())
 }
 
@@ -125,4 +130,9 @@ func TestNotificationChannelWiringKeepsTheEnvironmentWhenTheStoreFails(t *testin
 // NCH-004 (wiring): the environment's Teams URL builds a teams channel.
 func TestNCH004_TeamsChannelFromTheEnvironment(t *testing.T) {
 	require.Equal(t, []string{"teams"}, channelNames(server.AlertConfig{TeamsURL: "https://teams.example/x"}))
+}
+
+// NCH-014 (wiring): the environment's routing key builds a pagerduty channel.
+func TestNCH014_PagerDutyChannelFromTheEnvironment(t *testing.T) {
+	require.Equal(t, []string{"pagerduty"}, channelNames(server.AlertConfig{PagerDutyRoutingKey: "PDKEY0501abcdefghijklmnopqrstuvw"}))
 }

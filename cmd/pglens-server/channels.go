@@ -17,6 +17,7 @@ func buildChannels(cfg server.AlertConfig) []notify.Channel {
 		{"webhook", cfg.WebhookURL},
 		{"google_chat", cfg.GoogleChatURL},
 		{"teams", cfg.TeamsURL},
+		{"pagerduty", cfg.PagerDutyRoutingKey},
 	} {
 		if kind.address != "" {
 			channels = append(channels, server.NewNotificationChannel(kind.name, kind.address))

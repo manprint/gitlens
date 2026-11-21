@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:32 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:36 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD cf25cd8d24d41108b61fb9d3da9daf13bce6a1b5 + tree 06a4f9d8eed904f20017208951e6f2100fe74227 · branch main · last WIP tree none
-- Last closure: unit:3.1:1
-- Next: open 3.2 · next eligible: 3.2
+- Base: HEAD 1fd5aacbb341350ff706eb8561abc88a3b161e82 + tree f0721b85b69f7a989b4a6c579ba0568335496c3e · branch main · last WIP tree none
+- Last closure: unit:3.2:1
+- Next: open 3.3 · next eligible: 3.3
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -77,7 +77,7 @@ none
 | 2 ASH dimensions | DONE | 2 | 2.1–2.5 | unit:P2:2 |
 | 3 Notification channels | IN_PROGRESS | 1 | 3.1–3.4 | — |
 | · 3.1 Kind hooks and the Teams channel | DONE | 1 | — | unit:3.1:1 |
-| · 3.2 PagerDuty channel | TODO | 1 | — | — |
+| · 3.2 PagerDuty channel | DONE | 1 | — | unit:3.2:1 |
 | · 3.3 Email channel | TODO | 1 | — | — |
 | · 3.4 OpenAPI, console, help, README | TODO | 1 | — | — |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |

@@ -50,3 +50,6 @@ Gates: G-GO-FULL 35 ok; G-GO-INT TestINTASHD001-004 (001 on PG15 and PG18) and o
 
 ## 2026-11-21 3.1/1 complete unit:3.1:1
 Gates: G-GO-FOCUS notify/server/cmd (race, shuffle); G-GO-INT TestINTNCH001 + NOTIINT; store migration tests incl. NCH-MIG-001; lint 0 issues; review: self-review (agent:opus) accepted; changes: notify.NewTeams (R2 Adaptive Card), Teams hosts redacted; notificationKind validate/host/available hooks with problem/shownHost/logHost/unavailable; teams kind, PGLENS_TEAMS_WEBHOOK_URL(_FILE), buildChannels; migration 0034; notes: A6, A7
+
+## 2026-11-21 3.2/1 complete unit:3.2:1
+Gates: G-GO-FOCUS notify/server/cmd (race, shuffle); lint 0 issues; review: self-review (agent:opus) accepted; changes: notify.NewPagerDuty (R1 Events API v2, endpoint package variable, key redacted from errors), ValidatePagerDutyKey; kind pagerduty with validate and host; PGLENS_PAGERDUTY_ROUTING_KEY(_FILE), invalid key fails start; listings gain the pagerduty row; notes: resolve is Phase "resolve" (notifier); a test message triggers without dedup_key

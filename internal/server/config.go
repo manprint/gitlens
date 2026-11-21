@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/manprint/pglens/internal/alert/notify"
 )
 
 type AlertConfig struct {
@@ -18,6 +20,8 @@ type AlertConfig struct {
 	// TeamsURL is a Microsoft Teams workflow URL; its sig parameter signs
 	// the request, so it is a secret like the Slack URL.
 	TeamsURL string
+	// PagerDutyRoutingKey is the Events API v2 key of a PagerDuty service.
+	PagerDutyRoutingKey string
 }
 
 type UIConfig struct {
@@ -125,6 +129,19 @@ func LoadAlertConfig(getenv func(string) string, readFile func(string) ([]byte, 
 			return AlertConfig{}, fmt.Errorf("read Teams webhook file: %w", err)
 		}
 		c.TeamsURL = strings.TrimSpace(string(b))
+	}
+	c.PagerDutyRoutingKey = strings.TrimSpace(getenv("PGLENS_PAGERDUTY_ROUTING_KEY"))
+	if p := strings.TrimSpace(getenv("PGLENS_PAGERDUTY_ROUTING_KEY_FILE")); p != "" {
+		b, err := readFile(p)
+		if err != nil {
+			return AlertConfig{}, fmt.Errorf("read PagerDuty routing key file: %w", err)
+		}
+		c.PagerDutyRoutingKey = strings.TrimSpace(string(b))
+	}
+	if c.PagerDutyRoutingKey != "" {
+		if err := notify.ValidatePagerDutyKey(c.PagerDutyRoutingKey); err != nil {
+			return AlertConfig{}, fmt.Errorf("invalid PGLENS_PAGERDUTY_ROUTING_KEY: %w", err)
+		}
 	}
 	return c, nil
 }
