@@ -175,6 +175,22 @@ type QueryPlanRow struct {
 	Analyzed   bool
 	CapturedAt time.Time
 	Plan       []byte
+	// Source is "command" (on-demand explain) or "auto_explain"; empty means
+	// command. The first stored row of a shape keeps its source.
+	Source string
+}
+
+// PlanSampleRow is one execution that auto_explain logged (plan 007 phase 7).
+type PlanSampleRow struct {
+	TS         time.Time
+	TenantID   string
+	InstanceID uuid.UUID
+	ClusterID  int64
+	Datname    string
+	QueryID    int64
+	PlanHash   string
+	DurationMS float64
+	Analyzed   bool
 }
 
 type ObjectFactRow struct {
@@ -502,7 +518,11 @@ func WriteBloat(ctx context.Context, tx pgx.Tx, rows []BloatRow) error {
 // WriteQueryPlan stores a plan shape once. Re-capturing the same shape is a
 // successful no-op, while a changed hash creates the next history row.
 func WriteQueryPlan(ctx context.Context, tx pgx.Tx, r QueryPlanRow) error {
-	_, err := tx.Exec(ctx, `INSERT INTO query_plans (tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, analyzed, captured_at, plan) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (tenant_id, instance_id, datname, queryid, plan_hash, analyzed) DO NOTHING`, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.PlanHash, r.Analyzed, r.CapturedAt, r.Plan)
+	source := r.Source
+	if source == "" {
+		source = "command"
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO query_plans (tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, analyzed, captured_at, plan, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (tenant_id, instance_id, datname, queryid, plan_hash, analyzed) DO NOTHING`, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.PlanHash, r.Analyzed, r.CapturedAt, r.Plan, source)
 	if err != nil {
 		return fmt.Errorf("write query plan: %w", err)
 	}
@@ -647,6 +667,28 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb) ON CONFLI
 		if _, err := br.Exec(); err != nil {
 			_ = br.Close()
 			return fmt.Errorf("write log event: %w", err)
+		}
+	}
+	return br.Close()
+}
+
+// WritePlanSamples writes plan samples ON CONFLICT DO NOTHING: a result pushed
+// twice stores each sample once.
+func WritePlanSamples(ctx context.Context, tx pgx.Tx, rows []PlanSampleRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, r := range rows {
+		batch.Queue(`INSERT INTO plan_samples (ts, tenant_id, instance_id, cluster_id, datname, queryid, plan_hash, duration_ms, analyzed)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
+			r.TS, r.TenantID, r.InstanceID, r.ClusterID, r.Datname, r.QueryID, r.PlanHash, r.DurationMS, r.Analyzed)
+	}
+	br := tx.SendBatch(ctx, batch)
+	for range rows {
+		if _, err := br.Exec(); err != nil {
+			_ = br.Close()
+			return fmt.Errorf("write plan sample: %w", err)
 		}
 	}
 	return br.Close()

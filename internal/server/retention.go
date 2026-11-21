@@ -38,7 +38,7 @@ type retentionFamily struct {
 }
 
 // retentionFamilies is the whitelist, in the order the API lists it (D17). The
-// defaults are those of migrations 0003, 0007, 0035 (rollups) and 0036 (log events).
+// defaults are those of migrations 0003, 0007, 0035 (rollups), 0036 (log events) and 0038 (plan samples).
 var retentionFamilies = []retentionFamily{
 	{Name: "metrics", Hypertable: "metrics", DefaultDays: 30},
 	{Name: "metrics_statements", Hypertable: "metrics_statements", DefaultDays: 30},
@@ -48,6 +48,7 @@ var retentionFamilies = []retentionFamily{
 	{Name: "metrics_indexes", Hypertable: "metrics_indexes", DefaultDays: 30},
 	{Name: "metrics_bloat", Hypertable: "metrics_bloat", DefaultDays: 90},
 	{Name: "log_events", Hypertable: "log_events", DefaultDays: 14},
+	{Name: "plan_samples", Hypertable: "plan_samples", DefaultDays: 30},
 	{Name: "metrics_1h", Hypertable: "metrics_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},
 	{Name: "metrics_statements_1h", Hypertable: "metrics_statements_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},
 	{Name: "metrics_ash_1h", Hypertable: "metrics_ash_1h", DefaultDays: 730, MinDays: rollupMinDays, MaxDays: rollupMaxDays, Rollup: true},

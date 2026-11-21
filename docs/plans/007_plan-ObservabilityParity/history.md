@@ -113,3 +113,6 @@ Gates: G-GO-FULL rc=0, G-GO-INT TestINTPGL001-005 PASS, G-RO TestINTRO001 PASS, 
 
 ## 2026-11-21 7.1/1 complete unit:7.1:1
 Gates: G-GO-FOCUS pglog/agent/cmd (race, shuffle), TestAEX001-006, TestINTAEX001 + TestINTPGL002/003 PASS, G-RO PASS, golangci-lint 0 issues; review: self-review (agent:opus) accepted; changes: pglog.ParseAutoExplain + fixtures from postgres:18.6 auto_explain; agent.PlanHash; log loop ships plan facts (body memo 1 h/5000, 50 per scrape, 256 KiB body cap, drop reasons, note auto_explain_format_not_json); TestPGL017 expects the note; notes: A24
+
+## 2026-11-21 7.2/1 complete unit:7.2:1
+Gates: G-GO-FOCUS ./internal/server/ ./internal/store/ ok (AEX-007..009, RLP); G-GO-INT ./internal/server/ ./internal/store/ ok (INTAEX002/003); lint 0 issues; G-API regenerated; vitest retention/settings 114 ok; review: self-review (agent:opus) accepted; changes: NEW migration 0038_plan_samples.sql (query_plans.source, plan_samples hypertable, 30-day retention); store QueryPlanRow.Source, PlanSampleRow, WritePlanSamples; NEW server plan_samples.go (autoPlanFromFact) wired in pipeline; commands pass Source command; retention family plan_samples (API enum, console label); notes: self-review: command plans keep source command and /api/v1/plans unchanged (existing plan tests green); first stored row of a shape keeps its source (ON CONFLICT DO NOTHING); A25

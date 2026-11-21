@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:04 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:11 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 3035c8f284dce308a39a038440562283d8fe7a65 + tree 3a353197524cc933e16eb1d42602a132535d7c95 · branch main · last WIP tree none
-- Last closure: unit:7.1:1
-- Next: open 7.2 · next eligible: 7.2
+- Base: HEAD 5292dd5c65dd852b2029aaa011c462a880c13af8 + tree d192f2f9121cc37dcf2ac73b1732a8f17cb1b281 · branch main · last WIP tree none
+- Last closure: unit:7.2:1
+- Next: open 7.3 · next eligible: 7.3
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -79,6 +79,7 @@ none
 - A22 (6.5): migration 0035 is the rollups, so log events take 0036 (alert seeds of 6.6 take 0037). The server keeps the spec's withheld constant "[withheld: may hold a credential]" (redact.Withheld is "[redacted]") and re-checks application_name too. log_events joins the retention whitelist (default 14, no compression, floor 3), so the OpenAPI enum, generated types and the console family label (en/it) change with it.
 - A23 (6.6): agent log notes (check `logs`, reason `logs_*`) leave RDY-CHK-02 and get their own info rule RDY-LOG-01 with one fix per note (an unknown note still lists, no fix); the log page help is a new chapter `logs` (group instance), so the help home lists 16 chapters.
 - A24 (7.1): TestINTAEX001 reads the log through the SQL source (shared helper `sqlLogLoop`) instead of a mounted log directory: same parser and loop, no bind mount in the sandbox. A parse error without the prefix also counts as reason `format`; only ErrPlanFormat raises the note. Phase 7's migration "0036" takes the next free number, 0038 (0036/0037 used by phase 6, A22).
+- A25 (7.2): `plan_samples` is a retention family like `log_events` (default 30, no compression), so the family enum also changes in `api/openapi.yaml`, `web/src/api/generated.ts`, `web/src/lib/retention.ts` and the settings catalogs (en/it), beyond the unit's listed files; a credential hit in a pushed plan body counts as `pglens_ingest_rejected{reason="plan_credential"}`; `truncateAll` now clears `query_plans` and `plan_samples`.
 
 ## 9. Blockers
 none

@@ -564,7 +564,7 @@ func persistCommandArtifact(ctx context.Context, tx pgx.Tx, tenantID string, ins
 		if datname == "" {
 			datname = payload.Datname
 		}
-		return store.WriteQueryPlan(ctx, tx, store.QueryPlanRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: datname, QueryID: *args.QueryID, PlanHash: payload.PlanHash, Analyzed: args.Analyze, CapturedAt: capturedAt.UTC(), Plan: payload.Plan})
+		return store.WriteQueryPlan(ctx, tx, store.QueryPlanRow{TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, Datname: datname, QueryID: *args.QueryID, PlanHash: payload.PlanHash, Analyzed: args.Analyze, CapturedAt: capturedAt.UTC(), Plan: payload.Plan, Source: "command"})
 	case command.KindPgstattuple:
 		var payload struct {
 			Datname      string `json:"datname"`

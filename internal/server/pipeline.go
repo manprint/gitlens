@@ -194,6 +194,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 	var bloatRows []store.BloatRow
 	var lockSnapshotRows []store.LockSnapshotRow
 	var logEventRows []store.LogEventRow
+	var planSampleRows []store.PlanSampleRow
+	var planRows []store.QueryPlanRow
 	var relationPrunes []store.RelationStatsPrune
 	var factPrunes []store.ObjectFactPrune
 	var checkOutcomes []checkOutcome
@@ -362,6 +364,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		truncatedAt := make(map[string]time.Time)
 		var instLockSnapshot *store.LockSnapshotRow
 		var instLogEvents []store.LogEventRow
+		var instPlanSamples []store.PlanSampleRow
+		var instPlans []store.QueryPlanRow
 		tableMap := make(map[tableStatKey]*store.TableStatRow)
 		indexMap := make(map[indexStatKey]*store.IndexStatRow)
 		bloatMap := make(map[bloatKey]*store.BloatRow)
@@ -530,8 +534,20 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 					instLockSnapshot = &store.LockSnapshotRow{TenantID: tenantID, InstanceID: instUUID, ClusterID: cidDB, TS: r.TS, Tree: withholdLockTreeQueries(f.ValueJSON)}
 					continue
 				}
-				if f.Kind == "plan" {
-					// phase 8: plans are routed to their dedicated history table.
+				if f.Kind == planFactKind {
+					// Only auto_explain plans are stored from a push; command plans
+					// arrive with their command result.
+					p, skip, reason := autoPlanFromFact(f.Labels, f.ValueJSON, tenantID, cidDB, instUUID)
+					if reason != "" {
+						IncIngestRejected(reason)
+					}
+					if skip || reason != "" {
+						continue
+					}
+					instPlanSamples = append(instPlanSamples, p.sample)
+					if p.plan != nil {
+						instPlans = append(instPlans, *p.plan)
+					}
 					continue
 				}
 				if f.Kind == logEventFactKind {
@@ -908,6 +924,8 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 			lockSnapshotRows = append(lockSnapshotRows, *instLockSnapshot)
 		}
 		logEventRows = append(logEventRows, instLogEvents...)
+		planSampleRows = append(planSampleRows, instPlanSamples...)
+		planRows = append(planRows, instPlans...)
 		relationPrunes = append(relationPrunes, instRelationPrunes...)
 		factPrunes = append(factPrunes, instFactPrunes...)
 		storedInstances = append(storedInstances, instUUID)
@@ -964,6 +982,14 @@ func (p *Pipeline) Process(ctx context.Context, env wire.Envelope) (*PipelineRes
 		return nil, fmt.Errorf("write check results: %w", err)
 	}
 	if err := store.WriteLogEvents(ctx, tx, logEventRows); err != nil {
+		return nil, err
+	}
+	for _, r := range planRows {
+		if err := store.WriteQueryPlan(ctx, tx, r); err != nil {
+			return nil, err
+		}
+	}
+	if err := store.WritePlanSamples(ctx, tx, planSampleRows); err != nil {
 		return nil, err
 	}
 	if err := store.WriteLockSnapshots(ctx, tx, lockSnapshotRows); err != nil {
