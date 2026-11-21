@@ -243,6 +243,7 @@ func runAgentCommand(args []string) {
 		dispatcher.AddExecutor(agent.NewCancelExecutor())
 		dispatcher.AddExecutor(agent.NewTerminateExecutor())
 		dispatcher.AddExecutor(agent.NewPgstattupleExecutor())
+		dispatcher.AddExecutor(agent.NewIndexCheckExecutor())
 		for i, mgr := range managers {
 			// A target whose identity cannot be read has no instance id to poll
 			// commands for, so it is not registered under the nil id.

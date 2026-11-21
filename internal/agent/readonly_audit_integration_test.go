@@ -89,6 +89,13 @@ func TestINTRO001_AgentOnlyReads(t *testing.T) {
 	})
 }
 
+// INT-RO-003: INT-RO-001 on pglens-pgext:18, where index_check runs with
+// hypopg installed.
+func TestINTRO003_AgentOnlyReadsHypopg(t *testing.T) {
+	pg := pgtest.PGExt(t)
+	auditAgentOnlyReads(t, pg, "", []string{"trigger", "fk_unindexed", "table_columns", "extension", "sequence", "partitioned_table", "function_tracking", "security_definer_function", "subscription"}, "")
+}
+
 // INT-RO-002: INT-RO-001 on PostGIS, with spatial columns for the PostGIS
 // checks to read. The PostGIS images install postgis_topology, whose
 // aggregates call functions of an extension the EXPLAIN ANALYZE guard does
@@ -154,6 +161,12 @@ SELECT setval('ro_audit_down', -5);
 ALTER TABLE ro_audit_child ALTER COLUMN id SET DEFAULT nextval('ro_audit_id_seq');
 DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 		require.NoError(t, err)
+		// hypopg where the image has it (pglens-pgext:18): index_check then
+		// creates a hypothetical index, which lives in the agent's session only.
+		_, err = admin.Exec(ctx, `DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'hypopg') THEN CREATE EXTENSION IF NOT EXISTS hypopg; END IF; END $$`)
+		require.NoError(t, err)
+		var hasHypopg bool
+		require.NoError(t, admin.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'hypopg')").Scan(&hasHypopg))
 		_, err = admin.Exec(ctx, "CREATE SUBSCRIPTION ro_audit_sub CONNECTION 'dbname=app' PUBLICATION ro_audit_pub WITH (connect = false)")
 		require.NoError(t, err)
 
@@ -243,6 +256,12 @@ DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 		var rejected *RejectedError
 		require.ErrorAs(t, err, &rejected)
 		require.ErrorContains(t, err, `has relkind "i"`)
+		_, err = NewIndexCheckExecutor().Execute(ctx, mgr, command.Args{QueryID: readID, Datname: "app", IndexSchema: "public", IndexRelation: "ro_audit", IndexColumns: []string{"v"}, IndexInclude: []string{"id"}})
+		if hasHypopg {
+			require.NoError(t, err)
+		} else {
+			require.ErrorContains(t, err, "hypopg_missing: ")
+		}
 
 		// The log reader (plan 007 6.4): settings and the SQL source. Without
 		// the collector or the grants the source refuses; it never writes.

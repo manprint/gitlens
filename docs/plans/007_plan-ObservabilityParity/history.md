@@ -152,3 +152,6 @@ Gates: G-GO-FULL rc=0; G-GO-INT rc=0 (TestINTPLI001, TestINTAEX002-005, TestINTR
 
 ## 2026-11-21 10.1/1 complete unit:10.1:1
 Gates: G-GO-FOCUS ./internal/command (race, shuffle) ok; lint 0; server tests ok; G-API regenerated; vitest commands+i18n 36 ok; tsc ok; review: self-review (agent:opus) accepted; changes: index_check kind, 4 index args, Validate+gate T1; OpenAPI enum/fields; shell.command.kind.* labels en/it; TestIDXV001-003, UI-IDXV-001; notes: A33
+
+## 2026-11-21 10.2/1 complete unit:10.2:1
+Gates: G-GO-FOCUS ./internal/agent ok; G-GO-INT TestINTIDXV001-003, TestINTRO001 (pg15, pg18), TestINTRO003 pass, none skipped; lint 0; review: self-review (agent:opus) accepted; changes: IndexCheckExecutor (hypopg, read-only txn, reset/ROLLBACK/discard on every path), indexDDL quoting, registered in pglens-agent; pgtest.PGExt; RO audit runs index_check; notes: A34
