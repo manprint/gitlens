@@ -27,6 +27,22 @@ Documented (README.md): pglens = self-hostable monitoring for PostgreSQL fleets,
 | Deploy | Dockerfiles, compose, systemd, SQL role scripts | `Dockerfile.{agent,server}`, `deploy/` |
 | Tests | Go unit/integration (tag `integration`), e2e (tag `e2e`), workload, HA lab (planned) | `test/{pgtest,harness,e2e,scenario,workload}`, `web/e2e` (Playwright) |
 
+### Source map update — 2026-11-21 (plan 007 ObservabilityParity, HEAD after unit 15.2 `c811300`)
+Observed by the executing session (agent:opus); the sections below this one are the 2026-11-04 snapshot.
+
+| Area | Source |
+|------|--------|
+| Log reader (agent check `logs`, classes, autovacuum lines, auto_explain plans) | `cmd/pglens-agent/logs.go`, `internal/pglog`, `internal/agent/config_logs.go` |
+| sqlcommenter tags (`service`, `endpoint`, `trace_id`) | `internal/sqltag` |
+| Per-process metrics (`host_process` fact) | `internal/wire/factkinds.go`, agent host loop, `internal/server` processes routes |
+| Rollups (`rollupFor`) | `internal/server/rollup_route.go` |
+| Index validation (`index_check`), workbook | `internal/command/types.go`, `internal/agent/exec_index_check.go`, `internal/server/api_workbooks.go` |
+| Notification channels Teams, PagerDuty, email | `internal/alert/notify` |
+| MCP server (`POST /mcp`, `PGLENS_MCP_ENABLED`) | `internal/mcp`, `internal/server/mcp_tools.go` |
+| Reference scenario | `test/parity`, `web/e2e/parity.spec.ts` |
+
+Migrations 0032–0043 (multixact rule, ASH dimensions, notification kinds, rollups, log events and alerts, plan samples, autovacuum runs, index validations, ASH service, metrics processes, workbooks). New routes: `/api/v1/{statements,ash}/compare`, `/api/v1/logs`, `/logs/classes`, `/plans/samples`, `/plans/stats`, `/autovacuum/runs`, `/autovacuum/summary`, `/instances/{id}/host/processes[/top]`, `/api/v1/workbooks*`, `POST /mcp`; full list in `docs/api.md`. Each plan's status lives only in its `STATE.md`.
+
 ## Stack, conventions and constraints
 - Versions: Go module `github.com/manprint/pglens`, `go 1.27.3` (go.mod, exact patch on purpose); web: react 19.3.1, vite 8.3.5, vitest 5.0.5, @playwright/test 1.64.1, TypeScript 6 (package.json). Installed toolchain versions not checked.
 - Instructions: `AGENTS.md` (Telegram `tgsend` notifications; `tgsend` is not installed, per plan 005 STATE §2); user global `/home/agent/.claude/CLAUDE.md`; no repo `CLAUDE.md` (see Uncertainty). Plan 005 STATE §2 has standing rules: no push, no branch switch/creation, local commits with `PEV-*` trailers and Opus 5.5 co-author line, never stage `internal/webui/dist/index.html`, never commit `.claude/`.

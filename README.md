@@ -13,6 +13,24 @@ Locks, Advisor, Alerts, and Settings.
 For the product boundary and the behaviour that is intentionally not promised,
 see [Product limits](docs/LIMITS.md).
 
+Capabilities added by plan 007 (observability parity):
+
+| Capability | Where |
+|------------|-------|
+| Wait events grouped by user, client address, application, service and endpoint | [Wait-event analysis](#wait-event-analysis), [Linking queries to services](#linking-queries-to-services) |
+| Two periods compared side by side (statements and wait events) | [Comparing two periods](#comparing-two-periods) |
+| Microsoft Teams, PagerDuty and email notifications | [Alerting](#alerting), [Configuration](#configuration) |
+| Multixact wraparound rule | [Advisor rule catalogue](#advisor-rule-catalogue) |
+| PostgreSQL log reader with classes and log alert rules | [PostgreSQL logs](#postgresql-logs) |
+| auto_explain plans, plan statistics and plan changes | [Automatic plans](#automatic-plans), [Plan history](#plan-history) |
+| Autovacuum run history | [Autovacuum history](#autovacuum-history) |
+| Per-process CPU, memory and I/O | [Per-process metrics](#per-process-metrics) |
+| Hourly rollups for long ranges | [Retention and rollups](#retention-and-rollups) |
+| Index suggestion validated with a hypothetical index (`index_check`) | [Validating an index suggestion](#validating-an-index-suggestion) |
+| Tuning workbook: settings, hints and parameters per variant | [Tuning workbook](#tuning-workbook) |
+| Read-only MCP server for AI assistants | [MCP server](#mcp-server) |
+| End-to-end reference scenario | [test/parity/README.md](test/parity/README.md) |
+
 The releases are alpha prereleases, published as multi-arch images on ghcr.io
 with an SBOM and build provenance. Every one of them goes through the whole of
 `ci.yml` first: format, lint and `go vet` under all three build tags, supply-chain
@@ -821,6 +839,7 @@ probes and monitoring.
 | `PGLENS_SMTP_PASSWORD_FILE` | path | unset | reads the SMTP password; takes precedence over the inline one |
 | `PGLENS_SMTP_FROM` | address | unset | sender address; required with `PGLENS_SMTP_HOST` |
 | `PGLENS_SMTP_TLS` | `starttls`, `tls`, `none` | `starttls` | `starttls` requires STARTTLS; `tls` is implicit TLS (465); `none` is plain and sends credentials only to localhost |
+| `PGLENS_TRACE_URL_TEMPLATE` | URL | unset | `http(s)` URL containing `{trace_id}`; the console links each trace id to your tracing tool; an invalid template stops the server at start; see [Linking queries to services](#linking-queries-to-services) |
 
 The bootstrap token is a shared secret; this release has no token rotation, no mTLS, and no approval queue. Revocation is supported: `UPDATE agents SET revoked_at = now()` makes the next push return 401.
 
@@ -1621,6 +1640,7 @@ checks:
   database_size:           { interval: 15m }  # Size of each database
   slru:                    { interval: 1m }   # SLRU cache counters
   recovery:                { interval: 30s }  # Standby conflicts, replay pause, WAL prefetch (standby.*)
+  logs:                    { enabled: false, interval: 15s, source: file, statement_text: false, plan_parameters: false, max_bytes_per_interval: 1048576 } # PostgreSQL log reader, off by default; see PostgreSQL logs
 ```
 
 **Configuration rules:**
@@ -2665,7 +2685,18 @@ GRANT EXECUTE ON FUNCTION pg_read_binary_file(text, bigint, bigint, boolean) TO 
 GRANT EXECUTE ON FUNCTION pg_current_logfile(text) TO <monitoring_role>;  -- PostgreSQL 15
 ```
 
-The agent saves its position in each file, so a restart neither repeats nor skips lines; on its first run it starts at the end of the current file, so older lines are not read. Each interval it reads at most `max_bytes_per_interval` bytes and ships at most 200 lines.
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `false` | turns the reader on |
+| `interval` | `15s` | read interval |
+| `source` | `file` | `file` or `sql` (table above) |
+| `path` | `log_directory` | directory of the log files, when the agent sees it at another path |
+| `statement_text` | `false` | ships `detail`, `hint`, `context` and `statement` |
+| `plan_parameters` | `false` | ships the parameters of auto_explain plans (see [Automatic plans](#automatic-plans)) |
+| `max_bytes_per_interval` | `1048576` | bytes read per interval, 65536 to 16777216 |
+| `state_path` | `pglog-state.json` beside `identity_path` | file that keeps the read position |
+
+The agent saves its position in each file (`state_path`), so a restart neither repeats nor skips lines; on its first run it starts at the end of the current file, so older lines are not read. Delivery is at most once: lines read just before a crash, and not yet pushed, are lost. Each interval it reads at most `max_bytes_per_interval` bytes and ships at most 200 lines.
 
 **What is never shipped.** A message is cut at 2000 bytes. `detail`, `hint`, `context` and `statement` are shipped only with `statement_text: true`. A text that may hold a credential is always replaced by `[withheld: may hold a credential]`. Reading the log never writes to the server.
 
@@ -3059,6 +3090,14 @@ the server is rejected, so upgrade the server before upgrading agents.
 - **No pooler view.** pglens does not display pooler queues, pool sizes, or pooler health; inspect a pooler separately when one sits in front of PostgreSQL.
 - **Polling bounds freshness.** The interface refreshes on a polling cadence rather than a streaming connection, so displayed data can be as old as the applicable poll interval and storage delay.
 - **Responsive minimum only.** The interface is designed for desktop operations and has no dedicated mobile layout beyond a responsive minimum.
+
+**Plan 007 features:**
+- **sqlcommenter tags need the end of the statement.** `pg_stat_activity` keeps the first `track_activity_query_size` bytes (1024 by default); a longer statement loses its tags and counts as untagged.
+- **Hourly rollups keep fewer dimensions.** Ranges served from rollups cannot group wait events by `usename`, `client_addr`, `application_name`, `service` or `endpoint` (400).
+- **Log delivery is at most once.** Lines read just before an agent crash, and not yet pushed, are lost; the first run starts at the end of the current file.
+- **Per-process I/O needs permission.** `/proc/<pid>/io` is readable only by the PostgreSQL operating-system user or root; the agent must share PostgreSQL's PID namespace, or the processes are skipped.
+- **Hints need `pg_hint_plan` loaded.** pglens never loads it; a workbook hint has no `*` and no `Set` hint (use the settings instead).
+- **Reference scenario.** `test/parity` runs on a single local PostgreSQL, not an HA lab; the multixact rule's threshold crossing is proved by unit tests only, because the advisor override route has no threshold.
 
 ## Contributing
 

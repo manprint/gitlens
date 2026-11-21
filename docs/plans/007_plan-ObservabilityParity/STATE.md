@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 20:12 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 20:15 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 0fa632ee8d8c905205dbb2a24465e1aa9b3ef89f + tree 65e6b8c2beda5e86c563f196cc6b8c42ace6bc58 · branch main · last WIP tree none
-- Last closure: unit:15.2:1
-- Next: open 15.3 · next eligible: 15.3
+- Base: HEAD c811300ebe7bfe52ee71686ab2200f0540b09347 + tree 8be291ba4d4512a9210412db80570dfcd01755a8 · branch main · last WIP tree none
+- Last closure: unit:15.3:1
+- Next: open P15 · next eligible: P15
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
