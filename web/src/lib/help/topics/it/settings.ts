@@ -45,7 +45,7 @@ export const settingsTopic: HelpTopic = {
             {
               term: '{{ui:settings.tabs.notifications}}',
               meaning:
-                'Dove vengono consegnati gli alert: Slack, Generic webhook e Google Chat. Vedi [{{ui:settings.tabs.notifications}}](/help/settings#notifications).',
+                'Dove vengono consegnati gli alert: Slack, Generic webhook, Google Chat, Microsoft Teams, PagerDuty ed email. Vedi [{{ui:settings.tabs.notifications}}](/help/settings#notifications).',
             },
             {
               term: '{{ui:settings.tabs.names}}',
@@ -486,7 +486,7 @@ export const settingsTopic: HelpTopic = {
       blocks: [
         {
           kind: 'text',
-          text: 'Il tab {{ui:settings.tabs.notifications}} elenca i canali che consegnano gli alert: Slack, {{ui:alerts.channel.label.webhook}} e Google Chat. Per ogni canale mostra se è configurato, l’host a cui invia e chi lo ha impostato, {{ui:alerts.channel.source.ui}} o {{ui:alerts.channel.source.env}}.',
+          text: 'Il tab {{ui:settings.tabs.notifications}} elenca i canali che consegnano gli alert: Slack, {{ui:alerts.channel.label.webhook}}, Google Chat, Microsoft Teams, PagerDuty e {{ui:alerts.channel.label.email}}. Per ogni canale mostra se è configurato, l’host a cui invia e chi lo ha impostato, {{ui:alerts.channel.source.ui}} o {{ui:alerts.channel.source.env}}.',
         },
         {
           kind: 'terms',
@@ -504,6 +504,21 @@ export const settingsTopic: HelpTopic = {
               term: 'Google Chat',
               meaning:
                 'Invia gli alert a un webhook di Google Chat. Si imposta con `PGLENS_GOOGLE_CHAT_WEBHOOK_URL`, oppure con `PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE` per un file.',
+            },
+            {
+              term: 'Microsoft Teams',
+              meaning:
+                'Invia gli alert come Adaptive Card a un flusso di lavoro di Teams. In Teams crea un flusso dal modello "Post to a channel when a webhook request is received" e usane l’URL. Si imposta con `PGLENS_TEAMS_WEBHOOK_URL`, oppure con `PGLENS_TEAMS_WEBHOOK_URL_FILE` per un file, oppure si salva qui.',
+            },
+            {
+              term: 'PagerDuty',
+              meaning:
+                'Apre e risolve gli incidenti di PagerDuty tramite la Events API v2. L’indirizzo è la chiave di integrazione (routing key) del servizio, 32 lettere o cifre; la console mostra solo `events.pagerduty.com`. Si imposta con `PGLENS_PAGERDUTY_ROUTING_KEY`, oppure con `PGLENS_PAGERDUTY_ROUTING_KEY_FILE` per un file, oppure si salva qui.',
+            },
+            {
+              term: '{{ui:alerts.channel.label.email}}',
+              meaning:
+                'Invia gli alert per email a 1–20 destinatari, separati da virgole, salvati qui; la console mostra solo quanti sono. Il server di posta si imposta sul server con `PGLENS_SMTP_HOST` e `PGLENS_SMTP_FROM`, più `PGLENS_SMTP_PORT`, `PGLENS_SMTP_USERNAME`, `PGLENS_SMTP_PASSWORD` e `PGLENS_SMTP_TLS` se servono. Senza `PGLENS_SMTP_HOST` i destinatari non si possono salvare.',
             },
             {
               term: '{{ui:settings.notifications.setBy}}',

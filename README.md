@@ -514,7 +514,7 @@ the statement search on Slowest queries in the same range.
 
 Alerts shows firing and suppressed alerts, editable rules where permitted,
 silences with their preview, and the fleet-wide event timeline. Suppression
-does not resolve an alert; delivery to Slack, Google Chat or a generic webhook
+does not resolve an alert; delivery to Slack, Google Chat, a generic webhook, Teams, PagerDuty or email
 is configured in the server environment or from the Notifications tab of
 Settings, which shows its state and sends a test message.
 
@@ -530,7 +530,7 @@ Settings has seven tabs, in this order. `?tab=` in the URL names the open tab
 | Preferences | theme, default time range, refresh interval, table page size, time zone and language of this browser |
 | Data retention | days of history kept per metrics family |
 | Advisor rules | rule on/off switches and the two observation windows |
-| Notifications | state of the Slack, generic webhook and Google Chat channels, a write-only URL per channel, and a test send |
+| Notifications | state of the six channels (Slack, generic webhook, Google Chat, Microsoft Teams, PagerDuty, email), a write-only address per channel, and a test send |
 | Names | cluster names and instance display names |
 | Audit & server | the command audit and the server information (read-only) |
 
@@ -613,21 +613,24 @@ a standby's scans are read from the same kept history. A base backup still
 counts as recent for a fixed seven days, and as a backup strategy for a fixed
 30 days, whatever the window.
 
-The Notifications tab lists the three alert delivery channels — Slack,
-generic webhook and Google Chat — with whether each is configured, where its
-address comes from (Environment or Console), the host name of its webhook
-address, and the environment variable that sets it
+The Notifications tab lists the six alert delivery channels — Slack,
+generic webhook, Google Chat, Microsoft Teams, PagerDuty and email (see
+[Alerting](#alerting) for each one's address) — with whether each is
+configured, where its address comes from (Environment or Console), the host
+name of its address (`events.pagerduty.com` for PagerDuty, `N recipients` for
+email), and the environment variable that sets it
 (`GET /api/v1/notification-channels`, `source` being `env` or `ui`). An address
 comes from the server environment (`PGLENS_ALERT_SLACK_WEBHOOK_URL`,
-`PGLENS_WEBHOOK_URL`, `PGLENS_GOOGLE_CHAT_WEBHOOK_URL`, the `_FILE` forms of
-the Slack and Google Chat variables, and the legacy
+`PGLENS_WEBHOOK_URL`, `PGLENS_GOOGLE_CHAT_WEBHOOK_URL`,
+`PGLENS_TEAMS_WEBHOOK_URL`, `PGLENS_PAGERDUTY_ROUTING_KEY`, their `_FILE`
+forms, and the legacy
 `PGLENS_SLACK_WEBHOOK_URL[_FILE]`; see [Configuration](#configuration) and
 `deploy/server.example.env`), read at start, so a change there needs a
 restart; or it is stored from the console. Set URL / Replace URL
 (`PUT /api/v1/notification-channels/{kind}` with `{"url": …}`) stores the
 address in the pglens database (`notification_channels`), where it overrides
 the environment, and the next alert and test of the channel use it without a
-restart. The address must be `https`, or `http` only for `localhost` or a
+restart. A webhook address must be `https`, or `http` only for `localhost` or a
 literal loopback or private address, with a host, no fragment, no spaces, tabs
 or line breaks and at most 2048 characters. A console user can therefore make
 the server post to any `https` endpoint and to private `http` addresses; no
@@ -740,6 +743,17 @@ probes and monitoring.
 | `PGLENS_WEBHOOK_URL` | URL | unset | enables generic webhook notifications |
 | `PGLENS_GOOGLE_CHAT_WEBHOOK_URL` | URL | unset | enables Google Chat notifications (incoming webhook of a space; the URL carries its key and token, keep it secret) |
 | `PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE` | path | unset | reads the Google Chat URL; takes precedence over the inline URL |
+| `PGLENS_TEAMS_WEBHOOK_URL` | URL | unset | Microsoft Teams workflow URL for alert delivery (Adaptive Card) |
+| `PGLENS_TEAMS_WEBHOOK_URL_FILE` | path | unset | reads the Teams URL; takes precedence over the inline URL |
+| `PGLENS_PAGERDUTY_ROUTING_KEY` | key | unset | PagerDuty Events API v2 routing key (32 letters or digits; invalid stops the start) |
+| `PGLENS_PAGERDUTY_ROUTING_KEY_FILE` | path | unset | reads the routing key; takes precedence over the inline key |
+| `PGLENS_SMTP_HOST` | host | unset | mail server of the email channel; unset turns email off |
+| `PGLENS_SMTP_PORT` | 1–65535 | `587` | mail server port |
+| `PGLENS_SMTP_USERNAME` | text | unset | SMTP user; set together with the password |
+| `PGLENS_SMTP_PASSWORD` | text | unset | SMTP password; never logged |
+| `PGLENS_SMTP_PASSWORD_FILE` | path | unset | reads the SMTP password; takes precedence over the inline one |
+| `PGLENS_SMTP_FROM` | address | unset | sender address; required with `PGLENS_SMTP_HOST` |
+| `PGLENS_SMTP_TLS` | `starttls`, `tls`, `none` | `starttls` | `starttls` requires STARTTLS; `tls` is implicit TLS (465); `none` is plain and sends credentials only to localhost |
 
 The bootstrap token is a shared secret; this release has no token rotation, no mTLS, and no approval queue. Revocation is supported: `UPDATE agents SET revoked_at = now()` makes the next push return 401.
 
@@ -1073,18 +1087,26 @@ event writer above two passes can close an alert as it opens; after a restart,
 an event that came while the closed alert was open, after its start, may
 reopen it once.
 
-Configure Slack, Google Chat or a generic webhook with the variables above. A silence suppresses notification while the alert remains visible and continues to be evaluated.
+Configure the delivery channels with the variables above or from Settings → Notifications (table below). A silence suppresses notification while the alert remains visible and continues to be evaluated.
 
 Alerts are persisted and evaluated even when no delivery channel is configured.
-Delivery remains limited to Slack via `PGLENS_ALERT_SLACK_WEBHOOK_URL` or
-`PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE` (with the accepted legacy
-`PGLENS_SLACK_WEBHOOK_URL` aliases), Google Chat via
-`PGLENS_GOOGLE_CHAT_WEBHOOK_URL` or `PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE` (a
-text message per firing and resolved alert; webhook paths are redacted from
-errors and logs), and generic webhooks via `PGLENS_WEBHOOK_URL`.
-The addresses come only from these variables. Settings → Notifications shows
-which channels are configured, with the host of each address and never the
-address, and sends a test message through each one (see [Settings](#settings)).
+There are six delivery channels. Each one's address comes from the server
+environment or is stored from Settings → Notifications, which overrides the
+environment; the console and the API show only the host (I-7) and never the
+address, and send a test message through each channel (see [Settings](#settings)).
+
+| Channel | Address | Server environment |
+|---------|---------|--------------------|
+| Slack | incoming-webhook URL | `PGLENS_ALERT_SLACK_WEBHOOK_URL` or `_FILE` (legacy `PGLENS_SLACK_WEBHOOK_URL`, `_FILE`) |
+| Generic webhook | any HTTPS URL (http only for a private host) | `PGLENS_WEBHOOK_URL` |
+| Google Chat | space webhook URL | `PGLENS_GOOGLE_CHAT_WEBHOOK_URL` or `_FILE` |
+| Microsoft Teams | workflow URL ("Post to a channel when a webhook request is received"); posts an Adaptive Card | `PGLENS_TEAMS_WEBHOOK_URL` or `_FILE` |
+| PagerDuty | Events API v2 routing key, 32 letters or digits; a firing alert triggers an incident, its resolution resolves it (dedup key = alert); shown as `events.pagerduty.com` | `PGLENS_PAGERDUTY_ROUTING_KEY` or `_FILE` (an invalid key stops the start) |
+| Email | 1 to 20 comma-separated recipients, set only from the console; shown as `N recipients` | mail server: `PGLENS_SMTP_HOST` (enables it), `PGLENS_SMTP_FROM` (required), `PGLENS_SMTP_PORT` (587), `PGLENS_SMTP_USERNAME` + `PGLENS_SMTP_PASSWORD` or `_FILE` (both or neither), `PGLENS_SMTP_TLS` = `starttls` (default, mandatory STARTTLS), `tls` or `none` (plain; credentials only to localhost) |
+
+Without `PGLENS_SMTP_HOST`, storing email recipients answers 409
+`smtp_not_configured`. Webhook paths, routing keys, recipients and the SMTP
+password are removed from delivery errors and never logged.
 
 Run the HTTP API sign-in block once before these examples; reuse its
 `cookies.txt` for every protected request.
@@ -1100,7 +1122,7 @@ curl -s -b cookies.txt -X DELETE http://localhost:8080/api/v1/silences/<silence-
 
 An alert listing contains objects such as `{"alert_key":"agent_down/...","state":"firing","severity":"critical","cluster_id":"7381927364512345678","suppressed":false}`. The API returns cluster identifiers as strings and timestamps in RFC 3339 format.
 
-Alerting delivers only to Slack, Google Chat and generic webhooks. Email and PagerDuty are not supported.
+Alerting delivers to Slack, generic webhooks, Google Chat, Microsoft Teams, PagerDuty and email.
 
 ## Advisor findings
 

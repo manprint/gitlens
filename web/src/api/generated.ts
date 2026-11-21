@@ -986,7 +986,7 @@ export interface paths {
         };
         get?: never;
         /**
-         * Store the webhook address of a notification channel.
+         * Store the address of a notification channel.
          * @description Stores the address in the pglens database, where it overrides the server environment, and delivers the next alert and test of the channel to it without a restart. The address is write-only: no response, page or log line holds it, an error included. It is stored without encryption at rest. No notification channel follows a redirect: a redirect answer is a failed delivery. Only this server process switches at once; another replica on the same database uses it from its next start.
          */
         put: operations["setNotificationChannel"];
@@ -2740,10 +2740,10 @@ export interface components {
             total: number;
         };
         /**
-         * @description A delivery channel of the alerts: a Slack incoming webhook, a generic JSON webhook, or a Google Chat space webhook.
+         * @description A delivery channel of the alerts: a Slack incoming webhook, a generic JSON webhook, a Google Chat space webhook, a Microsoft Teams workflow webhook, a PagerDuty service (Events API v2), or email through the server's SMTP server (PGLENS_SMTP_*).
          * @enum {string}
          */
-        NotificationChannelKind: "slack" | "webhook" | "google_chat";
+        NotificationChannelKind: "slack" | "webhook" | "google_chat" | "teams" | "pagerduty" | "email";
         NotificationChannel: {
             kind: components["schemas"]["NotificationChannelKind"];
             /** @description true when the channel has a webhook address, stored from the console or set by the server environment. */
@@ -2753,7 +2753,7 @@ export interface components {
              * @enum {string}
              */
             source: "env" | "ui";
-            /** @description The host name of the webhook address, null when the channel is not configured or its address names no host. The address itself is never returned. */
+            /** @description The host name of the webhook address; events.pagerduty.com for pagerduty; the number of recipients for email, for example "2 recipients". null when the channel is not configured or its address names no host. The address, routing key or recipient list itself is never returned. */
             host: string | null;
             /** @description The language of the channel's messages (setNotificationLanguage), one of the console languages; null when the channel uses the server default (PGLENS_LANG). */
             language: string | null;
@@ -2763,7 +2763,7 @@ export interface components {
             language: string | null;
         };
         NotificationChannelUpdate: {
-            /** @description The webhook address: https, or http only for localhost or a literal loopback or private address (127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, an IPv4 one mapped in IPv6), with a host, no fragment and no space, tab or line break. Write-only: it is never returned. */
+            /** @description The address of the channel, for every kind. A webhook address (slack, webhook, google_chat, teams): https, or http only for localhost or a literal loopback or private address (127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, an IPv4 one mapped in IPv6), with a host, no fragment and no space, tab or line break. pagerduty: the Events API v2 integration (routing) key, 32 letters or digits. email: 1 to 20 comma-separated recipient addresses. Write-only: it is never returned. */
             url: string;
         };
         NotificationTestResult: {
@@ -4717,7 +4717,7 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationChannel"];
                 };
             };
-            /** @description The address is missing, longer than 2048 characters, does not parse, names no host, has a fragment, a space, a tab or a line break, or uses http for a public host or another scheme; or the body has another field. The detail never quotes the address. Nothing was changed. */
+            /** @description The address is missing, longer than 2048 characters, does not parse, names no host, has a fragment, a space, a tab or a line break, or uses http for a public host or another scheme; for pagerduty, the routing key is not 32 letters or digits; for email, the list does not hold 1 to 20 addresses; or the body has another field. The detail never quotes the address. Nothing was changed. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -4727,8 +4727,17 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The kind is not slack, webhook or google_chat. */
+            /** @description The kind is not slack, webhook, google_chat, teams, pagerduty or email. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The kind cannot be set now: email while the server has no SMTP server (PGLENS_SMTP_HOST is empty). Nothing was changed. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4771,7 +4780,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The kind is not slack, webhook or google_chat. */
+            /** @description The kind is not slack, webhook, google_chat, teams, pagerduty or email. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -4826,7 +4835,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The kind is not slack, webhook or google_chat. */
+            /** @description The kind is not slack, webhook, google_chat, teams, pagerduty or email. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -4870,7 +4879,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description The kind is not slack, webhook or google_chat. */
+            /** @description The kind is not slack, webhook, google_chat, teams, pagerduty or email. */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -51,6 +51,8 @@ type notificationKind struct {
 	// available answers why the kind cannot be set now; the error is the
 	// API's error code of a 409. nil means always available.
 	available func(cfg AlertConfig) error
+	// unavailableDetail is the detail of that 409.
+	unavailableDetail string
 }
 
 // problem is why address is refused for the kind, "" when it is accepted.
@@ -143,6 +145,8 @@ var notificationKinds = []notificationKind{
 		validate:  validateEmailRecipients,
 		host:      emailRecipientsHost,
 		available: smtpAvailable,
+		// The detail of the 409 when no mail server is configured.
+		unavailableDetail: "set PGLENS_SMTP_HOST and PGLENS_SMTP_FROM on the server",
 	},
 }
 
@@ -774,7 +778,7 @@ func (a *API) handleSetNotificationChannel(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := k.unavailable(a.notificationState().cfg); err != nil {
-		writeError(w, http.StatusConflict, err.Error(), "")
+		writeError(w, http.StatusConflict, err.Error(), k.unavailableDetail)
 		return
 	}
 	address := *in.URL

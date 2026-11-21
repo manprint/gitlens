@@ -56,3 +56,6 @@ Gates: G-GO-FOCUS notify/server/cmd (race, shuffle); lint 0 issues; review: self
 
 ## 2026-11-21 3.3/1 complete unit:3.3:1
 Gates: G-GO-FOCUS (notify, alert, server, cmd/pglens-server; race, shuffle) green; lint 0; G-GO-INT TestINTNCH00[12] + NOTIINT green; review: self-review (agent:opus) accepted; changes: notify email.go (SMTPSettings, NewEmail, buildEmail, net/smtp transport with injectable dial); server SMTPConfig + LoadSMTPConfig; kind email (validate 1-20 recipients, host N recipients, available smtp_not_configured); NewNotificationChannel takes cfg; notes: A8; tests NCH020-024, INTNCH002
+
+## 2026-11-21 3.4/1 complete unit:3.4:1
+Gates: G-GO-FOCUS server/cmd/alert race+shuffle pass; golangci-lint 0; G-API regen; tsc/eslint/prettier clean; vitest 228 files/2043 tests rc=0; G-I18N 48 pass; review: self-review (agent:opus) accepted; changes: OpenAPI six kinds + 409 smtp_not_configured; console registry/labels/live validation for Teams, PagerDuty, Email; help en/it; README channels table + env rows; example env; notes: A9 recorded

@@ -30,6 +30,6 @@ describe('DeliverySection', () => {
       within(channels)
         .getAllByRole('heading', { level: 3 })
         .map((heading) => heading.textContent),
-    ).toEqual(['Slack', 'Generic webhook', 'Google Chat'])
+    ).toEqual(['Slack', 'Generic webhook', 'Google Chat', 'Microsoft Teams', 'PagerDuty', 'Email'])
   })
 })

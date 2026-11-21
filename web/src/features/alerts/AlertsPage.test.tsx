@@ -176,7 +176,7 @@ describe('AlertsPage', () => {
     expect(screen.getByText('Labels')).toBeInTheDocument()
   })
 
-  it('UI-ALERT-040 names only Slack, generic webhook and Google Chat as delivery channels', async () => {
+  it('UI-ALERT-040 names the six delivery channels', async () => {
     // Delivery is its own tab of the alerts page (15.3).
     await renderAlerts([alert()], [], '/alerts?section=delivery')
 
@@ -184,7 +184,10 @@ describe('AlertsPage', () => {
     expect(channels).toHaveTextContent('Slack')
     expect(channels).toHaveTextContent('Generic webhook')
     expect(channels).toHaveTextContent('Google Chat')
-    expect(within(channels).getAllByRole('heading', { level: 3 })).toHaveLength(3)
+    expect(channels).toHaveTextContent('Microsoft Teams')
+    expect(channels).toHaveTextContent('PagerDuty')
+    expect(channels).toHaveTextContent('Email')
+    expect(within(channels).getAllByRole('heading', { level: 3 })).toHaveLength(6)
   })
 
   it('UI-ALERT-041 explains that unconfigured channels still persist alerts', async () => {

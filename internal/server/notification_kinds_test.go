@@ -180,6 +180,7 @@ func TestNCH024_SetEmail(t *testing.T) {
 	rec := retentionRequest(t, off, http.MethodPut, "/api/v1/notification-channels/email", urlBody(t, two))
 	bodies = append(bodies, rec.Body.String())
 	requireAPIError(t, rec, http.StatusConflict, "smtp_not_configured")
+	require.Contains(t, rec.Body.String(), "PGLENS_SMTP_HOST")
 	_, ok := offStore.stored("email")
 	require.False(t, ok)
 

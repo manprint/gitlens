@@ -9,6 +9,9 @@ const VARIABLE_LEAD: Record<(typeof NOTIFICATION_CHANNELS)[number]['kind'], Mess
   slack: 'alerts.delivery.slackLead',
   webhook: 'alerts.delivery.webhookLead',
   google_chat: 'alerts.delivery.googleChatLead',
+  teams: 'alerts.delivery.teamsLead',
+  pagerduty: 'alerts.delivery.pagerDutyLead',
+  email: 'alerts.delivery.emailLead',
 }
 
 function VariableList({ variables }: { variables: readonly string[] }) {

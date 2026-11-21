@@ -29,6 +29,12 @@ export const alerts = {
   'alerts.delivery.settingsLink': 'Settings, Notifications',
   'alerts.delivery.slackLead': 'Configure the Slack webhook with one of these server variables:',
   'alerts.delivery.webhookLead': 'Configure the generic webhook with this server variable:',
+  'alerts.delivery.teamsLead':
+    'Configure the Microsoft Teams workflow URL with one of these server variables:',
+  'alerts.delivery.pagerDutyLead':
+    'Configure the PagerDuty routing key with one of these server variables:',
+  'alerts.delivery.emailLead':
+    'Configure the mail server with these server variables, then set the recipients in Settings:',
   'alerts.detail.close': 'Close detail',
   'alerts.detail.helpLabel': 'Alert detail',
   'alerts.detail.history': 'History',
@@ -248,6 +254,15 @@ export const alerts = {
   'alerts.channel.label.slack': 'Slack',
   'alerts.channel.label.webhook': 'Generic webhook',
   'alerts.channel.label.google_chat': 'Google Chat',
+  'alerts.channel.label.teams': 'Microsoft Teams',
+  'alerts.channel.label.pagerduty': 'PagerDuty',
+  'alerts.channel.label.email': 'Email',
+  'alerts.channel.hint.teams':
+    'In Teams, create a workflow from the template "Post to a channel when a webhook request is received" and paste its URL.',
+  'alerts.channel.hint.pagerduty':
+    'Paste the Events API v2 integration key (routing key) of the PagerDuty service.',
+  'alerts.channel.hint.email':
+    'Enter the recipients below, separated by commas. The mail server is configured on the server with the PGLENS_SMTP_* variables.',
   'alerts.channel.instructions':
     'Set {variable} in the server environment, then restart the server. Or store a URL from the console below: it applies at once.',
   'alerts.channel.instructionsFile':
@@ -262,6 +277,9 @@ export const alerts = {
     'http is accepted only for a loopback or private address; use https.',
   'alerts.channel.url.scheme':
     'The scheme must be https, or http for a loopback or private address.',
+  'alerts.channel.routingKey.invalid': 'The routing key must be 32 letters or digits.',
+  'alerts.channel.recipients.count':
+    'Enter between 1 and {max} email addresses, separated by commas.',
   'alerts.channel.source.ui': 'Console',
   'alerts.channel.source.env': 'Environment',
   'alerts.channel.change.notSaved': 'Not saved',
@@ -273,6 +291,8 @@ export const alerts = {
   'alerts.channel.change.unauthorized':
     'Your session has expired. Sign in again, then enter the URL again.',
   'alerts.channel.change.forbidden': '{verb}: the server refused the request.',
+  'alerts.channel.change.smtpNotConfigured':
+    'Email needs the SMTP settings on the server (PGLENS_SMTP_HOST, PGLENS_SMTP_FROM).',
   'alerts.channel.result.delivered': 'Delivered',
   'alerts.channel.result.timeout': 'No answer within 10 s',
   'alerts.channel.result.timeoutError': 'No answer within 10 s: {error}',

@@ -32,6 +32,12 @@ export const alerts: Translation<typeof english> = {
   'alerts.delivery.slackLead':
     'Configura il webhook di Slack con una di queste variabili del server:',
   'alerts.delivery.webhookLead': 'Configura il webhook generico con questa variabile del server:',
+  'alerts.delivery.teamsLead':
+    "Configura l'URL del flusso di lavoro Microsoft Teams con una di queste variabili del server:",
+  'alerts.delivery.pagerDutyLead':
+    'Configura la routing key di PagerDuty con una di queste variabili del server:',
+  'alerts.delivery.emailLead':
+    'Configura il server di posta con queste variabili del server, poi imposta i destinatari in Impostazioni:',
   'alerts.detail.close': 'Chiudi il dettaglio',
   'alerts.detail.helpLabel': 'Dettaglio dell’alert',
   'alerts.detail.history': 'Cronologia',
@@ -256,6 +262,15 @@ export const alerts: Translation<typeof english> = {
   'alerts.channel.label.slack': 'Slack',
   'alerts.channel.label.webhook': 'Webhook generico',
   'alerts.channel.label.google_chat': 'Google Chat',
+  'alerts.channel.label.teams': 'Microsoft Teams',
+  'alerts.channel.label.pagerduty': 'PagerDuty',
+  'alerts.channel.label.email': 'Email',
+  'alerts.channel.hint.teams':
+    'In Teams crea un flusso di lavoro dal modello "Post to a channel when a webhook request is received" e incollane l\'URL.',
+  'alerts.channel.hint.pagerduty':
+    'Incolla la chiave di integrazione Events API v2 (routing key) del servizio PagerDuty.',
+  'alerts.channel.hint.email':
+    'Inserisci i destinatari qui sotto, separati da virgole. Il server di posta si configura sul server con le variabili PGLENS_SMTP_*.',
   'alerts.channel.instructions':
     'Imposta {variable} nell’ambiente del server, poi riavvia il server. Oppure salva un URL dalla console qui sotto: vale subito.',
   'alerts.channel.instructionsFile':
@@ -270,6 +285,8 @@ export const alerts: Translation<typeof english> = {
     'http è accettato solo per un indirizzo di loopback o privato; usa https.',
   'alerts.channel.url.scheme':
     'Lo schema deve essere https, o http per un indirizzo di loopback o privato.',
+  'alerts.channel.routingKey.invalid': 'La routing key deve avere 32 lettere o cifre.',
+  'alerts.channel.recipients.count': 'Inserisci da 1 a {max} indirizzi email, separati da virgole.',
   'alerts.channel.source.ui': 'Console',
   'alerts.channel.source.env': 'Ambiente',
   'alerts.channel.change.notSaved': 'Non salvato',
@@ -281,6 +298,8 @@ export const alerts: Translation<typeof english> = {
   'alerts.channel.change.unauthorized':
     'La sessione è scaduta. Accedi di nuovo, poi reinserisci l’URL.',
   'alerts.channel.change.forbidden': '{verb}: il server ha rifiutato la richiesta.',
+  'alerts.channel.change.smtpNotConfigured':
+    "L'email richiede le impostazioni SMTP sul server (PGLENS_SMTP_HOST, PGLENS_SMTP_FROM).",
   'alerts.channel.result.delivered': 'Consegnato',
   'alerts.channel.result.timeout': 'Nessuna risposta entro 10 s',
   'alerts.channel.result.timeoutError': 'Nessuna risposta entro 10 s: {error}',

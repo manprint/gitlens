@@ -28,6 +28,8 @@ import type { MessageKey } from '@/i18n/messages/en'
 import { useT } from '@/i18n/react'
 import { resolveLocale } from '@/i18n/store'
 import {
+  addressFieldLabel,
+  addressProblem,
   channelChangeFailureMessage,
   channelInstructions,
   channelLabel,
@@ -35,7 +37,6 @@ import {
   notificationChannelInfo,
   testFailureMessage,
   testResultText,
-  webhookUrlProblem,
   type NotificationChannel,
   type NotificationChannelKind,
 } from '@/lib/notificationChannels'
@@ -108,16 +109,28 @@ function ChannelRow({
   async function save() {
     // Spaces around a pasted URL are dropped; the server refuses any left inside.
     const url = draft.trim()
-    const found = webhookUrlProblem(url)
+    const found = addressProblem(info, url)
     setProblem(found)
     if (found !== null) return
     if (await onSave(url)) setDraft('')
   }
 
+  // A typed address is checked as it is typed, so Save waits for one the server takes.
+  const typed = draft.trim()
+  const liveProblem = typed === '' ? null : addressProblem(info, typed)
+  const shownProblem = problem ?? liveProblem
+  const placeholder = stored
+    ? t('settings.notifications.urlPlaceholderStored')
+    : info.address === 'routingKey'
+      ? t('settings.notifications.routingKeyPlaceholder')
+      : info.address === 'recipients'
+        ? t('settings.notifications.recipientsPlaceholder')
+        : t('settings.notifications.urlPlaceholder')
+
   const changeText =
-    problem ??
+    shownProblem ??
     (change?.phase === 'done' ? change.text : changing ? t('settings.notifications.saving') : '')
-  const changeFailed = problem !== null || (change?.phase === 'done' && !change.ok)
+  const changeFailed = shownProblem !== null || (change?.phase === 'done' && !change.ok)
   const languageText =
     languageChange?.phase === 'done'
       ? languageChange.text
@@ -155,14 +168,16 @@ function ChannelRow({
         )}
       </div>
       <div className="min-w-0 text-sm">
-        {stored ? (
+        {stored && info.variable === null ? (
+          <span className="text-muted-foreground">{t('settings.notifications.storedOnly')}</span>
+        ) : stored ? (
           <>
             <span className="text-muted-foreground">
               {t('settings.notifications.storedFromConsole')}{' '}
             </span>
             <code className="break-all">{info.variable}</code>
           </>
-        ) : channel.configured ? (
+        ) : channel.configured && info.variable !== null ? (
           <>
             <span className="text-muted-foreground">{t('settings.notifications.setBy')} </span>
             <code className="break-all">{info.variable}</code>
@@ -268,7 +283,7 @@ function ChannelRow({
         role="group"
       >
         <label className="text-muted-foreground text-sm" htmlFor={ids.url}>
-          {t('settings.notifications.consoleUrl')}
+          {addressFieldLabel(info)}
           <span className="sr-only">
             {' '}
             {t('settings.notifications.urlOf', { channel: channelLabel(info) })}
@@ -278,7 +293,7 @@ function ChannelRow({
           aria-describedby={[urlHelpId, changeText === '' ? null : ids.change]
             .filter(Boolean)
             .join(' ')}
-          aria-invalid={problem === null ? undefined : true}
+          aria-invalid={shownProblem === null ? undefined : true}
           autoCapitalize="off"
           autoComplete="off"
           autoCorrect="off"
@@ -297,17 +312,13 @@ function ChannelRow({
               void save()
             }
           }}
-          placeholder={
-            stored
-              ? t('settings.notifications.urlPlaceholderStored')
-              : t('settings.notifications.urlPlaceholder')
-          }
+          placeholder={placeholder}
           spellCheck={false}
           type="text"
           value={draft}
         />
         <Button
-          disabled={changing}
+          disabled={changing || liveProblem !== null}
           onClick={() => void save()}
           size="xs"
           type="button"

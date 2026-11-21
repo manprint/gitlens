@@ -281,6 +281,27 @@ export const alertsTopic: HelpTopic = {
               action:
                 'Set one of the variables on the server, then send a test from [{{ui:shell.nav.settings}}, {{ui:settings.tabs.notifications}}](/settings?tab=notifications).',
             },
+            {
+              term: 'Microsoft Teams',
+              meaning:
+                'A Teams workflow webhook ("Post to a channel when a webhook request is received"). Variable: `PGLENS_TEAMS_WEBHOOK_URL`, or `PGLENS_TEAMS_WEBHOOK_URL_FILE` to read the address from a file.',
+              action:
+                'Set one of the variables on the server, or store the URL from [{{ui:shell.nav.settings}}, {{ui:settings.tabs.notifications}}](/settings?tab=notifications), then send a test.',
+            },
+            {
+              term: 'PagerDuty',
+              meaning:
+                'A PagerDuty service, through the Events API v2: an alert opens an incident and its resolution resolves it. Variable: `PGLENS_PAGERDUTY_ROUTING_KEY`, or `PGLENS_PAGERDUTY_ROUTING_KEY_FILE`.',
+              action:
+                'Set one of the variables on the server, or store the routing key from [{{ui:shell.nav.settings}}, {{ui:settings.tabs.notifications}}](/settings?tab=notifications), then send a test.',
+            },
+            {
+              term: '{{ui:alerts.channel.label.email}}',
+              meaning:
+                "Mail through the server's SMTP server (`PGLENS_SMTP_HOST`, `PGLENS_SMTP_FROM`, and the other `PGLENS_SMTP_*` variables). The recipients are set only from the console.",
+              action:
+                'Configure the mail server, then store the recipients from [{{ui:shell.nav.settings}}, {{ui:settings.tabs.notifications}}](/settings?tab=notifications) and send a test.',
+            },
           ],
         },
         {

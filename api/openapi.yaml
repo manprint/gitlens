@@ -1645,10 +1645,12 @@ components:
         total: { type: integer, format: int32, description: The checks listed. }
     NotificationChannelKind:
       type: string
-      enum: [slack, webhook, google_chat]
+      enum: [slack, webhook, google_chat, teams, pagerduty, email]
       description: >-
         A delivery channel of the alerts: a Slack incoming webhook, a generic
-        JSON webhook, or a Google Chat space webhook.
+        JSON webhook, a Google Chat space webhook, a Microsoft Teams workflow
+        webhook, a PagerDuty service (Events API v2), or email through the
+        server's SMTP server (PGLENS_SMTP_*).
     NotificationChannel:
       type: object
       required: [kind, configured, source, host, language]
@@ -1669,9 +1671,11 @@ components:
         host:
           type: [string, 'null']
           description: >-
-            The host name of the webhook address, null when the channel is not
-            configured or its address names no host. The address itself is
-            never returned.
+            The host name of the webhook address; events.pagerduty.com for
+            pagerduty; the number of recipients for email, for example
+            "2 recipients". null when the channel is not configured or its
+            address names no host. The address, routing key or recipient list
+            itself is never returned.
         language:
           type: [string, 'null']
           description: >-
@@ -1698,11 +1702,14 @@ components:
           minLength: 1
           maxLength: 2048
           description: >-
-            The webhook address: https, or http only for localhost or a literal
-            loopback or private address (127.0.0.0/8, ::1, 10.0.0.0/8,
-            172.16.0.0/12, 192.168.0.0/16, fc00::/7, an IPv4 one mapped in
-            IPv6), with a host, no fragment and no space, tab or line break.
-            Write-only: it is never returned.
+            The address of the channel, for every kind. A webhook address
+            (slack, webhook, google_chat, teams): https, or http only for
+            localhost or a literal loopback or private address (127.0.0.0/8,
+            ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, an IPv4
+            one mapped in IPv6), with a host, no fragment and no space, tab or
+            line break. pagerduty: the Events API v2 integration (routing) key,
+            32 letters or digits. email: 1 to 20 comma-separated recipient
+            addresses. Write-only: it is never returned.
     NotificationTestResult:
       type: object
       required: [delivered, status]
@@ -4227,7 +4234,7 @@ paths:
     put:
       tags: [settings]
       operationId: setNotificationChannel
-      summary: Store the webhook address of a notification channel.
+      summary: Store the address of a notification channel.
       description: >-
         Stores the address in the pglens database, where it overrides the
         server environment, and delivers the next alert and test of the channel
@@ -4260,8 +4267,10 @@ paths:
           description: >-
             The address is missing, longer than 2048 characters, does not
             parse, names no host, has a fragment, a space, a tab or a line
-            break, or uses http for a public host or another scheme; or the body has another field. The detail
-            never quotes the address. Nothing was changed.
+            break, or uses http for a public host or another scheme; for
+            pagerduty, the routing key is not 32 letters or digits; for email,
+            the list does not hold 1 to 20 addresses; or the body has another
+            field. The detail never quotes the address. Nothing was changed.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4270,13 +4279,23 @@ paths:
                   value: { error: invalid url, detail: http is accepted only for a loopback or private address; use https }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
-          description: The kind is not slack, webhook or google_chat.
+          description: The kind is not slack, webhook, google_chat, teams, pagerduty or email.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
               examples:
                 default:
-                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook, google_chat, teams, pagerduty, email' }
+        '409':
+          description: >-
+            The kind cannot be set now: email while the server has no SMTP
+            server (PGLENS_SMTP_HOST is empty). Nothing was changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default:
+                  value: { error: smtp_not_configured, detail: set PGLENS_SMTP_HOST and PGLENS_SMTP_FROM on the server }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503':
@@ -4308,13 +4327,13 @@ paths:
                   value: { kind: slack, configured: false, source: env, host: null, language: null }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
-          description: The kind is not slack, webhook or google_chat.
+          description: The kind is not slack, webhook, google_chat, teams, pagerduty or email.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
               examples:
                 default:
-                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook, google_chat, teams, pagerduty, email' }
         '503':
           description: The store is unavailable; nothing was changed.
           content:
@@ -4366,13 +4385,13 @@ paths:
                   value: { error: invalid language, detail: language is null (server default) or one of the console languages }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
-          description: The kind is not slack, webhook or google_chat.
+          description: The kind is not slack, webhook, google_chat, teams, pagerduty or email.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
               examples:
                 default:
-                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook, google_chat, teams, pagerduty, email' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '503':
@@ -4410,13 +4429,13 @@ paths:
                   value: { delivered: false, status: timeout, error: context deadline exceeded }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
-          description: The kind is not slack, webhook or google_chat.
+          description: The kind is not slack, webhook, google_chat, teams, pagerduty or email.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
               examples:
                 default:
-                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook and google_chat' }
+                  value: { error: unknown channel, detail: 'the channel kinds are slack, webhook, google_chat, teams, pagerduty, email' }
         '409':
           description: The channel is not configured, from the console or the server environment; nothing was sent.
           content:

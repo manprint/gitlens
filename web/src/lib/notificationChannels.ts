@@ -21,20 +21,38 @@ export interface NotificationChannelInfo {
   /** English name; the console shows `channelLabel(info)`. */
   label: string
   labelKey: MessageKey
-  /** The variable that holds the webhook address. */
-  variable: string
+  /** What the address is: a webhook URL, a PagerDuty routing key or email recipients. */
+  address: 'webhook' | 'routingKey' | 'recipients'
+  /** The variable that holds the address; null when only the console sets it. */
+  variable: string | null
   /** The variable naming a file that holds the address, when the server reads one. */
   fileVariable?: string
   /** Older names the server still accepts. */
   aliases: readonly string[]
+  /** The server settings the channel needs besides its address. */
+  settings?: readonly string[]
+  /** What to paste, after how to configure it. */
+  hintKey?: MessageKey
 }
 
-/** The three channels, in the order the server lists them. */
+/** The variables of the mail server the email channel sends through. */
+export const SMTP_VARIABLES = [
+  'PGLENS_SMTP_HOST',
+  'PGLENS_SMTP_PORT',
+  'PGLENS_SMTP_USERNAME',
+  'PGLENS_SMTP_PASSWORD',
+  'PGLENS_SMTP_PASSWORD_FILE',
+  'PGLENS_SMTP_FROM',
+  'PGLENS_SMTP_TLS',
+] as const
+
+/** The channels, in the order the server lists them. */
 export const NOTIFICATION_CHANNELS: readonly NotificationChannelInfo[] = [
   {
     kind: 'slack',
     label: 'Slack',
     labelKey: 'alerts.channel.label.slack',
+    address: 'webhook',
     variable: 'PGLENS_ALERT_SLACK_WEBHOOK_URL',
     fileVariable: 'PGLENS_ALERT_SLACK_WEBHOOK_URL_FILE',
     aliases: ['PGLENS_SLACK_WEBHOOK_URL', 'PGLENS_SLACK_WEBHOOK_URL_FILE'],
@@ -43,6 +61,7 @@ export const NOTIFICATION_CHANNELS: readonly NotificationChannelInfo[] = [
     kind: 'webhook',
     label: 'Generic webhook',
     labelKey: 'alerts.channel.label.webhook',
+    address: 'webhook',
     variable: 'PGLENS_WEBHOOK_URL',
     aliases: [],
   },
@@ -50,9 +69,40 @@ export const NOTIFICATION_CHANNELS: readonly NotificationChannelInfo[] = [
     kind: 'google_chat',
     label: 'Google Chat',
     labelKey: 'alerts.channel.label.google_chat',
+    address: 'webhook',
     variable: 'PGLENS_GOOGLE_CHAT_WEBHOOK_URL',
     fileVariable: 'PGLENS_GOOGLE_CHAT_WEBHOOK_URL_FILE',
     aliases: [],
+  },
+  {
+    kind: 'teams',
+    label: 'Microsoft Teams',
+    labelKey: 'alerts.channel.label.teams',
+    address: 'webhook',
+    variable: 'PGLENS_TEAMS_WEBHOOK_URL',
+    fileVariable: 'PGLENS_TEAMS_WEBHOOK_URL_FILE',
+    aliases: [],
+    hintKey: 'alerts.channel.hint.teams',
+  },
+  {
+    kind: 'pagerduty',
+    label: 'PagerDuty',
+    labelKey: 'alerts.channel.label.pagerduty',
+    address: 'routingKey',
+    variable: 'PGLENS_PAGERDUTY_ROUTING_KEY',
+    fileVariable: 'PGLENS_PAGERDUTY_ROUTING_KEY_FILE',
+    aliases: [],
+    hintKey: 'alerts.channel.hint.pagerduty',
+  },
+  {
+    kind: 'email',
+    label: 'Email',
+    labelKey: 'alerts.channel.label.email',
+    address: 'recipients',
+    variable: null,
+    aliases: [],
+    settings: SMTP_VARIABLES,
+    hintKey: 'alerts.channel.hint.email',
   },
 ]
 
@@ -70,20 +120,73 @@ export function notificationChannelInfo(kind: NotificationChannelKind): Notifica
 /** Every variable that configures the channel: the main one, its file form, then the aliases. */
 export function channelVariables(info: NotificationChannelInfo): string[] {
   return [
-    info.variable,
+    ...(info.variable === null ? [] : [info.variable]),
     ...(info.fileVariable === undefined ? [] : [info.fileVariable]),
     ...info.aliases,
+    ...(info.settings ?? []),
   ]
 }
 
 /** How to configure a channel that is not configured. */
 export function channelInstructions(info: NotificationChannelInfo): string {
-  return translate(
+  const hint = info.hintKey === undefined ? null : translate(info.hintKey)
+  if (info.variable === null) return hint ?? ''
+  const how = translate(
     info.fileVariable === undefined
       ? 'alerts.channel.instructions'
       : 'alerts.channel.instructionsFile',
     { variable: info.variable },
   )
+  return hint === null ? how : `${how} ${hint}`
+}
+
+/** The label of the address field, before "of <channel>". */
+export function addressFieldLabel(info: NotificationChannelInfo): string {
+  switch (info.address) {
+    case 'webhook':
+      return translate('settings.notifications.consoleUrl')
+    case 'routingKey':
+      return translate('settings.notifications.routingKey')
+    case 'recipients':
+      return translate('settings.notifications.recipients')
+  }
+}
+
+/** The PagerDuty Events API v2 routing key the server accepts (ValidatePagerDutyKey). */
+const ROUTING_KEY = /^[A-Za-z0-9]{32}$/
+
+/** The most recipients the email channel takes (validateEmailRecipients). */
+export const MAX_EMAIL_RECIPIENTS = 20
+
+/** One address of a list, bare or as "Name <address>". */
+const MAILBOX = /^(?:[^<>,]*<[^<>@\s,]+@[^<>@\s,]+>|[^<>@\s,]+@[^<>@\s,]+)$/
+
+/**
+ * Why the server would refuse the recipient list, or null: 1 to 20
+ * comma-separated addresses, as validateEmailRecipients reads them with
+ * net/mail. A quoted name holding a comma is not taken apart here.
+ */
+export function recipientsProblem(raw: string): string | null {
+  const problem = translate('alerts.channel.recipients.count', {
+    max: String(MAX_EMAIL_RECIPIENTS),
+  })
+  if (/[\r\n]/.test(raw)) return problem
+  const parts = raw.split(',').map((part) => part.trim())
+  if (parts.length > MAX_EMAIL_RECIPIENTS) return problem
+  if (parts.some((part) => !MAILBOX.test(part))) return problem
+  return null
+}
+
+/** Why the server would refuse the channel's address, or null; never quotes it. */
+export function addressProblem(info: NotificationChannelInfo, raw: string): string | null {
+  switch (info.address) {
+    case 'webhook':
+      return webhookUrlProblem(raw)
+    case 'routingKey':
+      return ROUTING_KEY.test(raw) ? null : translate('alerts.channel.routingKey.invalid')
+    case 'recipients':
+      return recipientsProblem(raw)
+  }
 }
 
 /** The longest address the server stores (setNotificationChannel). */
@@ -253,6 +356,10 @@ export function channelChangeFailureMessage(error: unknown, action: 'save' | 're
   if (!isApiFailure(error)) return translate('alerts.channel.change.retry', { verb })
   switch (error.kind) {
     case 'server':
+      if (error.status === 409 && error.error === 'smtp_not_configured') {
+        return translate('alerts.channel.change.smtpNotConfigured')
+      }
+      return translate('alerts.channel.change.error', { verb, error: failureText(error) })
     case 'unprocessable':
       return translate('alerts.channel.change.error', { verb, error: failureText(error) })
     case 'not_found':
