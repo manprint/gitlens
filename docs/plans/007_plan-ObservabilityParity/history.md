@@ -161,3 +161,6 @@ Gates: G-GO-FOCUS server/store/command ok; G-GO-INT TestINTIDXV004 pass; G-API g
 
 ## 2026-11-21 10.4/1 complete unit:10.4:1
 Gates: G-WEB-STATIC tsc/eslint(2 pre-existing warnings)/prettier ok; G-WEB-UNIT vitest 238 files 2103 tests pass; review: self-review (agent:opus) accepted; changes: IndexValidationSection (Validate with hypopg, NotPermitted T1, progress, result badges, hypopg_missing text); lib helpers; en/it catalogs; help indexes#missing-validate en/it; README Validating an index suggestion; tests UI-IDXV-002..007; notes: A36; self-review agent:opus: no findings
+
+## 2026-11-21 P10/1 complete unit:P10:1
+Gates: G-GO-FULL rc=0; G-GO-INT rc=0 (TestINTIDXV001-004, TestINTRO001 pg15/pg18, TestINTRO003 pglens-pgext:18, none skipped); G-API no diff; G-WEB-FULL rc=0 (budget PASS); G-I18N rc=0; review: self-review (agent:opus) accepted; changes: Phase 10 closure review; notes: Review: I-6 hypopg_reset before and in deferred cleanup, connection discarded; I-1 only BEGIN READ ONLY + SET LOCAL, hypopg functions run in the agent's own session; identifiers quoted with pgx.Identifier.Sanitize; I-3 command args carry queryid and identifiers, never SQL text; README Validating an index suggestion and help indexes#missing-validate.
