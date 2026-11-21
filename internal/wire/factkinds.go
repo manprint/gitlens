@@ -88,8 +88,11 @@ var factKinds = map[string]FactKind{
 	"plan":      {},
 	// incident is a capture of the agent's watcher (internal/watch): the
 	// server files it as an event, not as an object fact.
-	"incident":                  {},
-	"check_skip":                {},
+	"incident":   {},
+	"check_skip": {},
+	// log_event is one classified line of the server log (plan 007 phase 6):
+	// an event, never replaced by a later scrape.
+	"log_event":                 {Check: "logs"},
 	"monitoring_role":           {Check: "monitoring_role", Replace: true},
 	"trigger":                   {Check: "trigger_inventory", Replace: true},
 	"fk_unindexed":              {Check: "fk_indexes", Replace: true},

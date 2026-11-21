@@ -14,6 +14,7 @@ import (
 	"github.com/manprint/pglens/internal/check"
 	"github.com/manprint/pglens/internal/clock"
 	"github.com/manprint/pglens/internal/command"
+	"github.com/manprint/pglens/internal/pglog"
 	"github.com/manprint/pglens/internal/wire"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
@@ -242,6 +243,17 @@ DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 		var rejected *RejectedError
 		require.ErrorAs(t, err, &rejected)
 		require.ErrorContains(t, err, `has relkind "i"`)
+
+		// The log reader (plan 007 6.4): settings and the SQL source. Without
+		// the collector or the grants the source refuses; it never writes.
+		settings, err := mgr.ReadLogSettings(ctx)
+		require.NoError(t, err)
+		src := pglog.NewSQLSource(mgr.LogQuerier(), pglog.FormatJSON)
+		if name, _, err := src.Current(ctx); err == nil {
+			_, _, _ = src.Size(ctx, name)
+			_, _ = src.ReadAt(ctx, name, 0, 64)
+		}
+		_, _, _ = pglog.NewSQLSource(mgr.LogQuerier(), settings.Format()).Size(ctx, "postgresql.json")
 
 		require.Equal(t, before, databaseFingerprint(t, admin))
 

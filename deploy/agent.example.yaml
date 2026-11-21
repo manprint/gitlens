@@ -67,6 +67,12 @@ checks:
   checkpointer: { interval: 30s } # Checkpoint and background-writer counters.
   io: { interval: 30s } # PostgreSQL I/O counters (PG16+ when the view exists).
   archiver: { interval: 1m } # WAL archiver counters and last activity.
+  # PostgreSQL log reader, off by default. Needs logging_collector=on and jsonlog or csvlog in log_destination.
+  # source: file reads log_directory on this host (the agent user needs read access); sql reads it through
+  # pg_read_binary_file (GRANT EXECUTE ON FUNCTION pg_read_binary_file(text,bigint,bigint,boolean), and on
+  # PostgreSQL 15 also pg_current_logfile(text), to the monitoring role). statement_text: true also ships
+  # detail, hint, context and statement; a text that may hold a credential is always withheld.
+  # logs: { enabled: true, interval: 15s, source: file, statement_text: false, max_bytes_per_interval: 1048576 }
 
   # Existing checks not overridden above continue to use their code defaults.
   database_stats: { interval: 30s } # Per-database transaction/cache counters.

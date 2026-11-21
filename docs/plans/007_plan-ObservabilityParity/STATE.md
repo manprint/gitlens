@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 10:59 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:07 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 4149c5337ddb0f117412b4fa40ab935aa4cf7eda + tree ab3bfb0ca083f34070666144f51f4146be19405b · branch main · last WIP tree none
-- Last closure: unit:6.3:1
-- Next: open 6.4 · next eligible: 6.4
+- Base: HEAD 5435b9b6f8787f28d01a0146c14cb8a14306e055 + tree 7d983ef6f1d34d7c9b1a13e545dfcc2cdfc3d79c · branch main · last WIP tree none
+- Last closure: unit:6.4:1
+- Next: open 6.5 · next eligible: 6.5
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -74,6 +74,8 @@ none
 - A17 (5.4): the rollup note and the disabled-control tooltip are shared texts (`shell.rollup.note`, `shell.rollup.dropped`) rendered by one `RollupNote` component instead of per-area keys; rollup rows form a second DataTable (`settings.retention-rollup-table`, captions en+it). The note shows on Queries list, Slowest queries, Wait events (page and top list) and as the subtitle of Overview workload cards; Overview metric charts read raw only (A15) and show none.
 - A18 (P5): `golangci-lint --build-tags=integration` found one pre-existing errcheck (plan 006, `internal/agent/explain_guard_integration_test.go:866`, `defer app.Close(ctx)`). P5 edits no tests, so the one-line fix lands as its own chore commit outside the unit; not a phase-5 defect.
 - A19 (6.3 design note, approved by agent-1): Advance cases — first run (no saved position): next = end of current file, nothing read; same file grown: read [offset, size); truncated (size < offset): read from 0; rotated (saved file != current): rest of the old file (if it still exists), then the new one from 0, in budget order; file gone: new file from 0; backlog (sum of unread spans) > 16 × budget: nothing read, next = end of current file, skipped = backlog. Reads stop at the budget, next = where they stopped. Contract extension: Advance returns `[]Chunk{File, Offset, Data, Ended}` instead of `[][]byte`, and `Settle(next, lastChunk, consumed)` moves the position back to the end of the last complete record of a file still being written (a half record at the end of a rotated-away file is dropped). `NewSQLSource` takes a driver-free `Querier{QueryRow}` (D9: pglog imports no driver); the agent adapts pgx. Integration helper `pgtest.StartLogging` (collector on, `log_directory=log`, RoleT0 as plain pg_monitor). Verified on PG 18.6: pg_monitor already executes `pg_current_logfile` and `pg_ls_logdir`; only `pg_read_binary_file` needs the grant.
+- A20 (6.4 wiring plan, approved by agent-1): one goroutine per target started in `run.go` right after `startASH`, only when `checks.logs.enabled: true`; it ticks at `checks.logs.interval` (default 15s) and appends its `wire.Result` (check `logs`) to `pending[target]` under the shared `mu`, like the watcher, so the existing pusher ships it. Coverage notes are `wire.Result{Check: "logs", SkipReason: <code>}`, which the server already files as `check_skip` facts keyed by check. Each query takes `mgr.Shared` and releases it at once (no dedicated connection). Settings read, the driver-free `pglog.Querier` adapter and `LogSettings` live in `internal/agent/logs.go` so the read-only audit (G-RO) runs the same statements; fact building is a pure function in `cmd/pglens-agent/logs_build.go`. `logs` is not a registered check, so the scheduler ignores it.
+- A21 (6.4): PostgreSQL 15's pg_monitor lacks EXECUTE on pg_current_logfile (16+ has it), so the SQL source there needs that grant too; the loop reports logs_sql_denied, example config and 6.6 docs say so. INT-PGL-002/003 run through the SQL source (the file source is covered by pglog unit tests; bind-mounting the container log dir is not portable in the sandbox). Saved positions are one shared store per state file (sharedLogState) so multi-target loops never write back another target's stale position.
 
 ## 9. Blockers
 none
@@ -96,7 +98,7 @@ none
 | · 6.1 | DONE | 1 | — | unit:6.1:1 |
 | · 6.2 | DONE | 1 | — | unit:6.2:1 |
 | · 6.3 | DONE | 1 | — | unit:6.3:1 |
-| · 6.4 | TODO | 1 | — | — |
+| · 6.4 | DONE | 1 | — | unit:6.4:1 |
 | · 6.5 | TODO | 1 | — | — |
 | · 6.6 | TODO | 1 | — | — |
 | · P6 closure | TODO | 1 | — | — |

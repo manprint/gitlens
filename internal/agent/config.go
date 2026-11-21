@@ -149,6 +149,13 @@ type CheckConfig struct {
 	// Dimensions (ash only) lists the text dimensions the sampler keeps: nil
 	// keeps all three, an empty list turns them all off.
 	Dimensions *[]string `yaml:"dimensions,omitempty"`
+	// The keys below belong to checks.logs only (see config_logs.go).
+	Source              string `yaml:"source,omitempty"`
+	Path                string `yaml:"path,omitempty"`
+	StatementText       *bool  `yaml:"statement_text,omitempty"`
+	PlanParameters      *bool  `yaml:"plan_parameters,omitempty"`
+	MaxBytesPerInterval int64  `yaml:"max_bytes_per_interval,omitempty"`
+	StatePath           string `yaml:"state_path,omitempty"`
 }
 
 // ASH text dimensions accepted by checks.ash.dimensions.
@@ -335,6 +342,9 @@ func (c *Config) validate() error {
 		// unbounded value would let one check hold as many series as it asks.
 		if check.TopN < 0 || check.TopN > maxTopN {
 			return fmt.Errorf("validation: checks.%s.top_n must be between 0 and %d", name, maxTopN)
+		}
+		if err := validateLogKeys(name, check); err != nil {
+			return err
 		}
 		if check.Dimensions != nil {
 			if name != "ash" {

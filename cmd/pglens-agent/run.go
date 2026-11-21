@@ -173,6 +173,7 @@ func runAgentCommand(args []string) {
 		ashStop, enabled := startASH(ctx, managers[i], tc.Name, cfg.Checks["ash"], cfg.Checks["watch"], clk, &mu, pending)
 		ashStops = append(ashStops, ashStop)
 		ashEnabled[tc.Name] = enabled
+		startLogs(ctx, managers[i], tc, cfg, clk, &mu, pending, os.Stderr)
 	}
 	if cfg.HostEnabled() {
 		collector := host.NewCollector(cfg.HostProcPath(), cfg.HostSysPath())

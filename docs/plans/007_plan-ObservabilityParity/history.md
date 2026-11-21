@@ -98,3 +98,6 @@ Gates: G-GO-FOCUS ./internal/pglog/ ok; lint 0 issues; review: self-review (agen
 
 ## 2026-11-21 6.3/1 complete unit:6.3:1
 Gates: G-GO-FOCUS ./internal/pglog/ ok (PGL-009..014); G-GO-INT TestINTPGL001 pass on PG 18.6; lint (integration tag) 0 issues; review: self-review (agent:opus) accepted; changes: NEW internal/pglog source.go (Source, Position, Chunk, Settle, Advance), source_file.go, source_sql.go, position.go, source_test.go, source_sql_integration_test.go; NEW test/pgtest/logging.go (StartLogging); notes: design note A19 approved before code; self-review: names with / or .. refused in both sources, SQL permission error 42501 -> ErrLogReadDenied, positions via temp file + rename
+
+## 2026-11-21 6.4/1 complete unit:6.4:1
+Gates: G-GO-FOCUS ok (agent, cmd agent, wire, pglog); G-GO-INT cmd/pglens-agent ok; INT-PGL-002/003 ok; G-RO INTRO001 pg15+pg18 ok; lint 0 issues; review: self-review (agent:opus) accepted; changes: checks.logs config + validation; agent LogSettings/ReadLogSettings/LogQuerier; cmd agent log loop (logs.go, logs_build.go) wired in run.go; log_event fact kind; example config block; RO audit covers log reader; notes: A21: PG15 grant of pg_current_logfile; shared position store
