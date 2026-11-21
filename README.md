@@ -1546,6 +1546,9 @@ host:
   interval: 30s
   proc_path: /proc                 # defaults to $HOST_PROC, then /proc
   sys_path: /sys                    # defaults to $HOST_SYS, then /sys
+  processes:                        # per-process metrics of PostgreSQL (needs host.enabled)
+    enabled: true                   # default true
+    top_n: 20                       # 1-100: busiest processes by CPU and by memory, plus the postmaster
 
 # Push scheduling (optional)
 push_interval: 15s                   # duration: time between envelope deliveries (default 15s)
@@ -2617,6 +2620,22 @@ PostgreSQL logs only runs longer than `log_autovacuum_min_duration` (default 10 
 Console: Instance › Tables and indexes › Autovacuum activity sums the last 7 days per table (runs, total and longest time, rows removed, runs to prevent wraparound), most autovacuum time first; a row opens the runs of that table.
 
 API: `GET /api/v1/autovacuum/runs?instance_id=&database=&schema=&relation=&kind=&from=&to=&order_by=ts|elapsed_seconds|tuples_removed&limit=` (always descending, `limit` up to 1000, default 200, last 7 days by default) and `GET /api/v1/autovacuum/summary?instance_id=&from=&to=&limit=`.
+
+## Per-process metrics
+
+With host metrics on, the agent also reads `/proc` for the PostgreSQL postmaster and its children every host interval: CPU (share of one core, so a parallel query can pass 100 %), resident memory and disk read and write bytes per second. It joins each pid to `pg_stat_activity` (process type, database, user, application, state, query id) and ships the `top_n` busiest processes by CPU and by memory, plus the postmaster.
+
+Requirements:
+
+- The agent runs on the database host and sees PostgreSQL in its PID namespace (`host_local` target; a container needs `pid: host` or the same PID namespace as PostgreSQL). A process the agent cannot place is skipped, with one stderr line per hour.
+- Read and write rates need the agent to run as the PostgreSQL operating-system user or as root; otherwise `/proc/<pid>/io` is not readable and the console shows `—`.
+- `host.processes.enabled: false` turns it off.
+
+Only the pid, the session labels (cut to 64 bytes) and the numbers leave the agent: never a command line, an environment or a path. The server stores them in `metrics_processes` (7 days, retention family `metrics_processes`).
+
+Console: Instance › Host › Processes lists the newest sample, sortable, with a link to the query when the process runs one; the group selector switches to averages over the selected range per process type, database, user or application.
+
+API: `GET /api/v1/instances/{id}/host/processes?at=&order_by=cpu|rss|read|write&limit=` (newest sample at most 5 minutes before `at`, `limit` 1-200, default 40) and `GET /api/v1/instances/{id}/host/processes/top?from=&to=&group_by=backend_type|datname|usename|application_name&limit=` (averages over every sample time in the range; `max_rss_bytes` is the largest single process).
 
 ## Events
 

@@ -11,6 +11,7 @@ import { useT, type Translate } from '@/i18n/react'
 import { formatBytes, formatCount, formatDecimal, formatPercent } from '@/lib/format'
 
 import { HostCharts } from './HostCharts'
+import { ProcessesPanel } from './ProcessesPanel'
 
 interface HostSectionProps {
   instanceId: string
@@ -243,6 +244,7 @@ export function HostSection({ instanceId }: HostSectionProps) {
         )}
       </Section>
       {host === undefined ? null : <HostCharts instanceId={instanceId} {...hostChartFlags(host)} />}
+      {host === undefined ? null : <ProcessesPanel instanceId={instanceId} />}
     </div>
   )
 }

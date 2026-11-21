@@ -265,6 +265,16 @@ export const instanceCaptions = {
     howToRead:
       'Per-device I/O rates, disk latency and network metrics are not collected. Host collection is local to the agent, so a remote server has no host data.',
   },
+  'host.processes': {
+    what: 'CPU, memory and disk I/O of each PostgreSQL process, joined to its session: process type, database, user, application, state and query.',
+    source:
+      'The agent reads /proc for the postmaster and its children and joins pg_stat_activity by pid; only the pid, the session labels and the numbers are shipped, never a command line.',
+    unit: '%',
+    window:
+      'The table shows the newest sample (taken every 30 s); grouped views average the selected time range. Kept 7 days.',
+    howToRead:
+      'CPU is a share of one core, so a value above 100 % uses more than one core. Read and write are blank when the agent runs as another user than PostgreSQL.',
+  },
   'host.cpu-used': {
     what: 'Share of CPU time in use since the previous sample, of the container CPU limit when one is set, otherwise of the whole host.',
     source:

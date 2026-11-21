@@ -17,6 +17,10 @@ export const qk = {
   instanceActivity: (id: string) => ['getInstanceActivity', id] as const,
   instanceDatabases: (id: string) => ['getInstanceDatabases', id] as const,
   instanceHost: (id: string) => ['getInstanceHost', id] as const,
+  hostProcesses: (id: string, orderBy: string, limit: number) =>
+    ['getInstanceHostProcesses', id, orderBy, limit] as const,
+  hostProcessesTop: (id: string, groupBy: string, window: QueryWindow) =>
+    ['getInstanceHostProcessesTop', id, groupBy, queryWindowKey(window)] as const,
   instanceSettings: (id: string, changedSince?: string) =>
     ['getInstanceSettings', id, changedSince] as const,
   instanceTables: (id: string, limit?: number, orderBy?: string) =>

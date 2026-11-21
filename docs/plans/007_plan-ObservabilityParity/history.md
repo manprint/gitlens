@@ -188,3 +188,6 @@ Gates: G-GO-FOCUS ./cmd/pglens-agent ./internal/agent ./internal/wire ./internal
 
 ## 2026-11-21 12.3/1 complete unit:12.3:1
 Gates: G-GO-FOCUS server+store race; TestINTPROC002 + TestRETINT001 PASS; lint 0; G-API regenerated; vitest retention; review: self-review (agent:opus) accepted; changes: migration 0042 metrics_processes; store.WriteProcesses; pipeline host_process routing with invalid_fact rejects; GET host/processes and host/processes/top; OpenAPI + generated; retention family metrics_processes (Go, web, i18n); notes: A41
+
+## 2026-11-21 12.4/1 complete unit:12.4:1
+Gates: G-WEB-STATIC (tsc, eslint 0 errors, prettier); G-WEB-UNIT full 241 files after fixing CAPTION-COVERAGE-002 + UI-CLUS-052; server PROC tests; review: self-review (agent:opus) accepted; changes: lib/processes.ts; ProcessesPanel (snapshot table, group selector on /top, unknown I/O dash with tooltip, empty state); HostSection mounts it; i18n en/it; caption host.processes en/it; help instance-overview#host-processes en/it; README Per-process metrics + host.processes config; notes: processRow label read moved off the BackendType: line (UI-CLUS-052 scans Go Type: lines)

@@ -541,6 +541,37 @@ export const instanceOverviewTopic: HelpTopic = {
             },
           ],
         },
+        {
+          id: 'host-processes',
+          title: 'Processi',
+          blocks: [
+            {
+              kind: 'text',
+              text: 'Il pannello {{ui:instance.processes.title}} elenca ogni processo PostgreSQL dell’ultimo campione dell’host: il postmaster e i suoi figli, uniti alla loro sessione in pg_stat_activity. La CPU è una quota di un core, quindi una query parallela impegnata può superare il 100 %. Un query id porta alla pagina della query.',
+            },
+            {
+              kind: 'text',
+              text: '{{ui:instance.processes.groupLabel}} passa alle medie sull’intervallo di tempo selezionato, per tipo di processo, database, utente o applicazione. La colonna della memoria mostra allora il singolo processo più grande del gruppo.',
+            },
+            {
+              kind: 'terms',
+              items: [
+                {
+                  term: '{{ui:instance.processes.col.read}} / {{ui:instance.processes.col.write}}',
+                  meaning:
+                    'Byte al secondo che il processo ha letto dallo storage o vi ha scritto. Un trattino significa che l’agent non può leggere i contatori I/O dei processi di un altro utente.',
+                  action:
+                    'Per vederli, esegui l’agent con l’utente di sistema di PostgreSQL oppure come root.',
+                },
+                {
+                  term: '{{ui:instance.processes.emptyTitle}}',
+                  meaning:
+                    'L’agent non invia campioni dei processi. Servono l’agent sull’host del database, le metriche host attive e `host.processes.enabled` (attivo per default). Un PostgreSQL in un altro container o PID namespace non è visibile.',
+                },
+              ],
+            },
+          ],
+        },
       ],
     },
     {

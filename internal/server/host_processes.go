@@ -65,9 +65,11 @@ func processRow(f wire.Fact, ts time.Time, tenantID string, clusterID int64, ins
 			return store.ProcessRow{}, false
 		}
 	}
+	backend := f.Labels["backend_type"]
 	row := store.ProcessRow{
 		TS: ts.UTC(), TenantID: tenantID, InstanceID: instanceID, ClusterID: clusterID, PID: int32(pid),
-		BackendType: f.Labels["backend_type"], Datname: f.Labels["datname"], Usename: f.Labels["usename"],
+		BackendType: backend,
+		Datname:     f.Labels["datname"], Usename: f.Labels["usename"],
 		ApplicationName: f.Labels["application_name"], State: f.Labels["state"],
 		CPURatio: *v.CPURatio, RSSBytes: int64(*v.RSSBytes),
 		ReadBytesPerS: v.ReadBytesPerS, WriteBytesPerS: v.WriteBytesPerS,

@@ -539,6 +539,37 @@ export const instanceOverviewTopic: HelpTopic = {
             },
           ],
         },
+        {
+          id: 'host-processes',
+          title: 'Processes',
+          blocks: [
+            {
+              kind: 'text',
+              text: 'The panel {{ui:instance.processes.title}} lists each PostgreSQL process of the newest host sample: the postmaster and its children, joined to their session in pg_stat_activity. CPU is a share of one core, so a busy parallel query can pass 100 %. A query id links to the query page.',
+            },
+            {
+              kind: 'text',
+              text: '{{ui:instance.processes.groupLabel}} switches to averages over the selected time range, per process type, database, user or application. The memory column then shows the largest single process of the group.',
+            },
+            {
+              kind: 'terms',
+              items: [
+                {
+                  term: '{{ui:instance.processes.col.read}} / {{ui:instance.processes.col.write}}',
+                  meaning:
+                    'Bytes the process read from or wrote to the storage layer per second. A dash means the agent cannot read I/O counters of processes owned by another user.',
+                  action:
+                    'Run the agent as the PostgreSQL operating-system user, or as root, to see them.',
+                },
+                {
+                  term: '{{ui:instance.processes.emptyTitle}}',
+                  meaning:
+                    'The agent ships no process samples. They need the agent on the database host, host metrics on, and `host.processes.enabled` (on by default). A PostgreSQL in another container or PID namespace is not visible.',
+                },
+              ],
+            },
+          ],
+        },
       ],
     },
     {

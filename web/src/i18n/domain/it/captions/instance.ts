@@ -271,6 +271,16 @@ export const instance: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     howToRead:
       'Non vengono raccolti tassi I/O per dispositivo, latenza del disco e metriche di rete. La raccolta host è locale all’agent, quindi un server remoto non ha dati host.',
   },
+  'host.processes': {
+    what: 'CPU, memoria e I/O su disco di ogni processo PostgreSQL, uniti alla sua sessione: tipo di processo, database, utente, applicazione, stato e query.',
+    source:
+      'L’agent legge /proc per il postmaster e i suoi figli e unisce pg_stat_activity per pid; invia solo il pid, le etichette della sessione e i numeri, mai una riga di comando.',
+    unit: '%',
+    window:
+      'La tabella mostra l’ultimo campione (preso ogni 30 s); le viste raggruppate fanno la media sull’intervallo di tempo selezionato. Conservate 7 giorni.',
+    howToRead:
+      'La CPU è una quota di un core, quindi un valore oltre il 100 % usa più di un core. Lettura e scrittura sono vuote quando l’agent gira con un utente diverso da quello di PostgreSQL.',
+  },
   'host.cpu-used': {
     what: 'Quota del tempo CPU in uso dal campione precedente, sul limite CPU del container se impostato, altrimenti su tutto l’host.',
     source:

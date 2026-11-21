@@ -33,7 +33,11 @@ async function settle() {
 type HostFixture = Schemas['HostResponse'] & Record<string, unknown>
 
 function renderHost(data: HostFixture) {
-  server.use(ok('getInstanceHost', data), ok('queryMetrics', { series: [] }))
+  server.use(
+    ok('getInstanceHost', data),
+    ok('queryMetrics', { series: [] }),
+    ok('getInstanceHostProcesses', { ts: null, processes: [] }),
+  )
   return renderWithProviders(<HostSection instanceId={INSTANCE_ID} />, {
     route: `/instances/${INSTANCE_ID}`,
   })
@@ -170,6 +174,7 @@ describe('HostSection', () => {
     )
     expect(screen.queryByText(DISK_NOT_VISIBLE)).not.toBeInTheDocument()
     expect(screen.queryByText(FILESYSTEM_HINT)).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Processes' })).toBeInTheDocument()
     expect(screen.queryByText(NO_SWAP_TEXT)).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Host charts' })).toBeInTheDocument()
   })
@@ -194,6 +199,12 @@ describe('HostSection', () => {
     await settle()
 
     expect(screen.queryByRole('region', { name: 'Host charts' })).not.toBeInTheDocument()
+  })
+
+  it('shows the Processes panel only when host metrics are available', async () => {
+    renderHost({ instance_id: INSTANCE_ID, available: false, reason: 'not local' })
+    await settle()
+    expect(screen.queryByRole('region', { name: 'Processes' })).not.toBeInTheDocument()
   })
 
   it('supports the flat response emitted by the server', async () => {

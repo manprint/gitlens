@@ -18,6 +18,7 @@ import { REFRESH, type RefreshPolicy } from './policy'
 import { useRefreshTiming } from '@/hooks/usePreferences'
 import { resolveQueryWindow, type QueryWindow } from '@/lib/timerange'
 import { dimensionFiltersKey } from '@/lib/ash'
+import { PROCESS_SNAPSHOT_LIMIT, type ProcessGroupBy } from '@/lib/processes'
 
 export { useCommand } from './commands'
 
@@ -284,6 +285,51 @@ export function useInstanceHost(id: string, policy: RefreshPolicy = REFRESH.inst
     queryFn: (signal) =>
       getApi(() => client.GET('/api/v1/instances/{id}/host', { params: { path: { id } }, signal })),
     queryKey: qk.instanceHost(id),
+  })
+}
+
+export function useHostProcesses(id: string, options: { enabled?: boolean } = {}) {
+  const limit = PROCESS_SNAPSHOT_LIMIT
+  return useApiQuery({
+    enabled: options.enabled ?? true,
+    keepPrevious: true,
+    policy: REFRESH.instance,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/host/processes', {
+          params: { path: { id }, query: { order_by: 'cpu', limit } },
+          signal,
+        }),
+      ),
+    queryKey: qk.hostProcesses(id, 'cpu', limit),
+  })
+}
+
+export function useHostProcessesTop(
+  id: string,
+  groupBy: ProcessGroupBy,
+  window: QueryWindow,
+  options: { enabled?: boolean } = {},
+) {
+  return useApiQuery({
+    enabled: options.enabled ?? true,
+    keepPrevious: true,
+    policy: REFRESH.instance,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/instances/{id}/host/processes/top', {
+          params: {
+            path: { id },
+            query: {
+              group_by: groupBy,
+              limit: PROCESS_SNAPSHOT_LIMIT,
+              ...resolveQueryWindow(window),
+            },
+          },
+          signal,
+        }),
+      ),
+    queryKey: qk.hostProcessesTop(id, groupBy, window),
   })
 }
 
