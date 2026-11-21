@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/manprint/pglens/internal/agent"
 	"github.com/manprint/pglens/internal/ash"
 	"github.com/manprint/pglens/internal/clock"
 )
@@ -93,4 +94,61 @@ func TestASHTicks_WindowReportsItsOwnFailure(t *testing.T) {
 	w, err = ticks.flush(clk.Now())
 	require.Equal(t, 0, w.Ticks)
 	require.ErrorIs(t, err, errA)
+}
+
+// ashMetricsFor runs rows through the dimension filter of cfg, one window of
+// the aggregator and the wire conversion.
+func ashMetricsFor(t *testing.T, cfg agent.CheckConfig, rows ...ash.SampleRow) []map[string]string {
+	t.Helper()
+	agg := ash.New(clock.NewFake(time.Unix(0, 0)), ashWindow, ashMaxKeys)
+	add := ashRowFilter(cfg, agg.Add)
+	for _, r := range rows {
+		add(r)
+	}
+	agg.TickSucceeded()
+	var labels []map[string]string
+	for _, m := range ashWindowToMetrics(agg.Flush(time.Unix(10, 0))) {
+		labels = append(labels, m.Labels)
+	}
+	return labels
+}
+
+func dimRow(user, addr, app string) ash.SampleRow {
+	return ash.SampleRow{Datname: "app", State: "active", WaitEventType: "CPU", WaitEvent: "CPU",
+		Usename: user, ClientAddr: addr, ApplicationName: app}
+}
+
+// ASH-D-004: by default a row with values carries all three labels; an empty
+// value carries none.
+func TestASHD004_DefaultEmitsAllDimensions(t *testing.T) {
+	labels := ashMetricsFor(t, agent.CheckConfig{}, dimRow("alice", "10.0.0.7", "shop"))
+	require.Len(t, labels, 1)
+	require.Equal(t, "alice", labels[0]["usename"])
+	require.Equal(t, "10.0.0.7", labels[0]["client_addr"])
+	require.Equal(t, "shop", labels[0]["application_name"])
+
+	labels = ashMetricsFor(t, agent.CheckConfig{}, dimRow("", "", ""))
+	for _, k := range []string{"usename", "client_addr", "application_name"} {
+		require.NotContains(t, labels[0], k)
+	}
+}
+
+// ASH-D-005: dimensions [usename] keeps only usename; rows that differ only by
+// client_addr merge into one metric.
+func TestASHD005_OnlyListedDimensions(t *testing.T) {
+	cfg := agent.CheckConfig{Dimensions: &[]string{"usename"}}
+	labels := ashMetricsFor(t, cfg, dimRow("alice", "10.0.0.7", "shop"), dimRow("alice", "10.0.0.8", "shop"))
+	require.Len(t, labels, 1)
+	require.Equal(t, "alice", labels[0]["usename"])
+	require.NotContains(t, labels[0], "client_addr")
+	require.NotContains(t, labels[0], "application_name")
+}
+
+// ASH-D-007: dimensions [] turns all three off.
+func TestASHD007_EmptyListTurnsAllOff(t *testing.T) {
+	labels := ashMetricsFor(t, agent.CheckConfig{Dimensions: &[]string{}}, dimRow("alice", "10.0.0.7", "shop"))
+	require.Len(t, labels, 1)
+	for _, k := range []string{"usename", "client_addr", "application_name"} {
+		require.NotContains(t, labels[0], k)
+	}
 }

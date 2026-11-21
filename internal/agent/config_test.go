@@ -586,3 +586,26 @@ checks:
 func TestMaxPushIntervalIsTheServerStaleness(t *testing.T) {
 	require.Equal(t, store.InstanceStaleAfter, maxPushInterval)
 }
+
+// ASH-D-006: an unknown dimension is a configuration error with the exact
+// message; dimensions under another check are refused.
+func TestASHD006_UnknownDimensionFails(t *testing.T) {
+	base := `server: {url: http://localhost:8080, token: test}
+identity_path: /tmp/id
+buffer: {path: /tmp/buf}
+targets: [{name: pg, dsn: postgres://localhost/app}]
+checks: `
+	path := writeConfigFile(t, base+`{ash: {dimensions: [foo]}}`)
+	_, err := LoadConfig(path)
+	require.ErrorContains(t, err, `checks.ash.dimensions: unknown dimension "foo"`)
+
+	path = writeConfigFile(t, base+`{activity: {dimensions: [usename]}}`)
+	_, err = LoadConfig(path)
+	require.ErrorContains(t, err, "only checks.ash takes dimensions")
+
+	cfg := loadChecksYAML(t, `{ash: {dimensions: [usename, client_addr]}}`)
+	u, c, a := cfg.Checks["ash"].ASHDimensions()
+	require.Equal(t, []bool{true, true, false}, []bool{u, c, a})
+	u, c, a = CheckConfig{}.ASHDimensions()
+	require.Equal(t, []bool{true, true, true}, []bool{u, c, a})
+}

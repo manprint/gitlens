@@ -146,6 +146,35 @@ type CheckConfig struct {
 	// metrics_ash rows, no error, and an explicit "enabled": false from the
 	// API — never an empty result indistinguishable from an idle database).
 	Enabled *bool `yaml:"enabled"`
+	// Dimensions (ash only) lists the text dimensions the sampler keeps: nil
+	// keeps all three, an empty list turns them all off.
+	Dimensions *[]string `yaml:"dimensions,omitempty"`
+}
+
+// ASH text dimensions accepted by checks.ash.dimensions.
+const (
+	ASHDimUsename         = "usename"
+	ASHDimClientAddr      = "client_addr"
+	ASHDimApplicationName = "application_name"
+)
+
+// ASHDimensions resolves checks.ash.dimensions: all on when the key is unset,
+// otherwise on only for the listed names.
+func (c CheckConfig) ASHDimensions() (usename, clientAddr, applicationName bool) {
+	if c.Dimensions == nil {
+		return true, true, true
+	}
+	for _, d := range *c.Dimensions {
+		switch d {
+		case ASHDimUsename:
+			usename = true
+		case ASHDimClientAddr:
+			clientAddr = true
+		case ASHDimApplicationName:
+			applicationName = true
+		}
+	}
+	return usename, clientAddr, applicationName
 }
 
 // ByApplicationEnabled resolves checks.activity.by_application: on unless the
@@ -306,6 +335,18 @@ func (c *Config) validate() error {
 		// unbounded value would let one check hold as many series as it asks.
 		if check.TopN < 0 || check.TopN > maxTopN {
 			return fmt.Errorf("validation: checks.%s.top_n must be between 0 and %d", name, maxTopN)
+		}
+		if check.Dimensions != nil {
+			if name != "ash" {
+				return fmt.Errorf("validation: checks.%s.dimensions: only checks.ash takes dimensions", name)
+			}
+			for _, d := range *check.Dimensions {
+				switch d {
+				case ASHDimUsename, ASHDimClientAddr, ASHDimApplicationName:
+				default:
+					return fmt.Errorf("checks.ash.dimensions: unknown dimension %q", d)
+				}
+			}
 		}
 	}
 

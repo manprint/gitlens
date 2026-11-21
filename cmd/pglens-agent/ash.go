@@ -38,7 +38,7 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg, w
 	conn := &ashConn{mgr: mgr, base: ctx, clk: clk}
 
 	agg := ash.New(clk, ashWindow, ashMaxKeys)
-	sampler := ash.NewSampler(conn, clk, agg.Add)
+	sampler := ash.NewSampler(conn, clk, ashRowFilter(cfg, agg.Add))
 	if cfg.Interval != "" {
 		if d, err := time.ParseDuration(cfg.Interval); err == nil {
 			sampler.SetInterval(d)
@@ -327,6 +327,15 @@ func ashWindowToMetrics(w ash.Window) []wire.Metric {
 		if b.Key.HasQueryID {
 			labels["queryid"] = strconv.FormatInt(b.Key.QueryID, 10)
 		}
+		for name, v := range map[string]string{
+			agent.ASHDimUsename:         b.Key.Usename,
+			agent.ASHDimClientAddr:      b.Key.ClientAddr,
+			agent.ASHDimApplicationName: b.Key.ApplicationName,
+		} {
+			if v != "" {
+				labels[name] = v
+			}
+		}
 		metrics = append(metrics, wire.Metric{
 			Name:   "ash_samples",
 			Value:  float64(b.Samples),
@@ -335,4 +344,22 @@ func ashWindowToMetrics(w ash.Window) []wire.Metric {
 		})
 	}
 	return metrics
+}
+
+// ashRowFilter blanks the dimensions checks.ash.dimensions turns off before a
+// row reaches the aggregator, so rows that differ only there merge into one key.
+func ashRowFilter(cfg agent.CheckConfig, add func(ash.SampleRow)) func(ash.SampleRow) {
+	usename, clientAddr, applicationName := cfg.ASHDimensions()
+	return func(r ash.SampleRow) {
+		if !usename {
+			r.Usename = ""
+		}
+		if !clientAddr {
+			r.ClientAddr = ""
+		}
+		if !applicationName {
+			r.ApplicationName = ""
+		}
+		add(r)
+	}
 }

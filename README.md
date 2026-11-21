@@ -1520,7 +1520,7 @@ checks:
   archiver:         { interval: 60s }
   database_stats:  { interval: 30s }        # Per-database counters and size
   stat_statements: { interval: 60s, top_n: 50 }  # Top N queries (requires pg_stat_statements)
-  ash:             { interval: 1s }         # Activity sampling (ASH); lower for sensitive instances
+  ash:             { interval: 1s, dimensions: [usename, client_addr, application_name] } # Activity sampling (ASH); lower for sensitive instances; dimensions defaults to all three, [] turns them off
   replication_streaming:   { interval: 10s }  # Replication lag from primary
   replication_receiver:    { interval: 10s }  # Replication status on standby
   replication_slots:       { interval: 15s }  # Replication slot status
@@ -2403,6 +2403,8 @@ curl -s -b cookies.txt "localhost:8080/api/v1/ash/top?instance_id=11111111-1111-
 ```
 
 Configuration: `ash.interval` (default `1s`). Lower the interval for sensitive instances. See Agent configuration above for `checks.ash.interval`.
+
+Each sample also keeps three text dimensions: the user (`usename`), the client address (`client_addr`, the host without netmask, empty for a Unix socket) and the application (`application_name`). Values longer than 64 bytes are cut. `checks.ash.dimensions` lists the ones to keep (default all three); `[]` turns them all off, and an unknown name is a configuration error. A dimension that is off, or a value that is unknown, sends no label, so those samples merge.
 
 ## Events
 

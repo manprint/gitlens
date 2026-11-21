@@ -29,3 +29,6 @@ Gates: G-GO-FULL 35 pkgs ok; G-GO-INT TestINTMXW001/002/003 pass (pg15+pg18); G-
 
 ## 2026-11-21 2.1/1 complete unit:2.1:1
 Gates: G-GO-FOCUS ./internal/ash/ TestASHD001/002/003 pass; ./internal/ash ./cmd/pglens-agent -race pass; G-GO-INT TestINTASHD001 + TestINTASH001-008 pg15+pg18 pass; G-RO pass; go build ./... ok; review: self-review (agent:opus) accepted; changes: SampleRow/Key + Usename, ClientAddr, ApplicationName; query adds usename, host(client_addr), application_name; cut64; Add(r SampleRow); keyLess tie-break; caller passes agg.Add; watch_test mock tolerates extra columns; notes: self-review agent:opus: only callers in cmd/pglens-agent and internal/ash; overflow otherKey keeps '' dimensions (I-2 TestASHD003)
+
+## 2026-11-21 2.2/1 complete unit:2.2:1
+Gates: G-GO-FOCUS ./cmd/pglens-agent ./internal/agent TestASHD004-007 pass; both packages -race pass; make lint 0 issues; review: self-review (agent:opus) accepted; changes: CheckConfig.Dimensions + ASHDimensions(); validation (unknown name, non-ash key); ashRowFilter blanks off dimensions before Add; ashWindowToMetrics adds non-empty labels; README + deploy/agent.example.yaml; notes: self-review agent:opus: unknown-dimension error text exact (no validation: prefix, per contract)
