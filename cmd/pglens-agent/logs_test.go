@@ -92,7 +92,8 @@ func TestPGL017ScrapeCountsShipsAndSaves(t *testing.T) {
 		jsonLine(3, "LOG", "00000", "connection received: host=[local]", ""),
 	)
 	h.loop.scrape(context.Background())
-	require.Len(t, h.results, 1)
+	require.Len(t, h.results, 2, "the result and the note of the text-format plan")
+	require.Equal(t, autoExplainFormatNotJSON, h.results[1].SkipReason)
 	r := h.results[0]
 	require.Equal(t, logsCheck, r.Check)
 	v, ok := metric(r, "pg_log_events", pglog.ClassErrorStatement)

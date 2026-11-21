@@ -1,0 +1,3 @@
+duration: 0.006 ms  plan:
+Query Text: SET auto_explain.log_format=text; SELECT 1
+Result  (cost=0.00..0.01 rows=1 width=4) (actual time=0.001..0.001 rows=1.00 loops=1)

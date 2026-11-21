@@ -45,6 +45,7 @@ type logLoop struct {
 	readAt   time.Time
 	loc      *time.Location
 	locKnown bool
+	plans    planMemo
 }
 
 // logState holds the saved positions of every target in one file, shared by
@@ -148,7 +149,7 @@ func (l *logLoop) scrape(ctx context.Context) {
 		}
 		return
 	}
-	scrape := logScrape{bytesSkipped: skipped, statementText: l.cfg.LogStatementText()}
+	scrape := logScrape{bytesSkipped: skipped, statementText: l.cfg.LogStatementText(), plans: &l.plans}
 	for _, c := range chunks {
 		recs, consumed := pglog.Split(format, c.Data, pglog.MaxLineBytes)
 		scrape.bytesRead += int64(consumed)
@@ -168,7 +169,11 @@ func (l *logLoop) scrape(ctx context.Context) {
 	if skipped > 0 {
 		l.logf("warning: logs: %s: backlog over 16 × max_bytes_per_interval, skipped %d bytes", l.target, skipped)
 	}
-	l.emit(logResult(scrape, l.clk.Now()))
+	result, formatNotJSON := logResult(scrape, l.clk.Now())
+	l.emit(result)
+	if formatNotJSON {
+		l.note(autoExplainFormatNotJSON)
+	}
 	switch {
 	case !l.cur.EnglishMessages():
 		l.note(logsMessagesNotEnglish)

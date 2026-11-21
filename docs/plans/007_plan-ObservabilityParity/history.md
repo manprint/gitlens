@@ -110,3 +110,6 @@ Gates: G-GO-FOCUS (readiness, server, i18n, store, pglog, alert, agent, deploy),
 
 ## 2026-11-21 P6/1 complete unit:P6:1
 Gates: G-GO-FULL rc=0, G-GO-INT TestINTPGL001-005 PASS, G-RO TestINTRO001 PASS, G-API no diff, G-WEB-FULL rc=0 (2072 tests, coverage gate, budget), G-I18N rc=0; review: self-review (agent:opus) accepted; changes: none (closure); notes: review: integration (INTPGL001-005), I-1 G-RO, I-4 TestPGL020, I-9 TestPGL014/015, position rules A19 (pglog source tests), default config off TestPGL016 + startLogs guard; README PostgreSQL logs and MONITORING_READINESS RDY-LOG-01 checked
+
+## 2026-11-21 7.1/1 complete unit:7.1:1
+Gates: G-GO-FOCUS pglog/agent/cmd (race, shuffle), TestAEX001-006, TestINTAEX001 + TestINTPGL002/003 PASS, G-RO PASS, golangci-lint 0 issues; review: self-review (agent:opus) accepted; changes: pglog.ParseAutoExplain + fixtures from postgres:18.6 auto_explain; agent.PlanHash; log loop ships plan facts (body memo 1 h/5000, 50 per scrape, 256 KiB body cap, drop reasons, note auto_explain_format_not_json); TestPGL017 expects the note; notes: A24

@@ -508,6 +508,10 @@ func blockCommentEnd(statement string) int {
 	return -1
 }
 
+// PlanHash is the structural hash of a FORMAT JSON plan, the same one the
+// EXPLAIN command stores (plan 007 phase 7).
+func PlanHash(plan json.RawMessage) (string, error) { return planHash(plan) }
+
 func planHash(plan json.RawMessage) (string, error) {
 	var value any
 	if err := json.Unmarshal(plan, &value); err != nil {

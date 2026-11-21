@@ -1,0 +1,19 @@
+duration: 0.010 ms  plan:
+{
+  "Query Text": "SET auto_explain.log_analyze=off; SELECT relname FROM pg_class WHERE oid = 1259",
+  "Plan": {
+    "Node Type": "Index Scan",
+    "Parallel Aware": false,
+    "Async Capable": false,
+    "Scan Direction": "Forward",
+    "Index Name": "pg_class_oid_index",
+    "Relation Name": "pg_class",
+    "Alias": "pg_class",
+    "Startup Cost": 0.27,
+    "Total Cost": 8.29,
+    "Plan Rows": 1,
+    "Plan Width": 64,
+    "Disabled": false,
+    "Index Cond": "(oid = '1259'::oid)"
+  }
+}

@@ -29,6 +29,8 @@ type logScrape struct {
 	bytesRead     int64
 	bytesSkipped  int64
 	statementText bool
+	// plans remembers the plan bodies already shipped; nil starts empty.
+	plans *planMemo
 }
 
 // logText cuts a text to max bytes on a rune boundary and withholds any text
@@ -98,10 +100,12 @@ func gauge(name string, v float64, labels map[string]string) wire.Metric {
 }
 
 // logResult builds the logs check result of one scrape: per-class line
-// counts, the always-present problem counters, byte counts, and at most
-// logFactsPerScrape log_event facts.
-func logResult(s logScrape, now time.Time) wire.Result {
+// counts, the always-present problem counters, byte counts, at most
+// logFactsPerScrape log_event facts and at most planFactsPerScrape plan facts.
+// formatNotJSON reports an auto_explain plan written in another format.
+func logResult(s logScrape, now time.Time) (r wire.Result, formatNotJSON bool) {
 	perClass := map[string]int{}
+	plans := newPlanScrape(s.plans, now)
 	var facts []wire.Fact
 	dropped := 0
 	for _, e := range s.entries {
@@ -110,6 +114,10 @@ func logResult(s logScrape, now time.Time) wire.Result {
 			continue
 		}
 		perClass[class]++
+		if class == pglog.ClassAutoExplainPlan {
+			plans.add(e)
+			continue
+		}
 		if !pglog.Shipped(class) {
 			continue
 		}
@@ -126,7 +134,7 @@ func logResult(s logScrape, now time.Time) wire.Result {
 		classes = append(classes, c)
 	}
 	sort.Strings(classes)
-	metrics := make([]wire.Metric, 0, len(classes)+7)
+	metrics := make([]wire.Metric, 0, len(classes)+12)
 	for _, c := range classes {
 		metrics = append(metrics, gauge("pg_log_events", float64(perClass[c]), map[string]string{"class": c}))
 	}
@@ -139,5 +147,7 @@ func logResult(s logScrape, now time.Time) wire.Result {
 		gauge("pg_log_bytes_skipped", float64(s.bytesSkipped), nil),
 		gauge("pg_log_events_dropped", float64(dropped), nil),
 	)
-	return wire.Result{Check: logsCheck, TS: now, Metrics: metrics, Facts: facts}
+	metrics = append(metrics, plans.metrics()...)
+	facts = append(facts, plans.facts...)
+	return wire.Result{Check: logsCheck, TS: now, Metrics: metrics, Facts: facts}, plans.formatNotJSON
 }
