@@ -11,7 +11,7 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Scope: plan 007 · COMPLETE · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
 - Base: HEAD c91aecfaa35f927fe05e8821b280806196c9f20e + tree 62c11f4af78fe2d3a07f4b35b6def5b554d6f4cc · branch main · last WIP tree none
-- Last closure: unit:PLAN:1
+- Last closure: 25293e6 (PLAN:1; legacy SHA reference, V001-F1)
 - Next: none · PLAN 007 COMPLETE
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
@@ -68,25 +68,25 @@ none
 | 0 Baseline and test images | DONE | 1 | 0.1–0.2 | unit:P0:1 |
 | 1 Multixact wraparound rule | DONE | 1 | 1.1–1.3 | unit:P1:1 |
 | 2 ASH dimensions | DONE | 2 | 2.1–2.5 | unit:P2:2 |
-| 3 Notification channels | DONE | 1 | 3.1–3.4 | unit:P3:1 |
-| 4 Period A versus B | DONE | 1 | 4.1–4.3 | unit:P4:1 |
-| 5 Rollups | DONE | 1 | 5.1–5.4 | unit:P5:1 |
-| 6 Log ingest | DONE | 1 | 6.1–6.6 | unit:P6:1 |
-| 7 Automatic plans | DONE | 1 | 7.1–7.4 | unit:P7:1 |
-| 8 Autovacuum history | DONE | 1 | 8.1–8.3 | unit:P8:1 |
-| 9 Plan insights | DONE | 1 | 9.1–9.3 | unit:P9:1 |
-| 10 Validated index suggestions | DONE | 1 | 10.1–10.4 | unit:P10:1 |
-| 11 Query to service link | DONE | 1 | 11.1–11.4 | unit:P11:1 |
-| 12 Per-process OS metrics | DONE | 1 | 12.1–12.4 | unit:P12:1 |
-| 13 Tuning workbook | DONE | 1 | 13.1–13.4 | unit:P13:1 |
-| 14 MCP server | DONE | 1 | 14.1–14.4 | unit:P14:1 |
-| 15 Integration and documents | DONE | 1 | 15.1–15.3, 15.F1 | unit:P15:1 |
-| PLAN | DONE | 1 | — | unit:PLAN:1 |
+| 3 Notification channels | DONE | 1 | 3.1–3.4 | 04e7077 |
+| 4 Period A versus B | DONE | 1 | 4.1–4.3 | a58d37a |
+| 5 Rollups | DONE | 1 | 5.1–5.4 | d3241a3 |
+| 6 Log ingest | DONE | 1 | 6.1–6.6 | 3035c8f |
+| 7 Automatic plans | DONE | 1 | 7.1–7.4 | 3a6d840 |
+| 8 Autovacuum history | DONE | 1 | 8.1–8.3 | a3783cc |
+| 9 Plan insights | DONE | 1 | 9.1–9.3 | d8fc7aa |
+| 10 Validated index suggestions | DONE | 1 | 10.1–10.4 | cd94f39 |
+| 11 Query to service link | DONE | 1 | 11.1–11.4 | e841290 |
+| 12 Per-process OS metrics | DONE | 1 | 12.1–12.4 | 1ef70b2 |
+| 13 Tuning workbook | DONE | 1 | 13.1–13.4 | e97e8e7 |
+| 14 MCP server | DONE | 1 | 14.1–14.4 | 4242004 |
+| 15 Integration and documents | DONE | 1 | 15.1–15.3, 15.F1 | c91aecf |
+| PLAN | DONE | 1 | — | 25293e6 |
 
 Corrections (V001):
 | Correction | Status | Attempt | Closes | Closure ref |
 |------------|--------|---------|--------|-------------|
-| C1 | TODO | 1 | V001-F1 | — |
+| C1 | DONE | 1 | V001-F1 | unit:C1:1 |
 | C2 | TODO | 1 | V001-F2 | — |
 
 Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED (reason kept), BLOCKED.

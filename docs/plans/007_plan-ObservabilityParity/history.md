@@ -305,3 +305,6 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 
 ## 2026-11-21 PLAN/1 complete unit:PLAN:1
 Gates: G-FINAL: G-GO-FULL 0, G-I18N 0, G-RO 0, G-WEB-FULL 0, G-API 0 (rerun on final code), G-GO-INT-ALL green (37 packages + agent rerun after 15.F1); scenario 15.2 reused: no product code after 15.2; review: self-review (agent:opus) accepted; changes: STATE.md compacted (decisions A1–A52 and readiness moved here); notes: final tree differs from the P15 gate tree only in integration-tagged tests (15.F1) and plan files; every phase 0–15 DONE
+
+## 2026-11-21 C1/1 complete (V001-F1)
+Gates: board-ref script: P0–P2 `unit:` refs 1 match each, P3…PLAN SHA refs trailers OK (14); review: self-review (agent:opus) accepted; changes: STATE.md §11 closure refs P3…PLAN → SHAs, §1 Last closure; notes: no history rewrite (V001-D1); completion commits from 3.3 used PEV-Result DONE/PASS instead of complete.
