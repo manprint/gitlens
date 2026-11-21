@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { refreshLocale, setServerLanguage } from '@/i18n/store'
 import { renderWithProviders } from '@/test/render'
 
-const mocks = vi.hoisted(() => ({ logs: vi.fn(), classes: vi.fn() }))
+const mocks = vi.hoisted(() => ({ logs: vi.fn(), classes: vi.fn(), session: vi.fn() }))
 
 vi.mock('@/api/queries', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/queries')>()),
   useLogs: mocks.logs,
   useLogClasses: mocks.classes,
+  useSession: mocks.session,
 }))
 
 import { LogsPage } from './LogsPage'
@@ -43,6 +44,8 @@ beforeEach(() => {
   vi.useRealTimers()
   mocks.logs.mockReset()
   mocks.classes.mockReset()
+  mocks.session.mockReset()
+  mocks.session.mockReturnValue(result({ authenticated: true }))
 })
 
 afterEach(async () => {
@@ -74,6 +77,34 @@ describe('LogsPage', () => {
     expect(within(detail).getByText('Process 4242 waits for ShareLock')).toBeInTheDocument()
     expect(within(detail).getByText('UPDATE t SET v = 1')).toBeInTheDocument()
     expect(within(detail).getByText('40P01')).toBeInTheDocument()
+  })
+
+  it('UI-QTAG-003 a trace id links to the tracing tool, else shows text and copy', async () => {
+    const trace = '4bf92f3577b34da6a3ce929d0e0e4736'
+    mocks.logs.mockReturnValue(result([{ ...deadlock, trace_id: trace }]))
+    mocks.classes.mockReturnValue(result([]))
+    mocks.session.mockReturnValue(
+      result({
+        authenticated: true,
+        trace_url_template: 'https://tracing.example.com/trace/{trace_id}',
+      }),
+    )
+    const first = render()
+    const link = await within(await screen.findByTestId('log-row')).findByRole('link', {
+      name: `Open trace ${trace} in the tracing tool`,
+    })
+    expect(link).toHaveAttribute('href', `https://tracing.example.com/trace/${trace}`)
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveTextContent('4bf92f35')
+    first.unmount()
+
+    mocks.session.mockReturnValue(result({ authenticated: true }))
+    render()
+    const row = await screen.findByTestId('log-row')
+    expect(within(row).queryByRole('link', { name: /Open trace/ })).toBeNull()
+    expect(within(row).getByText('4bf92f35')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: /Copy/ })).toBeInTheDocument()
   })
 
   it('UI-PGL-002 a class filter sends class=', async () => {

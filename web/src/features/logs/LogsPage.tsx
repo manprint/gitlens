@@ -7,6 +7,7 @@ import type { components } from '@/api/generated'
 import { HelpLink } from '@/components/layout/HelpLink'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SearchBox } from '@/components/layout/SearchBox'
+import { TraceId } from '@/components/layout/TraceId'
 import { Section } from '@/components/layout/Section'
 import { EmptyState, ErrorState } from '@/components/state'
 import { Badge } from '@/components/ui/badge'
@@ -70,6 +71,12 @@ function LogRow({ event, instanceId }: { event: LogEvent; instanceId: string }) 
             >
               {t('logs.row.query')}
             </Link>
+          ) : null}
+          {event.trace_id ? (
+            <span className="ml-2 inline-flex items-center gap-1 text-xs">
+              <span className="text-muted-foreground">{t('logs.row.trace')}</span>
+              <TraceId id={event.trace_id} />
+            </span>
           ) : null}
         </td>
       </tr>

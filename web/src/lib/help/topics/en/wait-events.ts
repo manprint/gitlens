@@ -459,6 +459,29 @@ export const waitEventsTopic: HelpTopic = {
       ],
     },
     {
+      id: 'services',
+      title: 'Services, endpoints and trace ids',
+      blocks: [
+        {
+          kind: 'text',
+          text: "Applications instrumented with sqlcommenter append a comment such as `/*application='shop',route='/cart',traceparent='00-…-01'*/` to every statement. The agent reads the tags of the sampled statement, keeps only the tag values and never ships the statement text. {{ui:ash.group.service}} is the `application` tag; {{ui:ash.group.endpoint}} is `route`, else `controller#action`. Sessions without tags show as {{ui:ash.dimension.untagged}}.",
+        },
+        {
+          kind: 'steps',
+          items: [
+            'Choose {{ui:ash.group.service}} or {{ui:ash.group.endpoint}} in {{ui:ash.groupBy.label}} to split the active sessions by application or route.',
+            'Click a series to filter the page by that value; the filter works with the other dimensions.',
+            'Rows of {{ui:shell.nav.logs}} and of the automatic plans show the first 8 characters of the trace id. With `PGLENS_TRACE_URL_TEMPLATE` set on the server they open the trace in your tracing tool; otherwise copy the full id.',
+          ],
+        },
+        {
+          kind: 'note',
+          tone: 'warning',
+          text: 'PostgreSQL keeps only the first `track_activity_query_size` bytes of a statement (1024 by default), so a long statement loses its trailing comment and counts as untagged. Raise the setting (restart required) or keep the comment short. Hourly rollups do not keep these dimensions.',
+        },
+      ],
+    },
+    {
       id: 'reading-together',
       title: 'Reading the groups together',
       blocks: [

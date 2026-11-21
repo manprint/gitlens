@@ -14,6 +14,15 @@ export const ASH_GROUP_LABELS: Record<AshChartGroup, MessageKey> = {
   usename: 'ash.group.usename',
   client_addr: 'ash.group.clientAddr',
   application_name: 'ash.group.applicationName',
+  service: 'ash.group.service',
+  endpoint: 'ash.group.endpoint',
+}
+
+/** The label of a dimension's empty value: a tag dimension's is (untagged). */
+export function ashUnknownLabel(dimension: AshDimension): MessageKey {
+  return dimension === 'service' || dimension === 'endpoint'
+    ? 'ash.dimension.untagged'
+    : 'ash.dimension.unknown'
 }
 
 export type AshWaitGroupId = 'cpu' | 'io' | 'locks' | 'client' | 'other'

@@ -81,6 +81,7 @@ export const queries = {
   'queries.planSamples.analyzedYes': 'Yes',
   'queries.planSamples.analyzedNo': 'No',
   'queries.planSamples.parameters': 'Parameters',
+  'queries.planSamples.trace': 'Trace',
   'queries.planSamples.parametersHidden': 'Hidden',
   'queries.planSamples.parametersNone': 'Not stored',
   'queries.planSamples.showParameters': 'Show parameters',

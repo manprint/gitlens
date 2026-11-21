@@ -4,6 +4,7 @@ import { usePlanSamples } from '@/api/queries'
 import type { Schemas } from '@/api/types'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { SimpleTable, type SimpleColumn } from '@/components/layout/SimpleTable'
+import { TraceId } from '@/components/layout/TraceId'
 import { ErrorState } from '@/components/state/ErrorState'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/i18n/react'
@@ -83,6 +84,11 @@ export function PlanSamples({ instanceId, queryid, planHash, datname }: PlanSamp
         ) : (
           <code className="font-mono text-xs break-all">{row.parameters}</code>
         ),
+    },
+    {
+      id: 'trace',
+      header: t('queries.planSamples.trace'),
+      cell: (row) => (row.trace_id ? <TraceId id={row.trace_id} /> : null),
     },
   ]
 

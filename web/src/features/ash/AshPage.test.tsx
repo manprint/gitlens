@@ -128,7 +128,7 @@ describe('AshPage', () => {
   it('UI-RLP-004 a rollup response disables the session groupings and notes hourly averages', () => {
     renderAsh('/instances/instance-1/ash?range=90d', { ...ashResponse, resolution: '1h' })
     const groups = screen.getByTestId('ash-group-by')
-    for (const name of ['User', 'Client address', 'Application']) {
+    for (const name of ['User', 'Client address', 'Application', 'Service', 'Endpoint']) {
       expect(within(groups).getByRole('radio', { name })).toBeDisabled()
     }
     expect(within(groups).getByRole('radio', { name: 'Wait events' })).toBeEnabled()
@@ -136,7 +136,7 @@ describe('AshPage', () => {
       within(groups).getAllByTitle(
         'Not kept in hourly rollups: choose a range within the raw retention.',
       ),
-    ).toHaveLength(3)
+    ).toHaveLength(5)
     expect(screen.getByTestId('rollup-note')).toHaveTextContent(
       'Hourly averages (older than raw retention)',
     )

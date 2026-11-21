@@ -108,4 +108,42 @@ describe('ash i18n (plan 006 F3)', () => {
       await screen.findByRole('button', { name: 'Rimuovi il filtro Utente: (sconosciuto)' }),
     ).toBeInTheDocument()
   })
+
+  it('UI-QTAG-001 the group by control lists Service and Endpoint in en and it', async () => {
+    renderWithProviders(<AshPage instanceId="instance-1" />, {
+      route: '/instances/instance-1/ash?range=1h',
+    })
+    const en = await screen.findByRole('radiogroup', { name: 'Group by' })
+    for (const label of ['Service', 'Endpoint']) {
+      expect(within(en).getByLabelText(label)).toBeInTheDocument()
+    }
+    cleanup()
+
+    await setServerLanguage('it')
+    renderWithProviders(<AshPage instanceId="instance-1" />, {
+      route: '/instances/instance-1/ash?range=1h',
+    })
+    const it = await screen.findByRole('radiogroup', { name: 'Raggruppa per' })
+    for (const label of ['Servizio', 'Endpoint']) {
+      expect(within(it).getByLabelText(label)).toBeInTheDocument()
+    }
+  })
+
+  it('UI-QTAG-004 the empty service reads (untagged) and (senza tag)', async () => {
+    renderWithProviders(<AshPage instanceId="instance-1" />, {
+      route: '/instances/instance-1/ash?range=1h&service=-',
+    })
+    expect(
+      await screen.findByRole('button', { name: 'Remove the filter Service: (untagged)' }),
+    ).toBeInTheDocument()
+    cleanup()
+
+    await setServerLanguage('it')
+    renderWithProviders(<AshPage instanceId="instance-1" />, {
+      route: '/instances/instance-1/ash?range=1h&endpoint=-',
+    })
+    expect(
+      await screen.findByRole('button', { name: 'Rimuovi il filtro Endpoint: (senza tag)' }),
+    ).toBeInTheDocument()
+  })
 })

@@ -461,6 +461,29 @@ export const waitEventsTopic: HelpTopic = {
       ],
     },
     {
+      id: 'services',
+      title: 'Servizi, endpoint e trace id',
+      blocks: [
+        {
+          kind: 'text',
+          text: "Le applicazioni strumentate con sqlcommenter aggiungono a ogni statement un commento come `/*application='shop',route='/cart',traceparent='00-…-01'*/`. L'agent legge i tag dello statement campionato, tiene solo i valori dei tag e non invia mai il testo dello statement. {{ui:ash.group.service}} è il tag `application`; {{ui:ash.group.endpoint}} è `route`, altrimenti `controller#action`. Le sessioni senza tag appaiono come {{ui:ash.dimension.untagged}}.",
+        },
+        {
+          kind: 'steps',
+          items: [
+            'Scegli {{ui:ash.group.service}} o {{ui:ash.group.endpoint}} in {{ui:ash.groupBy.label}} per dividere le sessioni attive per applicazione o route.',
+            'Fai clic su una serie per filtrare la pagina su quel valore; il filtro si combina con le altre dimensioni.',
+            "Le righe di {{ui:shell.nav.logs}} e dei piani automatici mostrano i primi 8 caratteri del trace id. Con `PGLENS_TRACE_URL_TEMPLATE` impostato sul server aprono la traccia nello strumento di tracing; altrimenti copia l'id completo.",
+          ],
+        },
+        {
+          kind: 'note',
+          tone: 'warning',
+          text: 'PostgreSQL conserva solo i primi `track_activity_query_size` byte di uno statement (1024 di default), quindi uno statement lungo perde il commento finale e risulta senza tag. Aumenta il parametro (serve un riavvio) o tieni corto il commento. I rollup orari non conservano queste dimensioni.',
+        },
+      ],
+    },
+    {
       id: 'reading-together',
       title: 'Lettura dei gruppi insieme',
       blocks: [

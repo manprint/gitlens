@@ -24,7 +24,11 @@ import { useT } from '@/i18n/react'
 import { queryWindowOf, rangeLabelKey } from '@/lib/timerange'
 
 import { AshBreakdown } from './AshBreakdown'
-import { ASH_GROUP_LABELS as GROUP_LABELS, type AshChartGroup } from '@/lib/ashGroups'
+import {
+  ASH_GROUP_LABELS as GROUP_LABELS,
+  ashUnknownLabel,
+  type AshChartGroup,
+} from '@/lib/ashGroups'
 import { AshTopQueries } from './AshTopQueries'
 import { AshCompare } from './AshCompare'
 import { type CompareMode, readCompareMode } from '@/lib/compare'
@@ -189,7 +193,7 @@ function FilterChips({ filters, onRemove }: FilterChipsProps) {
         const raw = filters[dimension] ?? ''
         const vars = {
           dimension: t(GROUP_LABELS[dimension]),
-          value: raw === ASH_UNKNOWN ? t('ash.dimension.unknown') : raw,
+          value: raw === ASH_UNKNOWN ? t(ashUnknownLabel(dimension)) : raw,
         }
         return (
           <li

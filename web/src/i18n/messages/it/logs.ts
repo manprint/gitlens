@@ -33,6 +33,7 @@ export const logs: Translation<typeof english> = {
   'logs.row.expand': 'Mostra il dettaglio di questa riga',
   'logs.row.collapse': 'Nascondi il dettaglio di questa riga',
   'logs.row.query': 'Apri la query',
+  'logs.row.trace': 'Traccia',
   'logs.row.application': 'Applicazione',
   'logs.row.pid': 'PID',
   'logs.row.sqlstate': 'SQLSTATE',

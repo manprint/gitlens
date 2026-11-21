@@ -13,6 +13,9 @@ export type AshBucket = Pick<
   usename?: string | undefined
   client_addr?: string | undefined
   application_name?: string | undefined
+  /** From the statements' sqlcommenter tags; empty when untagged. */
+  service?: string | undefined
+  endpoint?: string | undefined
 }
 
 export type AshTopEntry = Omit<Schemas['AshTopEntry'], 'queryid'> & {
@@ -21,7 +24,13 @@ export type AshTopEntry = Omit<Schemas['AshTopEntry'], 'queryid'> & {
 }
 
 /** The session dimensions a range can be grouped and filtered by. */
-export const ASH_DIMENSIONS = ['usename', 'client_addr', 'application_name'] as const
+export const ASH_DIMENSIONS = [
+  'usename',
+  'client_addr',
+  'application_name',
+  'service',
+  'endpoint',
+] as const
 
 export type AshDimension = (typeof ASH_DIMENSIONS)[number]
 
@@ -83,6 +92,8 @@ const GROUP_COLUMNS: Record<AshGroupBy, keyof AshBucket> = {
   usename: 'usename',
   client_addr: 'client_addr',
   application_name: 'application_name',
+  service: 'service',
+  endpoint: 'endpoint',
 }
 
 const OTHER = 'other'

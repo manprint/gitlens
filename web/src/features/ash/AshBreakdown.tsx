@@ -20,7 +20,12 @@ import {
 } from '@/lib/ash'
 import { useT } from '@/i18n/react'
 import type { MessageKey } from '@/i18n/messages/en'
-import { ASH_GROUP_LABELS as GROUP_LABELS, groupSeries, type AshChartGroup } from '@/lib/ashGroups'
+import {
+  ASH_GROUP_LABELS as GROUP_LABELS,
+  ashUnknownLabel,
+  groupSeries,
+  type AshChartGroup,
+} from '@/lib/ashGroups'
 import type { CaptionId } from '@/lib/captions'
 
 const MAX_VISIBLE_SERIES = ASH_WAIT_TYPES.length
@@ -33,6 +38,8 @@ const EMPTY_LABELS: Record<AshChartGroup, MessageKey> = {
   usename: 'ash.empty.dimension',
   client_addr: 'ash.empty.dimension',
   application_name: 'ash.empty.dimension',
+  service: 'ash.empty.dimension',
+  endpoint: 'ash.empty.dimension',
 }
 
 const STACK_CAPTIONS: Record<AshChartGroup, CaptionId> = {
@@ -42,6 +49,8 @@ const STACK_CAPTIONS: Record<AshChartGroup, CaptionId> = {
   usename: 'ash.stack-dimension',
   client_addr: 'ash.stack-dimension',
   application_name: 'ash.stack-dimension',
+  service: 'ash.stack-dimension',
+  endpoint: 'ash.stack-dimension',
 }
 
 interface AshBreakdownProps {
@@ -142,7 +151,7 @@ export function AshBreakdown({
   const t = useT()
   const { range } = useTimeRange()
   const dimension = isAshDimension(groupBy)
-  const unknown = t('ash.dimension.unknown')
+  const unknown = t(dimension ? ashUnknownLabel(groupBy) : 'ash.dimension.unknown')
   const charted = chartSeries(buckets, groupBy, resolutionSeconds)
   const folded = charted.folded
   // A dimension's empty value is plotted as (unknown) and selected as "-".

@@ -2501,6 +2501,47 @@ Each sample also keeps three text dimensions: the user (`usename`), the client a
 
 `/api/v1/ash` takes `group_by=usename`, `client_addr` or `application_name`, and both `/api/v1/ash` and `/api/v1/ash/top` take the filters `usename=`, `client_addr=` and `application_name=`; the value `-` selects the samples whose dimension is empty. In the console, Wait events › Group by offers User, Client address and Application; an empty value reads `(unknown)`, and selecting a series filters the page on it (a removable chip, kept in the URL).
 
+## Linking queries to services
+
+[sqlcommenter](https://google.github.io/sqlcommenter/) is a convention, with
+libraries for common stacks, that appends the caller's context to every SQL
+statement as a comment:
+`/*application='shop',route='/cart',traceparent='00-<trace id>-<span id>-01'*/`.
+pglens reads these tags; the application only needs to turn sqlcommenter on.
+
+- **Python**: the sqlcommenter integrations for Django, SQLAlchemy and psycopg2,
+  or the OpenTelemetry instrumentations with `enable_commenter`; see the
+  sqlcommenter documentation, section Python.
+- **Java**: the sqlcommenter integrations for Spring and Hibernate; see the
+  sqlcommenter documentation, section Java.
+
+What pglens does with the tags:
+
+- **Wait events**: the agent reads the tags of every sampled statement and
+  keeps two dimensions, `service` (the `application` tag) and `endpoint`
+  (`route`, else `controller#action`, else `controller` or `action`). Values are
+  cut to 128 bytes; the statement text never leaves the agent.
+  `checks.ash.dimensions` turns them off like the other dimensions.
+  `/api/v1/ash` takes `group_by=service|endpoint` and the filters `service=` and
+  `endpoint=` (`-` selects untagged samples). In the console, Group by offers
+  Service and Endpoint; an empty value reads `(untagged)`. Hourly rollups do
+  not keep these dimensions.
+- **Trace id**: a valid `traceparent` gives log events and automatic plans a
+  `trace_id` (32 lowercase hex characters). `/api/v1/logs` and
+  `/api/v1/plans/samples` take `trace_id=` as a filter.
+- **Trace link**: set `PGLENS_TRACE_URL_TEMPLATE` on the server, for example
+  `https://tracing.example.com/trace/{trace_id}`, and the console shows each
+  trace id as a link to your tracing tool (new tab, `rel="noopener noreferrer"`).
+  The template must be an `http(s)` URL with a host and contain `{trace_id}`;
+  an invalid template stops the server at start. Without it the console shows
+  the first 8 characters with a copy button.
+
+**Limit**: PostgreSQL keeps only the first `track_activity_query_size` bytes of
+a statement (1024 by default) in `pg_stat_activity`. sqlcommenter appends the
+comment at the end, so a longer statement loses its tags and counts as
+untagged. Raise `track_activity_query_size` (restart required) or keep the
+comment short.
+
 ## PostgreSQL logs
 
 The agent can read the PostgreSQL server log, keep its notable lines and ship them to the server. The console shows them under **PostgreSQL logs** on each instance (`/instances/<id>/logs`), and four alert rules fire on the severe ones. The reader is off by default.

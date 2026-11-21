@@ -31,6 +31,7 @@ export const logs = {
   'logs.row.expand': 'Show the detail of this line',
   'logs.row.collapse': 'Hide the detail of this line',
   'logs.row.query': 'Open the query',
+  'logs.row.trace': 'Trace',
   'logs.row.application': 'Application',
   'logs.row.pid': 'PID',
   'logs.row.sqlstate': 'SQLSTATE',

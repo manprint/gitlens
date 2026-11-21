@@ -13,4 +13,6 @@ export const ROLLUP_DROPPED_DIMENSIONS: readonly AshDimension[] = [
   'usename',
   'client_addr',
   'application_name',
+  'service',
+  'endpoint',
 ]

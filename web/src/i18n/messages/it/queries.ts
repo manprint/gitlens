@@ -83,6 +83,7 @@ export const queries: Translation<typeof english> = {
   'queries.planSamples.analyzedYes': 'Sì',
   'queries.planSamples.analyzedNo': 'No',
   'queries.planSamples.parameters': 'Parametri',
+  'queries.planSamples.trace': 'Traccia',
   'queries.planSamples.parametersHidden': 'Nascosti',
   'queries.planSamples.parametersNone': 'Non salvati',
   'queries.planSamples.showParameters': 'Mostra parametri',
