@@ -308,3 +308,6 @@ Gates: G-FINAL: G-GO-FULL 0, G-I18N 0, G-RO 0, G-WEB-FULL 0, G-API 0 (rerun on f
 
 ## 2026-11-21 C1/1 complete (V001-F1)
 Gates: board-ref script: P0–P2 `unit:` refs 1 match each, P3…PLAN SHA refs trailers OK (14); review: self-review (agent:opus) accepted; changes: STATE.md §11 closure refs P3…PLAN → SHAs, §1 Last closure; notes: no history rewrite (V001-D1); completion commits from 3.3 used PEV-Result DONE/PASS instead of complete.
+
+## 2026-11-21 C2/1 complete (V001-F2)
+Gates: ID mapping script 291/291 planned IDs map to tests; review: self-review (agent:opus) accepted; changes: overview.md, phase_01.md (ASHD-INT-002 → INT-ASHD-002, WBK-INT-003 → INT-WBK-003); notes: plan text only.

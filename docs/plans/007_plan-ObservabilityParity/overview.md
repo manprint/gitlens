@@ -230,7 +230,7 @@ All sources accessed 2026-11-21. Local probes ran in throwaway Docker containers
 - Sources: https://github.com/ossc-db/pg_hint_plan `docs/installation.md`, `docs/hint_details.md` (master); tags `REL18_1_8_1`, `REL15_1_5_4` exist.
 - Documented fact: no `CREATE EXTENSION` needed; activated by `LOAD 'pg_hint_plan'` or a preload setting. Hints are read only from the first block comment `/*+ … */`; hint parsing stops at any character other than letters, digits, spaces, underscores, commas, parentheses.
 - Local result: a non-superuser `LOAD 'pg_hint_plan'` answers `access to library "pg_hint_plan" is not allowed`. The build on postgres:18.6-alpine with only `build-base` fails: `/usr/bin/flex: No such file or directory`.
-- ACCEPTED (autonomous), agent-1, 2026-11-21: the test image builds once `flex` and `bison` are added. Risk: it still fails. Guard: unit 0.2 builds the image; on failure the hint integration test WBK-INT-003 is skipped with a recorded reason and hints stay covered by unit tests WBK-004…006.
+- ACCEPTED (autonomous), agent-1, 2026-11-21: the test image builds once `flex` and `bison` are added. Risk: it still fails. Guard: unit 0.2 builds the image; on failure the hint integration test INT-WBK-003 is skipped with a recorded reason and hints stay covered by unit tests WBK-004…006.
 - Decision impact: D16.
 
 ### R10 — MCP
@@ -271,7 +271,7 @@ All sources accessed 2026-11-21. Local probes ran in throwaway Docker containers
 | Cardinality of new ASH dimensions | cap 100 keys per window, dimensions can be turned off | ASHD-003, ASHD-004 |
 | Secrets in logs and plans | off by default, credential filter, purge migration pattern | I-4 tests |
 | Log volume | byte budget per interval, start at end of file | I-9 tests |
-| Old agents with a new server and the reverse | additive labels and kinds; defaults `''` | ASHD-INT-002, IDXV-006 |
+| Old agents with a new server and the reverse | additive labels and kinds; defaults `''` | INT-ASHD-002, IDXV-006 |
 | Extension missing (`hypopg`, `pg_hint_plan`, `auto_explain`) | explicit error codes and help texts | IDXV-005, WBK-005, AEX-005 |
 | Low-power executor on large units | elementary units, agent-1 review before design where flagged | review records in STATE.md §7 |
 

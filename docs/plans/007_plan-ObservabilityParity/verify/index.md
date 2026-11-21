@@ -15,7 +15,7 @@ are not recomputed as findings are fixed; current unresolved findings are below.
 | ID | Severity | Title | Current status | Closed by / date | Evidence |
 |----|----------|-------|----------------|------------------|----------|
 | V001-F1 | MAJOR | Closure references P3…PLAN do not resolve | FIXED | C1 / 2026-11-21 | verify_001 F1 |
-| V001-F2 | MINOR | Two planned test IDs spelled differently | OPEN | C2 | verify_001 F2 |
+| V001-F2 | MINOR | Two planned test IDs spelled differently | FIXED | C2 / 2026-11-21 | verify_001 F2 |
 
 Statuses: OPEN, FIXED, ACCEPTED (user decision), OBSOLETE (reason recorded).
 Never silently remove a finding. Update the source report's resolution too.

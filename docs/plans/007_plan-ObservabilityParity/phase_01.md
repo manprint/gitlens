@@ -49,7 +49,7 @@ Plan revision: 1.
   3. S3 — `Makefile` target `pgext-image:` runs `test/pgext/build.sh`. `README.md`: what the image is for, the two versions, how to rebuild.
   4. S4 — check: `docker run --rm pglens-pgext:18 sh -c 'ls /usr/local/lib/postgresql/hypopg.so; ls /usr/local/lib/postgresql/pg_hint_plan.so; ls /pg_hint_plan.FAILED'`; expected: `hypopg.so` listed. Record in STATE.md §7 whether `pg_hint_plan.so` exists.
   Recovery boundary: none.
-  Failure handling: hypopg build fails → stop, ask agent-1. pg_hint_plan build fails → record "WBK-INT-003 will be skipped: pg_hint_plan not built" in STATE.md §8 and continue (R9 guard).
+  Failure handling: hypopg build fails → stop, ask agent-1. pg_hint_plan build fails → record "INT-WBK-003 will be skipped: pg_hint_plan not built" in STATE.md §8 and continue (R9 guard).
 - **Unit tests:** N/A — build tooling; S4 is the check.
 - **e2e tests:** N/A.
 - **Done:** image `pglens-pgext:18` exists locally with `hypopg.so`; the pg_hint_plan outcome is recorded; files reviewed; unit closed and committed (`test/pgext/*`, `Makefile` and `.gitignore` hunks only).

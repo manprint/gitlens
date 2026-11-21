@@ -5,7 +5,7 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
-- Run: verify 007 · audit V001 closed FAIL (1 MAJOR, 1 MINOR) · correction pass C1, C2 under this invocation (settings from §3: autonomy true, WIP on) · saved execution scope unchanged
+- Run: verify 007 · audit V001 closed FAIL (1 MAJOR, 1 MINOR) · correction pass done: C1, C2 DONE, findings FIXED · saved execution scope unchanged
 - Settings: autonomy true (explicit (prompt) `full-autonomous:true`) · WIP on (explicit (prompt) `--wip-commit`) · deadline none
 - Stop latch: none
 - Scope: plan 007 · COMPLETE · overrides autonomy true, WIP on, roster agent:opus (explicit)
@@ -87,7 +87,7 @@ Corrections (V001):
 | Correction | Status | Attempt | Closes | Closure ref |
 |------------|--------|---------|--------|-------------|
 | C1 | DONE | 1 | V001-F1 | unit:C1:1 |
-| C2 | TODO | 1 | V001-F2 | — |
+| C2 | DONE | 1 | V001-F2 | unit:C2:1 |
 
 Statuses: TODO, IN_PROGRESS, IN_REVIEW, DONE, SKIPPED (reason kept), BLOCKED.
 
