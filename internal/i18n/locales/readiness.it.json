@@ -140,5 +140,9 @@
   "readiness.aex01.title": "I piani automatici non sono in JSON",
   "readiness.aex01.summary": "auto_explain scrive i piani in un formato che l’agent non sa leggere: si conserva solo auto_explain.log_format = json.",
   "readiness.aex01.impact": "Mancano i piani automatici e i loro campioni nella cronologia dei piani.",
-  "readiness.aex01.fix": "Scrivi i piani di auto_explain in JSON"
+  "readiness.aex01.fix": "Scrivi i piani di auto_explain in JSON",
+  "readiness.av01.title": "Le esecuzioni di autovacuum non vanno nel log",
+  "readiness.av01.summary": "L’agent legge il log di PostgreSQL, ma con log_autovacuum_min_duration = -1 nessuna esecuzione di autovacuum o autoanalyze viene registrata.",
+  "readiness.av01.impact": "La cronologia di autovacuum per tabella resta vuota.",
+  "readiness.av01.fix": "Registra le esecuzioni di autovacuum più lunghe di 10 secondi"
 }

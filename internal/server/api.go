@@ -103,6 +103,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	a.registerFindingsRoutes(r)
 	a.registerPlanRoutes(r)
 	a.registerPlanSampleRoutes(r)
+	a.registerAutovacuumRoutes(r)
 	a.registerAuditRoutes(r)
 	a.registerRetentionRoutes(r)
 	a.registerAdvisorSettingsRoutes(r)

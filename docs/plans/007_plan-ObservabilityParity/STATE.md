@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 12:51 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 13:05 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD ef9b4c4e05abe358ba5afe9c4f30c7a7440c5602 + tree 513e59aa2c64ff9fd02243bf6ef89a3a2e2ae0b3 · branch main · last WIP tree none
-- Last closure: unit:8.2:1
-- Next: open 8.3 · next eligible: 8.3
+- Base: HEAD d0a411b24b1595b4993350ecf3a35b1291949326 + tree a95dec43b7a157b2ccf70bce1f34f44fffc1b978 · branch main · last WIP tree none
+- Last closure: unit:8.3:1
+- Next: open P8 · next eligible: P8
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -83,6 +83,7 @@ none
 - A26 (7.3): design note (self-approved by agent-1): parameter values travel only in the fact value; never in labels, keys, metrics, agent or server log lines, error texts (fixed texts in the purge handler) or audit rows (`args` holds only `{"cleared": n}`); the agent checks parameters for credentials only when it ships them (off: a parameter credential no longer drops the sample); the server checks again and stores NULL; the purge writes a `command_audit` row (no CHECK on `kind`). TestAEX013 is the unit part (400, no storage); the count, audit row and log checks run in TestINTAEX004.
 - A27 (8.1, 2026-11-21): autovacuum_run ValueJSON keys are the autovacuum_runs column names (so `wal_fpi`, not `wal_full_page_images`), letting the server map keys 1:1; TestINTAVH001 reads the log through the SQL source (`sqlLogLoop`, as TestINTAEX001) instead of a mounted directory: same parser path, no host mount. Fixtures captured from postgres:15.19-alpine and 18.6-alpine (PG 18 analyze also logs WAL usage).
 - A28 (8.2, 2026-11-21): the autovacuum_runs migration is `0039_autovacuum_runs.sql`, not 0037 as planned: 0037 (log alerts, phase 6) and 0038 (plan samples, 7.2) were taken. Content as D19. Retention family `autovacuum_runs` (90 days, no compression) goes after plan_samples; API enum and console label (en "Autovacuum runs", it "Esecuzioni di autovacuum") follow.
+- A29 (8.3, agent-1): the autovacuum summary aggregates in SQL (GROUP BY table); TestAVH010 checks the mapping and order of mock rows and TestINTAVH003 the sums on TimescaleDB. The "table history" of the console is the expandable detail of a summary row in Relations › Autovacuum activity (RelationsSection has no per-table history view; DeadRowsPanel belongs to Index analysis), fetching `/autovacuum/runs` filtered by database, schema and relation. RDY-AV-01 needs `wire.AgentFlags.LogsEnabled` (absent = rule silent, so old agents never trigger it).
 
 ## 9. Blockers
 none

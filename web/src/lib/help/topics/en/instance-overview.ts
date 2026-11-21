@@ -999,6 +999,47 @@ export const instanceOverviewTopic: HelpTopic = {
           code: 'SELECT relname, n_live_tup, n_dead_tup, last_autovacuum, last_autoanalyze FROM pg_stat_user_tables ORDER BY n_dead_tup DESC LIMIT 20;',
         },
       ],
+      subsections: [
+        {
+          id: 'autovacuum-activity',
+          title: '{{ui:instance.autovacuum.title}}',
+          blocks: [
+            {
+              kind: 'text',
+              text: 'The {{ui:instance.relations.view.autovacuum}} view sums the autovacuum and autoanalyze runs of the last 7 days per table, the tables with the most autovacuum time first. Open a row to see the runs of that table, newest first: time, kind, elapsed time, rows removed, dead rows not removable, pages scanned, WAL bytes and buffer reads. The agent reads the runs from the PostgreSQL log, so the view needs `checks.logs.enabled` on the agent and `log_autovacuum_min_duration` at 0 or more on PostgreSQL; readiness rule RDY-AV-01 says when the setting is -1. Runs are kept 90 days.',
+            },
+            {
+              kind: 'terms',
+              items: [
+                {
+                  term: '{{ui:instance.autovacuum.badge.wraparound}}',
+                  meaning:
+                    'PostgreSQL forced the run to freeze old transaction ids before they wrap around; it cannot be cancelled.',
+                  action:
+                    'Frequent runs of this kind on one table mean its rows are not frozen in time: check long transactions and the autovacuum settings of the table.',
+                },
+                {
+                  term: '{{ui:instance.autovacuum.badge.aggressive}}',
+                  meaning:
+                    'The run scanned every page that is not all-frozen, not only the pages with dead rows.',
+                },
+                {
+                  term: '{{ui:instance.autovacuum.col.deadNotRemovable}}',
+                  meaning:
+                    'Dead rows the run could not remove because an open transaction may still see them.',
+                  action:
+                    'Look for long transactions, idle-in-transaction sessions or stale replication slots.',
+                },
+              ],
+            },
+            {
+              kind: 'sql',
+              label: 'Log every autovacuum run longer than 10 seconds',
+              code: "ALTER SYSTEM SET log_autovacuum_min_duration = '10s';\nSELECT pg_reload_conf();",
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'catalog',

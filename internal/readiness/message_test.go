@@ -22,7 +22,7 @@ func TestMain(m *testing.M) {
 func worstInput() Input {
 	return Input{
 		Instance:        Instance{ID: "i1", PGMajor: 17, PermTier: 0, IsStandby: true},
-		Settings:        map[string]string{"track_activity_query_size": "1024", "compute_query_id": "off"},
+		Settings:        map[string]string{"track_activity_query_size": "1024", "compute_query_id": "off", "log_autovacuum_min_duration": "-1"},
 		SettingSources:  map[string]string{"compute_query_id": "configuration file"},
 		SettingsKnown:   true,
 		Extensions:      map[string][]string{"app": {}},
@@ -32,7 +32,7 @@ func worstInput() Input {
 		FailingChecks:   []string{"locks"},
 		Flags: wire.AgentFlags{
 			CommandsEnabled: ptr(false), AllowSignal: ptr(false), ByApplication: ptr(false),
-			SessionQueryText: ptr(false), HostLocal: ptr(true), DataDirectoryReadable: ptr(false),
+			SessionQueryText: ptr(false), HostLocal: ptr(true), DataDirectoryReadable: ptr(false), LogsEnabled: ptr(true),
 		},
 		DatabasesDiscovered: 12, DatabasesBudget: 10, Now: testNow,
 	}

@@ -608,6 +608,23 @@ export const instanceCaptions = {
     howToRead:
       'Estimated, not measured. Tables without column statistics (never analysed) and tables the monitoring role cannot read in full are not estimated; Measure exactly runs pgstattuple on one table.',
   },
+  'relations.autovacuum': {
+    what: 'The tables autovacuum and autoanalyze spent the most time on, with their runs, removed rows and runs to prevent wraparound.',
+    source:
+      'Autovacuum log lines the agent reads from the PostgreSQL log (logs check), stored per run in autovacuum_runs.',
+    unit: 'runs, seconds and rows',
+    window: 'The last 7 days; runs are kept 90 days.',
+    howToRead:
+      'Only runs longer than log_autovacuum_min_duration are logged. Open a row for the runs of that table.',
+  },
+  'relations.autovacuum-runs': {
+    what: 'Each autovacuum or autoanalyze run of one table, newest first.',
+    source: 'The autovacuum log line of the run, parsed by the agent (logs check).',
+    unit: 'seconds, rows, pages and bytes',
+    window: 'The last 7 days.',
+    howToRead:
+      'Dead rows not removable are rows still visible to an open transaction; WAL bytes is what the run wrote. To prevent wraparound marks a run PostgreSQL forced to freeze old transaction ids.',
+  },
   'relations.index-bloat': {
     what: 'Estimated wasted space inside each btree index, held by deleted or old entries, that rebuilding the index would give back.',
     source:

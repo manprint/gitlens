@@ -47,13 +47,14 @@ func TestRDYAGENT001_FlagsFromResolvedConfig(t *testing.T) {
 	require.NotNil(t, f.SessionQueryText, "the locks check reports its value even when the key is absent")
 	require.False(t, *f.SessionQueryText, "raw session text is opt-in")
 	require.Nil(t, f.DataDirectoryReadable, "unknown until a host collection knew the data directory")
+	require.False(t, *f.LogsEnabled, "the log reader is opt-in")
 
 	off, on := false, true
 	cfg, target = flagsConfig("db.example.com")
 	cfg.Commands.Enabled = &off
 	cfg.Host.Enabled = &on
 	target.AllowSignal = true
-	cfg.Checks = agent.ChecksConfig{"activity": {ByApplication: boolPtr(true)}}
+	cfg.Checks = agent.ChecksConfig{"activity": {ByApplication: boolPtr(true)}, agent.LogsCheck: {Enabled: &on}}
 	configureChecks(cfg)
 	f = decodeFlags(t, agentFlagsWireResult(cfg, target, &on, now))
 	require.False(t, *f.CommandsEnabled)
@@ -61,6 +62,7 @@ func TestRDYAGENT001_FlagsFromResolvedConfig(t *testing.T) {
 	require.True(t, *f.ByApplication)
 	require.False(t, *f.HostLocal, "a remote DSN is not host-local")
 	require.True(t, *f.DataDirectoryReadable)
+	require.True(t, *f.LogsEnabled)
 
 	// An explicit by_application: false is honoured after a true one.
 	cfg.Checks = agent.ChecksConfig{"activity": {ByApplication: boolPtr(false)}}

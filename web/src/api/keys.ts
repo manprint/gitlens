@@ -147,6 +147,10 @@ export const qk = {
     ['getPlans', queryId, instanceId, datname, limit] as const,
   planSamples: (params: Readonly<Record<string, string | number | boolean | undefined>>) =>
     ['getPlanSamples', params] as const,
+  autovacuumSummary: (params: Readonly<Record<string, string | number | undefined>>) =>
+    ['getAutovacuumSummary', params] as const,
+  autovacuumRuns: (params: Readonly<Record<string, string | number | undefined>>) =>
+    ['getAutovacuumRuns', params] as const,
   alerts: (
     state?: string,
     severity?: string,

@@ -1004,6 +1004,47 @@ export const instanceOverviewTopic: HelpTopic = {
           code: 'SELECT relname, n_live_tup, n_dead_tup, last_autovacuum, last_autoanalyze FROM pg_stat_user_tables ORDER BY n_dead_tup DESC LIMIT 20;',
         },
       ],
+      subsections: [
+        {
+          id: 'autovacuum-activity',
+          title: '{{ui:instance.autovacuum.title}}',
+          blocks: [
+            {
+              kind: 'text',
+              text: 'La vista {{ui:instance.relations.view.autovacuum}} somma per tabella le esecuzioni di autovacuum e autoanalyze degli ultimi 7 giorni, prima le tabelle con più tempo di autovacuum. Apri una riga per vedere le esecuzioni di quella tabella, dalla più recente: ora, tipo, durata, righe rimosse, dead tuple non rimovibili, pagine lette, byte WAL e letture buffer. L’agent legge le esecuzioni dal log di PostgreSQL, quindi la vista richiede `checks.logs.enabled` sull’agent e `log_autovacuum_min_duration` a 0 o più su PostgreSQL; la regola di readiness RDY-AV-01 segnala quando l’impostazione vale -1. Le esecuzioni restano 90 giorni.',
+            },
+            {
+              kind: 'terms',
+              items: [
+                {
+                  term: '{{ui:instance.autovacuum.badge.wraparound}}',
+                  meaning:
+                    'PostgreSQL ha forzato l’esecuzione per congelare vecchi id di transazione prima del wraparound; non si può annullare.',
+                  action:
+                    'Esecuzioni frequenti di questo tipo su una tabella indicano che le sue righe non vengono congelate in tempo: controlla le transazioni lunghe e le impostazioni di autovacuum della tabella.',
+                },
+                {
+                  term: '{{ui:instance.autovacuum.badge.aggressive}}',
+                  meaning:
+                    'L’esecuzione ha letto ogni pagina non del tutto congelata, non solo le pagine con dead tuple.',
+                },
+                {
+                  term: '{{ui:instance.autovacuum.col.deadNotRemovable}}',
+                  meaning:
+                    'Dead tuple che l’esecuzione non ha potuto rimuovere perché una transazione aperta può ancora vederle.',
+                  action:
+                    'Cerca transazioni lunghe, sessioni idle in transaction o slot di replica fermi.',
+                },
+              ],
+            },
+            {
+              kind: 'sql',
+              label: 'Registra ogni esecuzione di autovacuum più lunga di 10 secondi',
+              code: "ALTER SYSTEM SET log_autovacuum_min_duration = '10s';\nSELECT pg_reload_conf();",
+            },
+          ],
+        },
+      ],
     },
     {
       id: 'catalog',

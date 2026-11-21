@@ -62,6 +62,8 @@ type AgentFlags struct {
 	// filesystem of the target's data directory on its last host collection.
 	// It stays nil until a collection knew the data directory.
 	DataDirectoryReadable *bool `json:"data_directory_readable,omitempty"`
+	// LogsEnabled is checks.logs.enabled: the agent reads the PostgreSQL log.
+	LogsEnabled *bool `json:"logs_enabled,omitempty"`
 }
 
 // FactKind describes one kind of fact the server accepts.

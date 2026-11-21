@@ -2,6 +2,7 @@ package readiness
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,10 @@ func TestRDY002_RulesTriggerAndDoNotTrigger(t *testing.T) {
 		{"RDY-SET-03", SeverityInfo, func(in *Input) { in.Settings["track_activity_query_size"] = "1024" }, false},
 		{"RDY-LOG-01", SeverityInfo, func(in *Input) { in.Skips = []CheckSkip{{Check: "logs", Reason: "logs_sql_denied"}} }, false},
 		{"RDY-AEX-01", SeverityInfo, func(in *Input) { in.Skips = []CheckSkip{{Check: "logs", Reason: "auto_explain_format_not_json"}} }, false},
+		{"RDY-AV-01", SeverityInfo, func(in *Input) {
+			in.Flags.LogsEnabled = ptr(true)
+			in.Settings["log_autovacuum_min_duration"] = "-1"
+		}, false},
 	}
 	for _, c := range cases {
 		in := healthy()
@@ -111,7 +116,7 @@ func TestRDY002_RulesTriggerAndDoNotTrigger(t *testing.T) {
 func TestRDY003_ItemShape(t *testing.T) {
 	in := Input{
 		Instance:        Instance{ID: "i1", PGMajor: 17, PermTier: 0},
-		Settings:        map[string]string{"track_activity_query_size": "1024", "compute_query_id": "off"},
+		Settings:        map[string]string{"track_activity_query_size": "1024", "compute_query_id": "off", "log_autovacuum_min_duration": "-1"},
 		SettingsKnown:   true,
 		Extensions:      map[string][]string{"app": {}},
 		ExtensionsKnown: true,
@@ -120,7 +125,7 @@ func TestRDY003_ItemShape(t *testing.T) {
 		FailingChecks:   []string{"locks"},
 		Flags: wire.AgentFlags{
 			CommandsEnabled: ptr(false), AllowSignal: ptr(false), ByApplication: ptr(false),
-			SessionQueryText: ptr(false), HostLocal: ptr(true), DataDirectoryReadable: ptr(false),
+			SessionQueryText: ptr(false), HostLocal: ptr(true), DataDirectoryReadable: ptr(false), LogsEnabled: ptr(true),
 		},
 		DatabasesDiscovered: 12, DatabasesBudget: 10, NotificationChannels: 0, Now: testNow,
 	}
@@ -398,4 +403,34 @@ func TestRDY017_StandbySQLFixes(t *testing.T) {
 			require.NotContains(t, f.Steps, standbyStep, it.ID)
 		}
 	}
+}
+
+// AVH-011: RDY-AV-01 fires only when the agent reads the log and
+// log_autovacuum_min_duration is -1; an unknown setting or a log reader that
+// is off or unreported says nothing.
+func TestAVH011_AutovacuumLoggingRule(t *testing.T) {
+	fires := func(mutate func(*Input)) bool {
+		in := healthy()
+		mutate(&in)
+		return slices.Contains(ids(Evaluate(in)), "RDY-AV-01")
+	}
+	require.True(t, fires(func(in *Input) {
+		in.Flags.LogsEnabled = ptr(true)
+		in.Settings["log_autovacuum_min_duration"] = "-1"
+	}))
+	require.False(t, fires(func(in *Input) { in.Settings["log_autovacuum_min_duration"] = "-1" }), "logs flag not reported")
+	require.False(t, fires(func(in *Input) {
+		in.Flags.LogsEnabled = ptr(false)
+		in.Settings["log_autovacuum_min_duration"] = "-1"
+	}), "logs off")
+	require.False(t, fires(func(in *Input) { in.Flags.LogsEnabled = ptr(true) }), "default 10 min logs runs")
+	require.False(t, fires(func(in *Input) {
+		in.Flags.LogsEnabled = ptr(true)
+		in.Settings["log_autovacuum_min_duration"] = "0"
+	}))
+	require.False(t, fires(func(in *Input) {
+		in.Flags.LogsEnabled = ptr(true)
+		in.SettingsKnown = false
+		delete(in.Settings, "log_autovacuum_min_duration")
+	}), "unknown settings")
 }

@@ -30,6 +30,7 @@ import { useT, type Translate } from '@/i18n/react'
 import type { CaptionId, ColumnHelpId } from '@/lib/captions'
 import { StandbyStatsNote } from '@/components/StandbyStatsNote'
 
+import { AutovacuumActivity } from './AutovacuumRuns'
 import { DENSE_TABLE } from './denseTable'
 import { CaptionedBlock, InstancePanel, InstanceViewTabs, ToolbarNote } from './InstancePanel'
 import { RELATION_VIEW_IDS } from './instanceSections'
@@ -786,6 +787,7 @@ function relationViews(t: Translate): readonly InstanceView<RelationViewId>[] {
     { id: 'indexes', label: t('instance.relations.list.indexes') },
     { id: 'table-bloat', label: t('instance.relations.view.tableBloat') },
     { id: 'index-bloat', label: t('instance.relations.view.indexBloat') },
+    { id: 'autovacuum', label: t('instance.relations.view.autovacuum') },
   ]
 }
 
@@ -818,7 +820,7 @@ export function RelationsSection({
   const t = useT()
   const views = useMemo(() => relationViews(t), [t])
   const [view = 'tables', showView] = useInstanceView(views)
-  const panels: Record<RelationViewId, RelationPanelProps> = {
+  const panels: Record<Exclude<RelationViewId, 'autovacuum'>, RelationPanelProps> = {
     tables: {
       titleKey: 'instance.relations.list.tables',
       tableId: 'relations-tables',
@@ -904,6 +906,9 @@ export function RelationsSection({
         </TabsContent>
         <TabsContent value="index-bloat">
           <RelationPanel {...panels['index-bloat']} />
+        </TabsContent>
+        <TabsContent value="autovacuum">
+          <AutovacuumActivity instanceId={instanceId} />
         </TabsContent>
       </InstancePanel>
     </Tabs>

@@ -873,6 +873,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/autovacuum/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return the autovacuum and autoanalyze runs of an instance.
+         * @description Always descending on order_by, then newest first; a run without the ordered number comes last.
+         */
+        get: operations["getAutovacuumRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/autovacuum/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return the autovacuum runs of an instance summed per table, most autovacuum time first. */
+        get: operations["getAutovacuumSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans/samples": {
         parameters: {
             query?: never;
@@ -1856,6 +1893,68 @@ export interface components {
         };
         PlanSamplesResponse: {
             samples: components["schemas"]["PlanSample"][];
+        };
+        /** @description One autovacuum or autoanalyze run the agent read from the PostgreSQL log. A number the log line did not carry is null. */
+        AutovacuumRun: {
+            ts: components["schemas"]["Timestamp"];
+            datname: string;
+            schemaname: string;
+            relname: string;
+            /** @enum {string} */
+            kind: "vacuum" | "analyze";
+            aggressive: boolean;
+            /** @description The run was to prevent wraparound. */
+            wraparound: boolean;
+            /** Format: int64 */
+            index_scans: number | null;
+            /** Format: int64 */
+            pages_removed: number | null;
+            /** Format: int64 */
+            pages_remain: number | null;
+            /** Format: int64 */
+            pages_scanned: number | null;
+            /** Format: int64 */
+            tuples_removed: number | null;
+            /** Format: int64 */
+            tuples_remain: number | null;
+            /** Format: int64 */
+            tuples_dead_not_removable: number | null;
+            /** Format: int64 */
+            buffer_hits: number | null;
+            /** Format: int64 */
+            buffer_reads: number | null;
+            /** Format: int64 */
+            buffer_dirtied: number | null;
+            /** Format: int64 */
+            wal_records: number | null;
+            /** Format: int64 */
+            wal_fpi: number | null;
+            /** Format: int64 */
+            wal_bytes: number | null;
+            cpu_user_seconds: number | null;
+            cpu_system_seconds: number | null;
+            elapsed_seconds: number | null;
+        };
+        AutovacuumRunsResponse: {
+            runs: components["schemas"]["AutovacuumRun"][];
+        };
+        /** @description The autovacuum and autoanalyze runs of one table over the window. */
+        AutovacuumTableSummary: {
+            datname: string;
+            schemaname: string;
+            relname: string;
+            /** Format: int64 */
+            runs: number;
+            total_elapsed_seconds: number;
+            max_elapsed_seconds: number;
+            /** Format: int64 */
+            tuples_removed: number;
+            last_ts: components["schemas"]["Timestamp"];
+            /** Format: int64 */
+            wraparound_runs: number;
+        };
+        AutovacuumSummaryResponse: {
+            tables: components["schemas"]["AutovacuumTableSummary"][];
         };
         PlansResponse: {
             plans: components["schemas"]["Plan"][];
@@ -4690,6 +4789,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlansResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getAutovacuumRuns: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                database?: string;
+                schema?: string;
+                relation?: string;
+                kind?: "vacuum" | "analyze";
+                /** @description Start of the range; seven days before to when absent. */
+                from?: components["schemas"]["Timestamp"];
+                /** @description End of the range; now when absent. */
+                to?: components["schemas"]["Timestamp"];
+                order_by?: "ts" | "elapsed_seconds" | "tuples_removed";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Runs in the requested order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutovacuumRunsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getAutovacuumSummary: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                /** @description Start of the range; seven days before to when absent. */
+                from?: components["schemas"]["Timestamp"];
+                /** @description End of the range; now when absent. */
+                to?: components["schemas"]["Timestamp"];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tables by total elapsed seconds, descending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutovacuumSummaryResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

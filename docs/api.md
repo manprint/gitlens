@@ -71,6 +71,8 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 
 | METHOD | Path | operationId | Summary |
 |---|---|---|---|
+| GET | `/api/v1/autovacuum/runs` | `getAutovacuumRuns` | Return the autovacuum and autoanalyze runs of an instance. |
+| GET | `/api/v1/autovacuum/summary` | `getAutovacuumSummary` | Return the autovacuum runs of an instance summed per table, most autovacuum time first. |
 | GET | `/api/v1/plans` | `getPlans` | Return plan history for a query. |
 | GET | `/api/v1/plans/samples` | `getPlanSamples` | Return the automatic plan samples of a statement, newest first. |
 | GET | `/api/v1/statements` | `getStatements` | Return top statements joined to query text. |

@@ -619,6 +619,23 @@ export const instance: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     howToRead:
       'Stimato, non misurato. Le tabelle senza statistiche di colonna (mai analizzate) e le tabelle che il ruolo di monitoraggio non può leggere per intero non vengono stimate; Misura esattamente esegue pgstattuple su una tabella.',
   },
+  'relations.autovacuum': {
+    what: 'Le tabelle su cui autovacuum e autoanalyze hanno speso più tempo, con le loro esecuzioni, le righe rimosse e le esecuzioni per prevenire il wraparound.',
+    source:
+      'Righe di log di autovacuum che l’agent legge dal log di PostgreSQL (controllo logs), memorizzate per esecuzione in autovacuum_runs.',
+    unit: 'esecuzioni, secondi e righe',
+    window: 'Gli ultimi 7 giorni; le esecuzioni restano 90 giorni.',
+    howToRead:
+      'Vanno nel log solo le esecuzioni più lunghe di log_autovacuum_min_duration. Apri una riga per le esecuzioni di quella tabella.',
+  },
+  'relations.autovacuum-runs': {
+    what: 'Ogni esecuzione di autovacuum o autoanalyze di una tabella, dalla più recente.',
+    source: 'La riga di log di autovacuum dell’esecuzione, letta dall’agent (controllo logs).',
+    unit: 'secondi, righe, pagine e byte',
+    window: 'Gli ultimi 7 giorni.',
+    howToRead:
+      'Le dead tuple non rimovibili sono righe ancora visibili a una transazione aperta; i byte WAL sono quanto ha scritto l’esecuzione. Per prevenire il wraparound indica un’esecuzione che PostgreSQL ha forzato per congelare vecchi id di transazione.',
+  },
   'relations.index-bloat': {
     what: 'Spazio sprecato stimato in ogni indice btree, occupato da voci eliminate o vecchie, che ricostruire l’indice restituirebbe.',
     source:

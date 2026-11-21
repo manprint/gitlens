@@ -140,5 +140,9 @@
   "readiness.aex01.title": "Automatic plans are not in JSON",
   "readiness.aex01.summary": "auto_explain writes plans in a format the agent cannot read: only auto_explain.log_format = json is stored.",
   "readiness.aex01.impact": "Automatic plans and their samples in the plan history are missing.",
-  "readiness.aex01.fix": "Write auto_explain plans as JSON"
+  "readiness.aex01.fix": "Write auto_explain plans as JSON",
+  "readiness.av01.title": "Autovacuum runs are not logged",
+  "readiness.av01.summary": "The agent reads the PostgreSQL log, but log_autovacuum_min_duration = -1 logs no autovacuum or autoanalyze run.",
+  "readiness.av01.impact": "The autovacuum history per table stays empty.",
+  "readiness.av01.fix": "Log autovacuum runs longer than 10 seconds"
 }

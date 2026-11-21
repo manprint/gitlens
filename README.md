@@ -2322,6 +2322,8 @@ POST   /api/v1/push
 GET    /api/v1/plans
 GET    /api/v1/plans/samples
 DELETE /api/v1/plans/samples/parameters
+GET    /api/v1/autovacuum/runs
+GET    /api/v1/autovacuum/summary
 GET    /api/v1/settings/retention|settings/retention/preview
 PUT    /api/v1/settings/retention/{family}
 GET    /api/v1/settings/advisor-windows
@@ -2535,6 +2537,16 @@ SELECT pg_reload_conf();
 **Parameters.** `checks.logs.plan_parameters: true` ships the `Query Parameters` of each plan (cut at 4096 bytes; a text that may hold a credential is never shipped). Off by default: values can hold personal data. They are shown only on request (`include_parameters=true`); `DELETE /api/v1/plans/samples/parameters?instance_id=` clears them for an instance, keeps the samples and writes an audit row.
 
 API: `GET /api/v1/plans/samples?instance_id=&queryid=&plan_hash=&database=&from=&to=&limit=&include_parameters=` (newest first, `limit` up to 1000, last 7 days by default).
+
+## Autovacuum history
+
+With the log reader on (`checks.logs.enabled: true`), the agent turns each autovacuum and autoanalyze log line into one run: table, kind (`vacuum` or `analyze`), the `aggressive` and "to prevent wraparound" flags, pages, rows removed and not removable, buffers, WAL, CPU and elapsed time (PostgreSQL 15 and 18 formats). The server stores them in `autovacuum_runs` (90 days, retention family `autovacuum_runs`); a run seen twice is stored once. At most 500 runs ship per scrape; `pg_log_autovacuum_dropped` counts the rest.
+
+PostgreSQL logs only runs longer than `log_autovacuum_min_duration` (default 10 minutes; `-1` logs none, readiness rule `RDY-AV-01`). `ALTER SYSTEM SET log_autovacuum_min_duration = '10s'; SELECT pg_reload_conf();` is a common choice.
+
+Console: Instance › Tables and indexes › Autovacuum activity sums the last 7 days per table (runs, total and longest time, rows removed, runs to prevent wraparound), most autovacuum time first; a row opens the runs of that table.
+
+API: `GET /api/v1/autovacuum/runs?instance_id=&database=&schema=&relation=&kind=&from=&to=&order_by=ts|elapsed_seconds|tuples_removed&limit=` (always descending, `limit` up to 1000, default 200, last 7 days by default) and `GET /api/v1/autovacuum/summary?instance_id=&from=&to=&limit=`.
 
 ## Events
 

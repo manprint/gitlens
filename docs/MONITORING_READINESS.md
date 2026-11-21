@@ -346,3 +346,21 @@ GRANT pg_read_all_settings TO <monitoring_role>;
 ALTER SYSTEM SET auto_explain.log_format = 'json';
 SELECT pg_reload_conf();
 ```
+
+### RDY-AV-01 — Autovacuum runs are not logged
+
+*Info.* The agent reads the PostgreSQL log (`checks.logs.enabled`), but `log_autovacuum_min_duration = -1` logs no autovacuum or autoanalyze run. Evidence: `log_autovacuum_min_duration = -1`.
+
+**What you lose:** The autovacuum history per table (Relations › Autovacuum activity).
+
+**Fix — log autovacuum runs longer than 10 seconds** (`postgres_config`)
+
+1. Connect to the server as a superuser.
+2. Run the statement below.
+
+```
+ALTER SYSTEM SET log_autovacuum_min_duration = '10s';
+SELECT pg_reload_conf();
+```
+
+`0` logs every run; the default (10 minutes from PostgreSQL 15) logs only the long ones.

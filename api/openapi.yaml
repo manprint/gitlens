@@ -576,6 +576,60 @@ components:
       required: [samples]
       properties:
         samples: { type: array, items: { $ref: '#/components/schemas/PlanSample' } }
+    AutovacuumRun:
+      type: object
+      description: >-
+        One autovacuum or autoanalyze run the agent read from the PostgreSQL
+        log. A number the log line did not carry is null.
+      required: [ts, datname, schemaname, relname, kind, aggressive, wraparound, index_scans, pages_removed, pages_remain, pages_scanned, tuples_removed, tuples_remain, tuples_dead_not_removable, buffer_hits, buffer_reads, buffer_dirtied, wal_records, wal_fpi, wal_bytes, cpu_user_seconds, cpu_system_seconds, elapsed_seconds]
+      properties:
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        kind: { type: string, enum: [vacuum, analyze] }
+        aggressive: { type: boolean }
+        wraparound: { type: boolean, description: The run was to prevent wraparound. }
+        index_scans: { type: integer, format: int64, nullable: true }
+        pages_removed: { type: integer, format: int64, nullable: true }
+        pages_remain: { type: integer, format: int64, nullable: true }
+        pages_scanned: { type: integer, format: int64, nullable: true }
+        tuples_removed: { type: integer, format: int64, nullable: true }
+        tuples_remain: { type: integer, format: int64, nullable: true }
+        tuples_dead_not_removable: { type: integer, format: int64, nullable: true }
+        buffer_hits: { type: integer, format: int64, nullable: true }
+        buffer_reads: { type: integer, format: int64, nullable: true }
+        buffer_dirtied: { type: integer, format: int64, nullable: true }
+        wal_records: { type: integer, format: int64, nullable: true }
+        wal_fpi: { type: integer, format: int64, nullable: true }
+        wal_bytes: { type: integer, format: int64, nullable: true }
+        cpu_user_seconds: { type: number, nullable: true }
+        cpu_system_seconds: { type: number, nullable: true }
+        elapsed_seconds: { type: number, nullable: true }
+    AutovacuumRunsResponse:
+      type: object
+      required: [runs]
+      properties:
+        runs: { type: array, items: { $ref: '#/components/schemas/AutovacuumRun' } }
+    AutovacuumTableSummary:
+      type: object
+      description: The autovacuum and autoanalyze runs of one table over the window.
+      required: [datname, schemaname, relname, runs, total_elapsed_seconds, max_elapsed_seconds, tuples_removed, last_ts, wraparound_runs]
+      properties:
+        datname: { type: string }
+        schemaname: { type: string }
+        relname: { type: string }
+        runs: { type: integer, format: int64 }
+        total_elapsed_seconds: { type: number, minimum: 0 }
+        max_elapsed_seconds: { type: number, minimum: 0 }
+        tuples_removed: { type: integer, format: int64 }
+        last_ts: { $ref: '#/components/schemas/Timestamp' }
+        wraparound_runs: { type: integer, format: int64 }
+    AutovacuumSummaryResponse:
+      type: object
+      required: [tables]
+      properties:
+        tables: { type: array, items: { $ref: '#/components/schemas/AutovacuumTableSummary' } }
     PlansResponse:
       type: object
       required: [plans, total_shapes]
@@ -4151,6 +4205,88 @@ paths:
                         changed: false
                         source: command
                     total_shapes: 1
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/autovacuum/runs:
+    get:
+      tags: [statements]
+      operationId: getAutovacuumRuns
+      summary: Return the autovacuum and autoanalyze runs of an instance.
+      description: Always descending on order_by, then newest first; a run without the ordered number comes last.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: schema, in: query, required: false, schema: { type: string } }
+        - { name: relation, in: query, required: false, schema: { type: string } }
+        - { name: kind, in: query, required: false, schema: { type: string, enum: [vacuum, analyze] } }
+        - { name: from, in: query, required: false, description: Start of the range; seven days before to when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, description: End of the range; now when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: order_by, in: query, required: false, schema: { type: string, enum: [ts, elapsed_seconds, tuples_removed], default: ts } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 200, minimum: 1, maximum: 1000 } }
+      responses:
+        '200':
+          description: Runs in the requested order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutovacuumRunsResponse' }
+              examples:
+                default:
+                  value:
+                    runs:
+                      - ts: '2026-11-21T10:00:01Z'
+                        datname: app
+                        schemaname: public
+                        relname: orders
+                        kind: vacuum
+                        aggressive: false
+                        wraparound: false
+                        index_scans: 1
+                        pages_removed: 0
+                        pages_remain: 120
+                        pages_scanned: 40
+                        tuples_removed: 900
+                        tuples_remain: 5000
+                        tuples_dead_not_removable: 0
+                        buffer_hits: 300
+                        buffer_reads: 12
+                        buffer_dirtied: 8
+                        wal_records: 410
+                        wal_fpi: 6
+                        wal_bytes: 81234
+                        cpu_user_seconds: 0.01
+                        cpu_system_seconds: 0
+                        elapsed_seconds: 0.08
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/autovacuum/summary:
+    get:
+      tags: [statements]
+      operationId: getAutovacuumSummary
+      summary: Return the autovacuum runs of an instance summed per table, most autovacuum time first.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: from, in: query, required: false, description: Start of the range; seven days before to when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, description: End of the range; now when absent., schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, format: int32, default: 200, minimum: 1, maximum: 1000 } }
+      responses:
+        '200':
+          description: Tables by total elapsed seconds, descending.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutovacuumSummaryResponse' }
+              examples:
+                default:
+                  value:
+                    tables:
+                      - datname: app
+                        schemaname: public
+                        relname: orders
+                        runs: 12
+                        total_elapsed_seconds: 3.4
+                        max_elapsed_seconds: 0.9
+                        tuples_removed: 10400
+                        last_ts: '2026-11-21T10:00:01Z'
+                        wraparound_runs: 0
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/plans/samples:

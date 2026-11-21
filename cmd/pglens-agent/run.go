@@ -423,6 +423,7 @@ func agentFlagsWireResult(cfg *agent.Config, target agent.TargetConfig, dataDirR
 		SessionQueryText:      locksSessionQueryText(),
 		HostLocal:             boolPtr(cfg.HostEnabled() && agent.TargetIsLocal(target)),
 		DataDirectoryReadable: dataDirReadable,
+		LogsEnabled:           boolPtr(cfg.Checks[agent.LogsCheck].LogsEnabled()),
 	}
 	// A struct of booleans always marshals.
 	raw, _ := json.Marshal(flags)

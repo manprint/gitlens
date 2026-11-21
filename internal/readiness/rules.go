@@ -39,6 +39,7 @@ var rules = []Rule{
 	{ID: "RDY-SET-03", Severity: SeverityInfo, Applies: appliesSet03, Build: buildSet03},
 	{ID: "RDY-LOG-01", Severity: SeverityInfo, Applies: appliesLog01, Build: buildLog01},
 	{ID: "RDY-AEX-01", Severity: SeverityInfo, Applies: appliesAex01, Build: buildAex01},
+	{ID: "RDY-AV-01", Severity: SeverityInfo, Applies: appliesAv01, Build: buildAv01},
 }
 
 var plainIdent = regexp.MustCompile(`^[a-z_][a-z0-9_$]*$`)
@@ -612,5 +613,28 @@ func buildAex01(in Input) Item {
 		Fixes: []Fix{{Channel: ChannelPostgresConfig, Title: in.say("aex01.fix", nil),
 			Steps:   in.sayAll("log01.step.connect", "step.run_below"),
 			Snippet: "ALTER SYSTEM SET auto_explain.log_format = 'json';\nSELECT pg_reload_conf();"}},
+	}
+}
+
+// RDY-AV-01 — the agent reads the log but PostgreSQL logs no autovacuum run
+// (plan 007 8.3).
+
+func appliesAv01(in Input) bool {
+	if in.Flags.LogsEnabled == nil || !*in.Flags.LogsEnabled {
+		return false
+	}
+	v, ok := settingValue(in, "log_autovacuum_min_duration", "600000")
+	return ok && strings.TrimSpace(v) == "-1"
+}
+
+func buildAv01(in Input) Item {
+	return Item{
+		Title:    in.say("av01.title", nil),
+		Summary:  in.say("av01.summary", nil),
+		Impact:   []string{in.say("av01.impact", nil)},
+		Evidence: "log_autovacuum_min_duration = -1",
+		Fixes: []Fix{{Channel: ChannelPostgresConfig, Title: in.say("av01.fix", nil),
+			Steps:   in.sayAll("log01.step.connect", "step.run_below"),
+			Snippet: "ALTER SYSTEM SET log_autovacuum_min_duration = '10s';\nSELECT pg_reload_conf();"}},
 	}
 }

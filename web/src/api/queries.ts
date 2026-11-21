@@ -953,6 +953,28 @@ export function usePlanSamples(
   })
 }
 
+export function useAutovacuumSummary(params: QueryParameters<'/api/v1/autovacuum/summary'>) {
+  return useApiQuery({
+    policy: REFRESH.statements,
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/autovacuum/summary', { params: { query: params }, signal })),
+    queryKey: qk.autovacuumSummary(params),
+  })
+}
+
+export function useAutovacuumRuns(
+  params: QueryParameters<'/api/v1/autovacuum/runs'>,
+  options: { enabled?: boolean } = {},
+) {
+  return useApiQuery({
+    policy: REFRESH.statements,
+    queryFn: (signal) =>
+      getApi(() => client.GET('/api/v1/autovacuum/runs', { params: { query: params }, signal })),
+    queryKey: qk.autovacuumRuns(params),
+    enabled: options.enabled ?? true,
+  })
+}
+
 // The alert list carries its truncation flag in a header, which getApi drops.
 async function fetchAlerts(params: QueryParameters<'/api/v1/alerts'>, signal: AbortSignal) {
   const { data, response } = await getApiResponse(() =>

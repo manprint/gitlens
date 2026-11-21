@@ -78,7 +78,13 @@ export const INSTANCE_SECTIONS = [
  * replication offer a view only when the instance has its data (`replay` on a
  * standby, `subscriptions`/`slots` when present).
  */
-export const RELATION_VIEW_IDS = ['tables', 'indexes', 'table-bloat', 'index-bloat'] as const
+export const RELATION_VIEW_IDS = [
+  'tables',
+  'indexes',
+  'table-bloat',
+  'index-bloat',
+  'autovacuum',
+] as const
 export const CATALOG_VIEW_IDS = [
   'triggers',
   'sequences',
