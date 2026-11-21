@@ -10,7 +10,7 @@ UI_E2E_RUN ?= UI
 # carries the same value, and deploy/workflows_test.go checks that they match.
 GOVULNCHECK_VERSION ?= v1.9.0
 
-.PHONY: build fmt fmt-check lint vet-tags vuln tidy-check stress test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
+.PHONY: pgext-image build fmt fmt-check lint vet-tags vuln tidy-check stress test test-integration test-e2e test-e2e-full test-e2e-full-evidence test-e2e-matrix api-docs \
         ci-local ci-local-unit ci-local-integration ci-local-security coverage coverage-gate generate golden clean build-images build-images-multiarch test-e2e-unit \
         web-install web-gen-api web-typecheck web-lint web-build web-budget web-test web-coverage web-coverage-gate test-ui-e2e
 
@@ -179,6 +179,10 @@ web-lint: web-gen-api
 web-build:
 	cd $(WEB) && PGLENS_VERSION=$(VERSION) $(PNPM) run build
 	@printf 'built_at=%s\nvite=%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$(cd $(WEB) && node -p 'require("./node_modules/vite/package.json").version')" > internal/webui/dist/.built
+
+# Local test image postgres:18.6-alpine + hypopg + pg_hint_plan (test/pgext).
+pgext-image:
+	test/pgext/build.sh
 
 web-budget: web-build
 	cd $(WEB) && $(PNPM) exec tsx scripts/bundle-budget.ts

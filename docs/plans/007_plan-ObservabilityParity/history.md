@@ -5,3 +5,6 @@ Invocation `/plan-execute-verify execute 007 full-autonomous:true --wip-commit a
 
 ## 2026-11-21 0.1/1 complete unit:0.1:1
 Gates: G-GO-FULL pass (35 pkgs, 2773 PASS, 0 FAIL, 1 SKIP); G-WEB-FULL pass with B1 (gen-api git-diff check blocked by uncommitted plan-006 generated.ts; gen idempotent; vitest 2027/227; budget PASS); G-I18N pass (48 vitest); G-RO pass; review: agent:opus self-review accepted; changes: STATE.md, history.md (plan files added); notes: A1–A3.
+
+## 2026-11-21 0.2/1 complete unit:0.2:1
+Gates: S4 check pass (hypopg.so, pg_hint_plan.so; hypopg 1.4.5 created, pg_hint_plan loaded); review: self-review (agent:opus) accepted; changes: test/pgext/{Dockerfile,build.sh,README.md}, Makefile (pgext-image), .gitignore (test/pgext/src/); notes: build cache pruned after build.
