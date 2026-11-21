@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 09:17 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 09:20 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD e340689e50e1b6c28074ffbf710bce72fc2ba4a7 + tree 4ad1f7069c9b4a6caf3c4e58f75081ff061b753b · branch main · last WIP tree none
-- Last closure: unit:P3:1
-- Next: open 4.1 · next eligible: 4.1
+- Base: HEAD 04e70771c932a46f3c38066fddc819198ce52e78 + tree 9e157e0a09d6733aa94d27bd0e00683a62849373 · branch main · last WIP tree none
+- Last closure: unit:4.1:1
+- Next: open 4.2 · next eligible: 4.2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-P3: none (closure)
+none
 
 ## 6. Checkpoint
 none
@@ -64,6 +64,7 @@ none
 - A7 (autonomous, 2026-11-21, unit 3.1): the database refused the new kinds (check constraint of 0028/0031) and the plan had no migration in phase 3. Chosen: migration 0034_notification_kinds widens both checks to the six kinds at once (test NCH-MIG-001). Existing tests that list every kind gain the new rows; tests that used `teams` or `email` as an unknown kind now use `sms`; no other assertion changed.
 - A8 (autonomous, 2026-11-21, unit 3.3): the email kind needs the SMTP settings, but the kind hooks took only the address. Chosen: `AlertConfig.SMTP` (`SMTPConfig` = `notify.SMTPSettings`) filled by `LoadAlertConfig` through `LoadSMTPConfig(getenv, readFile)`, which also reads `PGLENS_SMTP_PASSWORD_FILE`; `build` and `available` take the config, and `NewNotificationChannel(cfg, kind, address)` gains it. main needs no change. Body = the plain text of the Slack message (summary + context line, or detail title, fields, sections, footer). The email channel removes its recipients and password from its own errors. Listings gain an email row; tests that used `email` as an unknown kind now use `sms`.
 - A9 (3.4, autonomous): webhook kinds keep the field label "Console URL" (existing contract, e2e selector); PagerDuty shows "Routing key", email "Recipients". The panel checks the address while typing and disables Save while invalid; the buttons keep "Set URL"/"Replace URL" for every kind. The 409 smtp_not_configured carries detail "set PGLENS_SMTP_HOST and PGLENS_SMTP_FROM on the server" (OpenAPI Error requires detail), via kind field unavailableDetail. deploy/server.example.env gains the Teams, PagerDuty and SMTP examples.
+- A10 (autonomous, 2026-11-21, unit 4.1): `handleStatements` groups by (cluster_id, queryid, datname); the compare CTEs group by (queryid, datname) with MIN(cluster_id) for the text lookup, so a FULL OUTER JOIN on (datname, queryid) gives one row per statement even if the instance changed cluster. Sums and the per-row seconds expression are copied unchanged. The 404 for an unknown instance is a separate `SELECT 1 FROM instances` (handleStatements has no 404); the compare itself is one statement with the 4 period bounds plus the 2 period lengths and limit as bind parameters. Ratio of a `gone` row is 0 (B counted as 0), null only when A is 0 or missing. All eight metrics appear in a, b, delta and ratio (superset of the example).
 
 ## 9. Blockers
 none
@@ -78,7 +79,11 @@ none
 | 1 Multixact wraparound rule | DONE | 1 | 1.1–1.3 | unit:P1:1 |
 | 2 ASH dimensions | DONE | 2 | 2.1–2.5 | unit:P2:2 |
 | 3 Notification channels | DONE | 1 | 3.1–3.4 | unit:P3:1 |
-| 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |
+| 4 Period A versus B | IN_PROGRESS | 1 | 4.1–4.3 | — |
+| · 4.1 statements/compare | DONE | 1 | — | unit:4.1:1 |
+| · 4.2 ash/compare | TODO | 1 | — | — |
+| · 4.3 console compare views | TODO | 1 | — | — |
+| · P4 closure | TODO | 1 | — | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |
 | 6 Log ingest | TODO | 1 | 6.1–6.6 | — |
 | 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |

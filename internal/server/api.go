@@ -90,6 +90,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/metrics/query", a.handleMetricsQuery)
 	r.Get("/api/v1/events", a.handleEvents)
 	r.Get("/api/v1/statements", a.handleStatements)
+	r.Get("/api/v1/statements/compare", a.handleStatementsCompare)
 	a.registerContentionRoutes(r)
 	a.registerRelationRoutes(r)
 	a.registerIndexSuggestionRoutes(r)

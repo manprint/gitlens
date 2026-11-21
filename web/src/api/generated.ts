@@ -736,6 +736,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/statements/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare top statements between period A and period B.
+         * @description Aggregates each period as /api/v1/statements does and joins the two on (datname, queryid). Totals are divided by their period length in seconds (normalized per_second); mean_exec_time is per call and is compared as it is. delta is B minus A with a missing side counted as 0; ratio is B / A, null when A is 0 or missing. Rows are ordered by the absolute delta of the order_by metric, largest first, then queryid. Each period lasts at most 31 days and ends at most one minute in the future; the periods may overlap. A wrong parameter is a 400 whose error names it (for example "invalid a_to").
+         */
+        get: operations["getStatementsCompare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ash": {
         parameters: {
             query?: never;
@@ -1508,6 +1528,52 @@ export interface components {
             wal_bytes?: number | null;
             temp_blks_written?: number | null;
             truncated: components["schemas"]["Truncated"];
+        };
+        ComparePeriod: {
+            from: components["schemas"]["Timestamp"];
+            to: components["schemas"]["Timestamp"];
+        };
+        /** @description Metrics named as in /api/v1/statements; totals per second of the period, mean_exec_time per call. null when not known. */
+        StatementCompareMetrics: {
+            /** Format: double */
+            calls: number | null;
+            /** Format: double */
+            total_exec_time_ms: number | null;
+            /** Format: double */
+            rows: number | null;
+            /** Format: double */
+            mean_exec_time: number | null;
+            /** Format: double */
+            shared_blks_hit: number | null;
+            /** Format: double */
+            shared_blks_read: number | null;
+            /** Format: double */
+            wal_bytes: number | null;
+            /** Format: double */
+            temp_blks_written: number | null;
+        };
+        StatementCompareRow: {
+            datname: string;
+            /** @description PostgreSQL query ID as a decimal string. */
+            queryid: string;
+            query_text: string | null;
+            /**
+             * @description new = only in B
+             * @enum {string}
+             */
+            status: "both" | "new" | "gone";
+            a: components["schemas"]["StatementCompareMetrics"] | null;
+            b: components["schemas"]["StatementCompareMetrics"] | null;
+            delta: components["schemas"]["StatementCompareMetrics"];
+            ratio: components["schemas"]["StatementCompareMetrics"];
+        };
+        StatementCompare: {
+            a: components["schemas"]["ComparePeriod"];
+            b: components["schemas"]["ComparePeriod"];
+            order_by: string;
+            /** @enum {string} */
+            normalized: "per_second";
+            rows: components["schemas"]["StatementCompareRow"][];
         };
         StatementsResponse: {
             statements: components["schemas"]["Statement"][];
@@ -4212,6 +4278,37 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+        };
+    };
+    getStatementsCompare: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                database?: string;
+                a_from: components["schemas"]["Timestamp"];
+                a_to: components["schemas"]["Timestamp"];
+                b_from: components["schemas"]["Timestamp"];
+                b_to: components["schemas"]["Timestamp"];
+                order_by?: "calls" | "calls_rate" | "total_calls" | "total_exec_time" | "total_exec_time_ms" | "exec_time" | "total_time" | "total_rows" | "rows" | "rows_rate" | "shared_blks_hit" | "shared_blks_hit_rate" | "shared_blks_read" | "shared_blks_read_rate" | "wal_bytes" | "wal_bytes_rate" | "temp_blks_written" | "temp_blks_written_rate" | "mean_exec_time" | "mean_time";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statements of both periods with their change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementCompare"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
         };
     };
     getAsh: {

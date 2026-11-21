@@ -66,6 +66,7 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 |---|---|---|---|
 | GET | `/api/v1/plans` | `getPlans` | Return plan history for a query. |
 | GET | `/api/v1/statements` | `getStatements` | Return top statements joined to query text. |
+| GET | `/api/v1/statements/compare` | `getStatementsCompare` | Compare top statements between period A and period B. |
 
 ## ash
 
