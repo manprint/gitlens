@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 18:13 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 20:12 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 42420040406777c3ee517d3bc57c97c64da088a1 + tree ab63c92d5d978493e6dbf8e8d9fcd688b48dc8e1 · branch main · last WIP tree none
-- Last closure: unit:15.1:1
-- Next: open 15.2 · next eligible: 15.2
+- Base: HEAD 0fa632ee8d8c905205dbb2a24465e1aa9b3ef89f + tree 65e6b8c2beda5e86c563f196cc6b8c42ace6bc58 · branch main · last WIP tree none
+- Last closure: unit:15.2:1
+- Next: open 15.3 · next eligible: 15.3
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -104,6 +104,8 @@ none
 - A47 (14.2, agent-1 tool list review): arguments copied from api/openapi.yaml as the phase requires, which corrects three table hints: pglens_list_findings filters by `state` (no `status`), pglens_query_plans takes `datname` (no `database`), pglens_instance_host takes only `id` (the route has no `from`/`to`). Every OpenAPI path/query parameter of a route is an argument (TestMCP007 checks both directions); `queryid` (oneOf integer|string) is typed string. 30 tools, all GET; no write or credential route.
 - A48 (14.3): /mcp is outside /api/, so RequireCredential exempts it; the handler calls the extracted credentialAccepted (same token/session rules, same 401/503). The cross-origin write guard bypasses only POST /mcp (AddInsecureBypassPattern) so listed origins reach the MCP Origin rule; every other route keeps the guard (TestMCP011). The in-process GET clears chi's route context, else the router routes it as the outer POST (found by TestINTMCP001; TestMCP009 guards it). pglens has one bearer token plus UI sessions, so TestMCP010's refused inner call is a REST refusal (400) returned verbatim with isError. Debug log via slog.Debug (no server debug level; silent by default). MCPConfig rides in UIConfig.MCP; version from main.
 - A49 (14.4): UI-CLUS-052 scans Go lines matching `Type:`/`typ:`; the MCP registry field `typ` became `kind` and content type `"text"` (internal/mcp) joined NOT_EVENT_TYPES, so the event-taxonomy guard stays strict without listing JSON Schema words.
+- A50 (15.2): the lab stack (`/home/agent/pglens-odoo-stack`, `/home/agent/odoo-backups`) does not exist in this sandbox (no directory, 0 containers). Not repaired or recreated (out of scope). The reference scenario runs instead on an ephemeral local stack from this tree: TimescaleDB store + `pglens-pgext:18` monitored PostgreSQL (single node, no HA, no Odoo), server and agent built with `go build` from the working tree and run on the host (no image build, no deploy.sh). Backup rule: nothing pre-existing is touched, the stack is created and removed by the unit. Lab-specific evidence (HA, hactl, lab restore) is a recorded deviation; the lab run stays a follow-up for the operator.
+- A51 (15.2): the reference scenario found a 3.3 defect: a resolved email kept the severity in its subject (`[pglens] WARNING …`), so an inbox could not tell fire from resolve. Agent-1 accepts the narrow fix inside 15.2 (`emailSubjectState` in `internal/alert/notify/email.go`, test TestNCH025) instead of reopening 3.3: one function, own test, no contract change beyond the subject word. Likewise the 15.1 Italian e2e fit check used the nil workbook UUID, whose 404s failed the console-error collector; it now creates and deletes a scratch workbook.
 
 ## 9. Blockers
 none

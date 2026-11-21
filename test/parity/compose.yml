@@ -1,0 +1,59 @@
+# Ephemeral stack of the plan 007 reference scenario (test/parity/README.md):
+# the server's TimescaleDB store and one monitored PostgreSQL 18 with hypopg,
+# pg_hint_plan and auto_explain. Both bind loopback only. The server and the
+# agent run on the host, built from the working tree.
+name: pglens-parity
+services:
+  store:
+    image: timescale/timescaledb:2.31.0-pg17
+    environment:
+      POSTGRES_DB: pglens
+      POSTGRES_USER: pglens
+      POSTGRES_PASSWORD: ${PARITY_STORE_PASSWORD:?set PARITY_STORE_PASSWORD}
+    ports:
+      - "127.0.0.1:${PARITY_STORE_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U pglens -d pglens"]
+      interval: 3s
+      retries: 40
+  pg:
+    image: pglens-pgext:18
+    environment:
+      POSTGRES_PASSWORD: ${PARITY_PG_PASSWORD:?set PARITY_PG_PASSWORD}
+      PGLENS_MONITORING_PASSWORD: ${PARITY_MONITOR_PASSWORD:?set PARITY_MONITOR_PASSWORD}
+      PARITY_APP_PASSWORD: ${PARITY_APP_PASSWORD:?set PARITY_APP_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements,auto_explain,pg_hint_plan
+      - -c
+      - compute_query_id=on
+      - -c
+      - logging_collector=on
+      - -c
+      - log_destination=jsonlog
+      - -c
+      - lc_messages=C
+      - -c
+      - log_autovacuum_min_duration=0
+      - -c
+      - autovacuum_naptime=5s
+      - -c
+      - auto_explain.log_min_duration=200
+      - -c
+      - auto_explain.log_format=json
+      - -c
+      - log_lock_waits=on
+      - -c
+      - log_temp_files=0
+      - -c
+      - log_checkpoints=on
+    ports:
+      - "127.0.0.1:${PARITY_PG_PORT:-55433}:5432"
+    volumes:
+      - ../../deploy/sql/monitoring_user.sql:/opt/pglens/monitoring_user.sql:ro
+      - ./init.sh:/docker-entrypoint-initdb.d/01-parity.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      interval: 3s
+      retries: 40

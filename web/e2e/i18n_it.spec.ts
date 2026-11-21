@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import type { APIRequestContext, Page } from '@playwright/test'
 
 import { expect, test } from './fixtures'
 import { headerLineProblems, measurePage, open, routeUrl, routeValues } from './fullhd_fit'
@@ -16,6 +16,29 @@ const FIT_PATHS = [
   '/instances/:instanceId/queries/:queryid/workbooks/:workbookId',
   '/settings?tab=retention',
 ]
+
+const NIL_WORKBOOK = '00000000-0000-0000-0000-000000000000'
+
+async function scratchWorkbook(
+  api: APIRequestContext,
+  values: { instanceId: string; queryid: string },
+): Promise<string> {
+  const statements = (await (
+    await api.get(`/api/v1/statements?instance_id=${values.instanceId}&limit=50`)
+  ).json()) as { statements?: { datname: string; queryid: string | number }[] }
+  const statement = statements.statements?.find((s) => String(s.queryid) === values.queryid)
+  if (!statement) throw new Error(`no statement ${values.queryid} for the workbook route`)
+  const created = await api.post('/api/v1/workbooks', {
+    data: {
+      database: statement.datname,
+      instance_id: values.instanceId,
+      name: 'I18N-E2E-001',
+      queryid: values.queryid,
+    },
+  })
+  expect(created.status(), 'workbook for the fit check').toBe(201)
+  return ((await created.json()) as { workbook_id: string }).workbook_id
+}
 
 async function chooseLanguage(page: Page, code: string): Promise<void> {
   await page.goto('/settings?tab=preferences')
@@ -74,31 +97,38 @@ test('I18N-E2E-001 the console in Italian: navigation, server texts, reload, Ful
   // The live data decides whether a page fits at all; the translation must not
   // be what breaks it: Italian fits wherever English fits.
   const values = await routeValues(api)
-  for (const path of FIT_PATHS) {
-    const url = routeUrl(fullHdRoute(path), values)
-    for (const viewport of FULLHD_VIEWPORTS) {
-      const where = `${path} at ${viewport.width}×${viewport.height}`
-      await storeLanguage(page, 'en')
-      await open(page, url, viewport)
-      await expect(page.locator('html')).toHaveAttribute('lang', 'en')
-      const english = await measurePage(page)
-      await storeLanguage(page, 'it')
-      await open(page, url, viewport)
-      await expect(page.locator('html')).toHaveAttribute('lang', 'it')
-      const italian = await measurePage(page)
-      expect(italian.scrollWidth, `${where}: horizontal scrollbar`).toBeLessThanOrEqual(
-        italian.innerWidth,
-      )
-      expect(italian.scrollingTableBoxes, `${where}: table box scrolls`).toBe(0)
-      const headerProblems = await headerLineProblems(page)
-      expect(headerProblems, `${where}: header line: ${headerProblems.join(' | ')}`).toEqual([])
-      if (english.scrollHeight <= english.innerHeight) {
-        expect(
-          italian.scrollHeight,
-          `${where}: page scrollbar in Italian only`,
-        ).toBeLessThanOrEqual(italian.innerHeight)
+  // The workbook route needs a workbook: the placeholder id of routeUrl answers
+  // 404, which the browser logs as an error. One is made for the check and removed.
+  const workbookId = await scratchWorkbook(api, values)
+  try {
+    for (const path of FIT_PATHS) {
+      const url = routeUrl(fullHdRoute(path), values).replace(NIL_WORKBOOK, workbookId)
+      for (const viewport of FULLHD_VIEWPORTS) {
+        const where = `${path} at ${viewport.width}×${viewport.height}`
+        await storeLanguage(page, 'en')
+        await open(page, url, viewport)
+        await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+        const english = await measurePage(page)
+        await storeLanguage(page, 'it')
+        await open(page, url, viewport)
+        await expect(page.locator('html')).toHaveAttribute('lang', 'it')
+        const italian = await measurePage(page)
+        expect(italian.scrollWidth, `${where}: horizontal scrollbar`).toBeLessThanOrEqual(
+          italian.innerWidth,
+        )
+        expect(italian.scrollingTableBoxes, `${where}: table box scrolls`).toBe(0)
+        const headerProblems = await headerLineProblems(page)
+        expect(headerProblems, `${where}: header line: ${headerProblems.join(' | ')}`).toEqual([])
+        if (english.scrollHeight <= english.innerHeight) {
+          expect(
+            italian.scrollHeight,
+            `${where}: page scrollbar in Italian only`,
+          ).toBeLessThanOrEqual(italian.innerHeight)
+        }
       }
     }
+  } finally {
+    await api.delete(`/api/v1/workbooks/${workbookId}`)
   }
 
   await chooseLanguage(page, 'en')

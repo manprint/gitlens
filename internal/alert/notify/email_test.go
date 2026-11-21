@@ -147,6 +147,16 @@ func TestNCH020_EmailGolden(t *testing.T) {
 	require.Equal(t, "email", NewEmail(testSMTP, nil).Name())
 }
 
+// NCH-025: a resolve message says RESOLVED in the subject, not the severity
+// of the alert it closes.
+func TestNCH025_EmailResolvedSubject(t *testing.T) {
+	m := Message{DedupID: "d", Severity: "critical", Phase: "resolve", Summary: "replication lag high", At: time.Unix(0, 0).UTC()}
+	got := string(buildEmail(testSMTP, []string{"ops@canary.example"}, m))
+	require.Contains(t, got, "Subject: [pglens] RESOLVED replication lag high\r\n")
+	m.Phase = "fire"
+	require.Contains(t, string(buildEmail(testSMTP, []string{"ops@canary.example"}, m)), "Subject: [pglens] CRITICAL replication lag high\r\n")
+}
+
 // NCH-021: a summary carrying CRLF cannot add a header.
 func TestNCH021_EmailHeaderInjection(t *testing.T) {
 	m := Message{Severity: "warning", Summary: "lag\r\nBcc: x@y", At: time.Unix(0, 0).UTC()}

@@ -189,7 +189,7 @@ func buildEmail(cfg SMTPSettings, recipients []string, m Message) []byte {
 	if a, err := mail.ParseAddress(from); err == nil {
 		from = a.String()
 	}
-	subject := headerValue("[pglens] " + strings.ToUpper(m.Severity) + " " + clip(m.Summary, emailSubjectMax))
+	subject := headerValue("[pglens] " + emailSubjectState(m) + " " + clip(m.Summary, emailSubjectMax))
 	var b strings.Builder
 	header := func(name, value string) { b.WriteString(name + ": " + headerValue(value) + "\r\n") }
 	header("From", from)
@@ -207,6 +207,15 @@ func buildEmail(cfg SMTPSettings, recipients []string, m Message) []byte {
 		}
 	}
 	return []byte(b.String())
+}
+
+// emailSubjectState is the subject's state word: RESOLVED for a resolve
+// message, else the severity, so an inbox tells the two apart without opening.
+func emailSubjectState(m Message) string {
+	if m.Phase == "resolve" {
+		return "RESOLVED"
+	}
+	return strings.ToUpper(m.Severity)
 }
 
 // messageIDPart keeps the letters, digits, dot, dash and underscore of id.
