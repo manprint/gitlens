@@ -39,6 +39,7 @@ type ProcessRate struct {
 }
 
 type procStat struct {
+	comm       string
 	ppid       int
 	cpuTicks   uint64
 	startTicks uint64
@@ -48,8 +49,8 @@ type procStat struct {
 // parentheses and may contain spaces or parentheses, so fields are counted
 // from the last ')'.
 func parseProcStat(data []byte) (procStat, error) {
-	end := bytes.LastIndexByte(data, ')')
-	if end < 0 {
+	start, end := bytes.IndexByte(data, '('), bytes.LastIndexByte(data, ')')
+	if start < 0 || end < start {
 		return procStat{}, errors.New("stat: no command name")
 	}
 	// fields[0] is field 3 (state).
@@ -69,7 +70,7 @@ func parseProcStat(data []byte) (procStat, error) {
 		}
 		vals[i] = v
 	}
-	return procStat{ppid: ppid, cpuTicks: vals[0] + vals[1], startTicks: vals[2]}, nil
+	return procStat{comm: string(data[start+1 : end]), ppid: ppid, cpuTicks: vals[0] + vals[1], startTicks: vals[2]}, nil
 }
 
 // parseProcStatus returns VmRSS of /proc/<pid>/status in bytes; a process
@@ -149,6 +150,20 @@ func (c *Collector) ParentPID(pid int) (int, error) {
 		return 0, err
 	}
 	return st.ppid, nil
+}
+
+// ProcessName returns the executable name of a process (field 2 of stat, at
+// most 15 bytes). It is used only to recognise PostgreSQL processes and is
+// never shipped.
+func (c *Collector) ProcessName(pid int) (string, error) {
+	if pid <= 0 {
+		return "", fmt.Errorf("pid %d", pid)
+	}
+	st, err := c.readStat(pid)
+	if err != nil {
+		return "", err
+	}
+	return st.comm, nil
 }
 
 // errGone marks a process that ended while it was being read.

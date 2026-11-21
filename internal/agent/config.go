@@ -66,10 +66,35 @@ type CommandsConfig struct {
 }
 
 type HostConfig struct {
-	Enabled  *bool  `yaml:"enabled"`
-	Interval string `yaml:"interval"`
-	ProcPath string `yaml:"proc_path"`
-	SysPath  string `yaml:"sys_path"`
+	Enabled   *bool               `yaml:"enabled"`
+	Interval  string              `yaml:"interval"`
+	ProcPath  string              `yaml:"proc_path"`
+	SysPath   string              `yaml:"sys_path"`
+	Processes HostProcessesConfig `yaml:"processes"`
+}
+
+// HostProcessesConfig is host.processes: per-process CPU, memory and I/O of
+// the PostgreSQL processes of each host-local target.
+type HostProcessesConfig struct {
+	Enabled *bool `yaml:"enabled"`
+	TopN    *int  `yaml:"top_n"`
+}
+
+// DefaultHostProcessesTopN is host.processes.top_n when unset.
+const DefaultHostProcessesTopN = 20
+
+// HostProcessesEnabled is host.processes.enabled (default true), effective
+// only when host metrics are on.
+func (c *Config) HostProcessesEnabled() bool {
+	return c.HostEnabled() && (c.Host.Processes.Enabled == nil || *c.Host.Processes.Enabled)
+}
+
+// HostProcessesTopN is host.processes.top_n after validation.
+func (c *Config) HostProcessesTopN() int {
+	if c.Host.Processes.TopN == nil {
+		return DefaultHostProcessesTopN
+	}
+	return *c.Host.Processes.TopN
 }
 
 func (c *Config) HostEnabled() bool              { return c.Host.Enabled == nil || *c.Host.Enabled }
@@ -341,6 +366,9 @@ func (c *Config) validate() error {
 			return fmt.Errorf("validation: host.interval: %w", err)
 		}
 		c.parsedHostInterval = d
+	}
+	if n := c.Host.Processes.TopN; n != nil && (*n < 1 || *n > 100) {
+		return fmt.Errorf("validation: host.processes.top_n: %d is outside 1-100", *n)
 	}
 	if c.Host.ProcPath == "" {
 		c.Host.ProcPath = c.HostProcPath()

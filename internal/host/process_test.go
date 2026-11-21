@@ -29,7 +29,7 @@ func TestPROC001_StatCommandWithSpacesAndParentheses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%q: %v", line, err)
 		}
-		if st != (procStat{ppid: 100, cpuTicks: 500, startTicks: 90}) {
+		if st.ppid != 100 || st.cpuTicks != 500 || st.startTicks != 90 {
 			t.Fatalf("%q: got %+v", line, st)
 		}
 	}
@@ -37,6 +37,9 @@ func TestPROC001_StatCommandWithSpacesAndParentheses(t *testing.T) {
 	ppid, err := c.ParentPID(104)
 	if err != nil || ppid != 100 {
 		t.Fatalf("ParentPID(104) = %d, %v", ppid, err)
+	}
+	if name, err := c.ProcessName(104); err != nil || name != "post gres" {
+		t.Fatalf("ProcessName(104) = %q, %v", name, err)
 	}
 	if _, err := parseProcStat([]byte("1 (x) S 0")); err == nil {
 		t.Fatal("short stat line accepted")

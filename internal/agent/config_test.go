@@ -617,3 +617,33 @@ checks: `
 	sv, ep = CheckConfig{}.ASHTagDimensions()
 	require.Equal(t, []bool{true, true}, []bool{sv, ep})
 }
+
+func TestPROC006_HostProcessesConfig(t *testing.T) {
+	load := func(host string) (*Config, error) {
+		path := writeConfigFile(t, `server: {url: http://localhost:8080, token: test}
+identity_path: /tmp/id
+buffer: {path: /tmp/buf}
+targets: [{name: pg, dsn: postgres://localhost/app}]
+`+host)
+		defer func() { _ = os.Remove(path) }()
+		return LoadConfig(path)
+	}
+	cfg, err := load("")
+	require.NoError(t, err)
+	require.True(t, cfg.HostProcessesEnabled())
+	require.Equal(t, 20, cfg.HostProcessesTopN())
+
+	cfg, err = load("host: {processes: {enabled: false, top_n: 100}}")
+	require.NoError(t, err)
+	require.False(t, cfg.HostProcessesEnabled())
+	require.Equal(t, 100, cfg.HostProcessesTopN())
+
+	cfg, err = load("host: {enabled: false}")
+	require.NoError(t, err)
+	require.False(t, cfg.HostProcessesEnabled(), "host metrics off turns processes off")
+
+	for _, n := range []string{"0", "101", "-1"} {
+		_, err := load("host: {processes: {top_n: " + n + "}}")
+		require.ErrorContains(t, err, "host.processes.top_n", n)
+	}
+}

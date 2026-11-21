@@ -12,6 +12,13 @@ const BloatSkippedTablesMetric = "pg_bloat_skipped_tables"
 // rewrites the one fact of each database, so readers judge it by its age.
 const BloatUnreadableFact = "bloat_unreadable"
 
+// HostProcessFact and HostProcessesCheck name the per-process host facts
+// and the result that carries them.
+const (
+	HostProcessFact    = "host_process"
+	HostProcessesCheck = "host_processes"
+)
+
 // BloatSkippedValue is the value of a BloatUnreadableFact: how many tables of
 // the database the bloat estimate cannot read, and the largest of them.
 type BloatSkippedValue struct {
@@ -112,7 +119,10 @@ var factKinds = map[string]FactKind{
 	"subscription":              {Check: "logical_replication", Replace: true},
 	BloatUnreadableFact:         {Check: "bloat_estimate"},
 	"xmin_horizon":              {Check: "activity", Replace: true},
-	AgentFlagsFact:              {Check: AgentFlagsCheck, Replace: true},
+	// host_process is one PostgreSQL process's CPU, memory and I/O over a
+	// host interval (plan 007 phase 12): a time series, never replaced.
+	HostProcessFact: {Check: HostProcessesCheck},
+	AgentFlagsFact:  {Check: AgentFlagsCheck, Replace: true},
 }
 
 // LookupFactKind returns the description of a fact kind, and whether the

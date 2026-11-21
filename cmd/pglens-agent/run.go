@@ -189,6 +189,7 @@ func runAgentCommand(args []string) {
 			}
 		}
 		warner := newDiskWarner(os.Stderr)
+		trackers := processTrackers(cfg, collector, func(i int) processQuerier { return managerProcessQuerier{managers[i]} }, newHourlyWarner(os.Stderr, clk.Now))
 		go func() {
 			ticker := clk.NewTicker(cfg.GetHostInterval())
 			defer ticker.Stop()
@@ -205,6 +206,11 @@ func runAgentCommand(args []string) {
 					if ok {
 						pending[target] = append(pending[target], changed)
 					}
+					mu.Unlock()
+				})
+				collectProcesses(ctx, trackers, clk.Now(), func(target string, r wire.Result) {
+					mu.Lock()
+					pending[target] = append(pending[target], r)
 					mu.Unlock()
 				})
 			}

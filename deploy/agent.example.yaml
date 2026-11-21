@@ -14,6 +14,12 @@ host:
   # Filesystem total/free are measured on each local target's data directory
   # (SHOW data_directory). In a container, mount that directory read-only at
   # the same path, or the disk fields stay empty (one warning is logged).
+  processes:
+    # CPU, memory and disk I/O of each PostgreSQL process of a local target,
+    # joined to its session; needs the agent on the database host. I/O
+    # counters need the same OS user as PostgreSQL, or root. Default true.
+    enabled: true
+    top_n: 20 # Ship the top N by CPU and the top N by memory; 1-100, default 20.
 
 buffer:
   path: /var/lib/pglens/buffer # Durable WAL-like sample buffer directory.

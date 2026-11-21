@@ -274,6 +274,15 @@ DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 		}
 		_, _, _ = pglog.NewSQLSource(mgr.LogQuerier(), settings.Format()).Size(ctx, "postgresql.json")
 
+		// Host processes (plan 007 phase 12): the backend pid and the
+		// sessions joined to /proc.
+		pid, err := mgr.BackendPID(ctx)
+		require.NoError(t, err)
+		require.Positive(t, pid)
+		sessions, err := mgr.ProcessSessions(ctx)
+		require.NoError(t, err)
+		require.Contains(t, sessions, pid)
+
 		require.Equal(t, before, databaseFingerprint(t, admin))
 
 		rows, err := admin.Query(ctx, `SELECT s.query FROM public.pg_stat_statements s
