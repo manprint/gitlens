@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 10:44 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 10:58 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 5e156330b08ccd1549db9e108718f066bb27172f + tree 65e885ae214d1a004c0720505a6007203c3c3b7b · branch main · last WIP tree none
-- Last closure: unit:5.4:1
-- Next: open P5 · next eligible: P5
+- Base: HEAD 5758bf8e58b76fe00fc68997ae3fb4c128209bf1 + tree bb4e9743bbfd18adb4101aafcc3207f1a2d02e62 · branch main · last WIP tree none
+- Last closure: unit:P5:1
+- Next: open 6.1 · next eligible: 6.1
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-none
+P5: closure: gates and review only
 
 ## 6. Checkpoint
 none
@@ -72,6 +72,7 @@ none
 - A15 (5.3): workload sources are metrics_statements/tables/indexes, not `metrics`: only `statements` reads `metrics_statements_1h`; tables and indexes have no rollup and stay raw (resolution raw); `metrics_1h` has no reader yet. Rollups are read through constant subqueries shaped like the raw table (`bucket AS ts`, statements `COALESCE(sample_seconds, samples*60)`, ASH `''::text AS state`), so the raw SQL runs unchanged; `from` is floored to the hour on the rollup. Raw days = live `drop_after` floored (min 1), family default if unreadable, no policy = never rollup; ranges within `retentionFloorDays` skip the policy read. ASH rollup ticks per hour = MAX(window_ticks) of the hour's keys (exact when one key covers every window). `/ash/compare` stays raw. `resolution` optional in OpenAPI (older servers omit it); grouped ASH buckets rounded up to whole hours; ash/top `resolution_seconds` 3600 on rollup. Mock tests with old fixed dates get an empty `stubPolicyStore`.
 - A16 (5.3): pre-existing failure TestINTADV008 (since migration 0030, plan 006): `ensureFindingTables` lacked `findings.message`; added `ALTER TABLE … ADD COLUMN IF NOT EXISTS message jsonb` so G-GO-INT can be green.
 - A17 (5.4): the rollup note and the disabled-control tooltip are shared texts (`shell.rollup.note`, `shell.rollup.dropped`) rendered by one `RollupNote` component instead of per-area keys; rollup rows form a second DataTable (`settings.retention-rollup-table`, captions en+it). The note shows on Queries list, Slowest queries, Wait events (page and top list) and as the subtitle of Overview workload cards; Overview metric charts read raw only (A15) and show none.
+- A18 (P5): `golangci-lint --build-tags=integration` found one pre-existing errcheck (plan 006, `internal/agent/explain_guard_integration_test.go:866`, `defer app.Close(ctx)`). P5 edits no tests, so the one-line fix lands as its own chore commit outside the unit; not a phase-5 defect.
 
 ## 9. Blockers
 none
@@ -88,12 +89,8 @@ none
 | 3 Notification channels | DONE | 1 | 3.1–3.4 | unit:P3:1 |
 | 4 Period A versus B | DONE | 1 | 4.1–4.3 | unit:P4:1 |
 | · P4 closure | IN_PROGRESS | 1 | — | — |
-| 5 Rollups | IN_PROGRESS | 1 | 5.1–5.4 | — |
-| · 5.1 | DONE | 1 | — | unit:5.1:1 |
-| · 5.2 | DONE | 1 | — | unit:5.2:1 |
-| · 5.3 | DONE | 1 | — | unit:5.3:1 |
-| · 5.4 | DONE | 1 | — | unit:5.4:1 |
-| · P5 closure | TODO | 1 | — | — |
+| 5 Rollups | DONE | 1 | 5.1–5.4 | unit:P5:1 |
+| · P5 closure | IN_PROGRESS | 1 | — | — |
 | 6 Log ingest | TODO | 1 | 6.1–6.6 | — |
 | 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |
 | 8 Autovacuum history | TODO | 1 | 8.1–8.3 | — |

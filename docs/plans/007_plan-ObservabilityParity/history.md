@@ -86,3 +86,6 @@ Gates: G-GO-FOCUS server ok (race, shuffle); TestINTRLP005 + TestWSERINT/TestINT
 
 ## 2026-11-21 5.4/1 complete unit:5.4:1
 Gates: G-WEB-STATIC tsc 0/eslint 0 errors/prettier ok; G-WEB-UNIT 232 files 2059 tests pass after test-ID fix; G-API no diff; review: self-review (agent:opus) accepted; changes: retention panel two groups (raw, hourly rollups) with per-row bounds; RollupNote (shell.rollup.note) on Queries list, Slowest, Wait events page+top, Overview workload card subtitle; ASH session groupings disabled with tooltip on 1h responses; help en/it retention + limits; README Retention and rollups + Known limits; notes: A17; UI-RLP-001..006
+
+## 2026-11-21 P5/1 complete unit:P5:1
+Gates: G-GO-FULL 35 pkgs ok 0 FAIL; G-GO-INT server+store ok (TestINTRLP00*, TestRET*, TestINTRET*, TestWSER*); G-API no diff (web-lint gen); G-WEB-FULL 232 files/2059 tests, coverage gate and budget pass; G-I18N pass; integration lint 1 pre-existing errcheck (A18); review: self-review (agent:opus) accepted; changes: none (closure); notes: self-review: migration 0035 rollups, read rule (raw within retention, 1h beyond), bounds 31-1825, README section; accepted
