@@ -59,6 +59,7 @@ export const auth: Translation<typeof english> = {
   'auth.surface.queryInspector': 'Ispettore delle query',
   'auth.surface.queryDetail': 'Dettaglio query e storico dei piani',
   'auth.surface.locks': 'Lock e attività',
+  'auth.surface.logs': 'Log PostgreSQL',
   'auth.surface.findings': 'Segnalazioni dell’advisor',
   'auth.surface.alerts': 'Alert ed eventi',
   'auth.surface.events': 'Cronologia degli eventi della flotta',

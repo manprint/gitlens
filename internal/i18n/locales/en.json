@@ -187,5 +187,21 @@
   "action.slot_drop": "Drop slot {slot}, if no consumer will come back (in its database):",
   "action.vacuum": "Freeze table {relation} (database {database}):",
   "field.threshold": "Threshold",
-  "section.evidence": "Evidence"
+  "section.evidence": "Evidence",
+  "page.logs": "PostgreSQL logs › {instance}",
+  "logs.section": "Latest PostgreSQL log lines",
+  "logs.line": "{at} {severity} [{class}] {message}",
+  "logs.none": "No matching line in the stored log of the last 24 hours.",
+  "rule.log.panic.title": "PANIC or crash in the PostgreSQL log",
+  "rule.log.panic.problem": "The PostgreSQL log reports a PANIC or a server process crash: PostgreSQL restarts and drops every session.",
+  "rule.log.panic.actions": "Read the lines below and the server log around them.\nFind the cause (storage, memory, an extension) before the next crash.",
+  "rule.log.corruption.title": "Data corruption in the PostgreSQL log",
+  "rule.log.corruption.problem": "The PostgreSQL log reports corrupted data.",
+  "rule.log.corruption.actions": "Find the relation named in the lines below and check the storage.\nRestore from a backup or rebuild the object; amcheck verifies B-tree indexes.",
+  "rule.log.disk_full.title": "Disk full in the PostgreSQL log",
+  "rule.log.disk_full.problem": "The PostgreSQL log reports a full disk: PostgreSQL cannot write WAL or data.",
+  "rule.log.disk_full.actions": "Free space or grow the filesystem at once.\nCheck pg_wal (failing archiving or slots retaining WAL) and temporary files.",
+  "rule.log.out_of_memory.title": "Out of memory in the PostgreSQL log",
+  "rule.log.out_of_memory.problem": "The PostgreSQL log reports that the server ran out of memory.",
+  "rule.log.out_of_memory.actions": "Find the statement in the lines below.\nLower work_mem or the number of connections, or add memory."
 }

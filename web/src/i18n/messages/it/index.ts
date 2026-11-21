@@ -10,6 +10,7 @@ import { help } from './help'
 import { indexes } from './indexes'
 import { instance } from './instance'
 import { locks } from './locks'
+import { logs } from './logs'
 import { queries } from './queries'
 import { readiness } from './readiness'
 import { settings } from './settings'
@@ -26,6 +27,7 @@ export const messages: Catalog = {
   ...indexes,
   ...instance,
   ...locks,
+  ...logs,
   ...queries,
   ...readiness,
   ...settings,

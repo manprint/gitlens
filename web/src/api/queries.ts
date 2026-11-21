@@ -794,6 +794,36 @@ export function useEvents(params: WindowlessParameters<'/api/v1/events'>, window
   })
 }
 
+export function useLogs(params: WindowlessParameters<'/api/v1/logs'>, window: QueryWindow) {
+  return useApiQuery({
+    keepPrevious: true,
+    policy: REFRESH.activity,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/logs', {
+          params: { query: { ...params, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
+    queryKey: qk.logs(params, window),
+  })
+}
+
+export function useLogClasses(instanceId: string, window: QueryWindow) {
+  return useApiQuery({
+    keepPrevious: true,
+    policy: REFRESH.activity,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/logs/classes', {
+          params: { query: { instance_id: instanceId, ...resolveQueryWindow(window) } },
+          signal,
+        }),
+      ),
+    queryKey: qk.logClasses(instanceId, window),
+  })
+}
+
 export function useStatements(
   rawParams: WindowlessParameters<'/api/v1/statements'>,
   window: QueryWindow,

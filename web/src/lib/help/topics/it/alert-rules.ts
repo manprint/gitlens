@@ -284,6 +284,34 @@ export const alertRulesTopic: HelpTopic = {
               action:
                 'Trova lo standby che non trasmette. Verifica se è spento, disconnesso, o non è ancora rientrato dopo un failover.',
             },
+            {
+              term: 'log.panic',
+              meaning:
+                'Predefinito: critical, ambito istanza. Un PANIC o il crash di un processo del server nel log, quindi la soglia è 0 e la durata è 0 secondi. Il log di PostgreSQL riporta un PANIC o il crash di un processo del server.',
+              action:
+                'Apri la pagina Log dell’istanza, leggi le righe di classe `panic` e `server.crash` e verifica se PostgreSQL si è riavviato. Cerca la causa (storage, memoria, un’estensione) prima del crash successivo.',
+            },
+            {
+              term: 'log.corruption',
+              meaning:
+                'Predefinito: critical, ambito istanza. Una riga di classe `corruption` nel log, quindi la soglia è 0 e la durata è 0 secondi. Il log di PostgreSQL riporta dati corrotti.',
+              action:
+                'Apri la pagina Log, trova la relazione citata nella riga e controlla lo storage. Ripristina da un backup o ricostruisci l’oggetto; `amcheck` verifica gli indici B-tree.',
+            },
+            {
+              term: 'log.disk_full',
+              meaning:
+                'Predefinito: critical, ambito istanza. Una riga di classe `disk.full` nel log, quindi la soglia è 0 e la durata è 0 secondi. Il log di PostgreSQL riporta un disco pieno.',
+              action:
+                'Libera spazio o estendi il disco subito: PostgreSQL non può scrivere WAL né dati. La regola `disk.free_low` e le metriche dell’host mostrano quale disco si riempie.',
+            },
+            {
+              term: 'log.out_of_memory',
+              meaning:
+                'Predefinito: warning, ambito istanza. Una riga di classe `memory.out` nel log, quindi la soglia è 0 e la durata è 0 secondi. Il log di PostgreSQL riporta che il server ha esaurito la memoria.',
+              action:
+                'Apri la pagina Log per trovare lo statement, poi riduci `work_mem` o il numero di connessioni, oppure aggiungi memoria.',
+            },
           ],
         },
         {

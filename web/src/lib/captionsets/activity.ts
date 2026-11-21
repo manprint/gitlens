@@ -262,6 +262,24 @@ export const activityCaptions = {
     howToRead:
       'Select a capture to read its table, row, lock mode, who waited for whom and each statement. A rebuilt deadlock was broken before the agent saw the cycle: its sessions are those seen waiting in that database just before.',
   },
+  'logs.class-summary': {
+    what: 'How many PostgreSQL log lines of each class the agent shipped for this server.',
+    source:
+      'getLogClasses: log_events, the lines the agent log reader classified and shipped (checks.logs).',
+    unit: 'log lines',
+    window: 'The time range of the page.',
+    howToRead:
+      'Select a class to list only its lines. A class with no line in the range is not listed.',
+  },
+  'logs.events': {
+    what: 'The PostgreSQL log lines of this server, newest first, with their class and severity.',
+    source:
+      'getLogs: log_events. A text that may hold a credential is withheld by the agent and again by the server.',
+    unit: 'log lines',
+    window: 'The time range of the page, at most 100 lines per page.',
+    howToRead:
+      'Expand a line to read its detail, hint, context and statement (statement only with checks.logs.statement_text). A line with a query ID links to the query.',
+  },
   'readiness.severity': {
     what: 'A warning means a pglens feature is lost or degraded on this server; a note means something is off by design or optional.',
     source: 'getReadiness: the severity of the pglens readiness rule that raised the item.',

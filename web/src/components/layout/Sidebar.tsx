@@ -19,6 +19,7 @@ import {
   ListChecks,
   ListTree,
   Lock,
+  ScrollText,
   Server,
   Settings,
   Zap,
@@ -91,6 +92,7 @@ function instanceGroup(instanceId: string, database: string | null): NavGroup {
       { icon: Zap, label: 'shell.nav.queryPerformance', path: `${base}/queries${search}` },
       { icon: Activity, label: 'shell.nav.waitEvents', path: `${base}/ash${search}` },
       { icon: Lock, label: 'shell.nav.locks', path: `${base}/locks${search}` },
+      { icon: ScrollText, label: 'shell.nav.logs', path: `${base}/logs${search}` },
     ],
   }
 }
@@ -218,7 +220,7 @@ function InstanceSwitcher({
       return
     }
     // Keep the operator on the same instance view when they switch servers.
-    const view = /^\/instances\/[^/]+(\/(?:ash|queries|locks))/.exec(pathname)?.[1] ?? ''
+    const view = /^\/instances\/[^/]+(\/(?:ash|queries|locks|logs))/.exec(pathname)?.[1] ?? ''
     void navigate(`/instances/${encodeURIComponent(instanceId)}${view}`)
   }
 

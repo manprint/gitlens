@@ -125,6 +125,10 @@ export const rules: Readonly<Record<RuleTextId, string>> = {
   'conn.idle_in_transaction': 'Una sessione è inattiva in una transazione da oltre 5 minuti.',
   'db.deadlock_rate': 'Si stanno verificando deadlock.',
   'disk.free_low': 'Meno del 15% del disco dei dati è libero.',
+  'log.panic': 'Il log di PostgreSQL riporta un PANIC o il crash di un processo del server.',
+  'log.corruption': 'Il log di PostgreSQL riporta dati corrotti.',
+  'log.disk_full': 'Il log di PostgreSQL riporta un disco pieno.',
+  'log.out_of_memory': 'Il log di PostgreSQL riporta che il server ha esaurito la memoria.',
 }
 
 export const needs: Readonly<Record<NeedName, string>> = {

@@ -282,6 +282,24 @@ export const activity: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     howToRead:
       'Attese più brevi dell’intervallo di campionamento possono sfuggire. Un bloccante radice non aspetta. Un ciclo: le sessioni si bloccano a vicenda.',
   },
+  'logs.class-summary': {
+    what: 'Quante righe del log PostgreSQL di ogni classe l’agent ha inviato per questo server.',
+    source:
+      'getLogClasses: log_events, le righe che il lettore del log dell’agent ha classificato e inviato (checks.logs).',
+    unit: 'righe di log',
+    window: 'L’intervallo di tempo della pagina.',
+    howToRead:
+      'Seleziona una classe per elencare solo le sue righe. Una classe senza righe nell’intervallo non compare.',
+  },
+  'logs.events': {
+    what: 'Le righe del log PostgreSQL di questo server, dalla più recente, con classe e severità.',
+    source:
+      'getLogs: log_events. Un testo che può contenere una credenziale viene nascosto dall’agent e di nuovo dal server.',
+    unit: 'righe di log',
+    window: 'L’intervallo di tempo della pagina, al massimo 100 righe per pagina.',
+    howToRead:
+      'Espandi una riga per leggere detail, hint, context e statement (lo statement solo con checks.logs.statement_text). Una riga con un query ID porta alla query.',
+  },
   'locks.captured-incidents': {
     what: 'Deadlock, attese di lock, transazioni lunghe o idle e query lunghe catturate dall’agent su questo server, con ogni sessione coinvolta.',
     source:

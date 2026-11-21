@@ -19,6 +19,7 @@ export const shell: Translation<typeof english> = {
   'shell.nav.queryPerformance': 'Prestazioni delle query',
   'shell.nav.waitEvents': 'Wait events',
   'shell.nav.locks': 'Lock e attività',
+  'shell.nav.logs': 'Log PostgreSQL',
   'shell.nav.settings': 'Impostazioni',
   'shell.nav.home': 'Home di pglens',
   'shell.nav.primary': 'Navigazione principale',

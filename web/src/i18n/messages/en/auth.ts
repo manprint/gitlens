@@ -56,6 +56,7 @@ export const auth = {
   'auth.surface.queryInspector': 'Query inspector',
   'auth.surface.queryDetail': 'Query detail and plan history',
   'auth.surface.locks': 'Locks and activity',
+  'auth.surface.logs': 'PostgreSQL logs',
   'auth.surface.findings': 'Advisor findings',
   'auth.surface.alerts': 'Alerts and events',
   'auth.surface.events': 'Fleet event timeline',

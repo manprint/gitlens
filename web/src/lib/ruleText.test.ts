@@ -20,7 +20,7 @@ const FIXTURE_RULE_IDS = [
 describe('ruleText', () => {
   it('knows every advisor rule and every alert rule', () => {
     expect(ADVISOR_RULE_IDS).toHaveLength(73)
-    expect(ALERT_RULE_IDS).toHaveLength(19)
+    expect(ALERT_RULE_IDS).toHaveLength(23)
     expect(ALERT_RULE_IDS).toContain('replica.redundancy_reduced')
   })
 
@@ -40,6 +40,14 @@ describe('ruleText', () => {
     expect(itRules[id]).toMatch(/multixact/)
     expect(ruleText(id)).not.toBe(ruleText('txn.wraparound_risk'))
     expect(itRules[id]).not.toBe(itRules['txn.wraparound_risk'])
+  })
+
+  it('UI-PGL-005 has en and it sentences for the four log rules', () => {
+    for (const id of ['log.panic', 'log.corruption', 'log.disk_full', 'log.out_of_memory']) {
+      expect(ALERT_RULE_IDS).toContain(id)
+      expect(ruleText(id)).toMatch(/PostgreSQL log/)
+      expect(itRules[id as keyof typeof itRules]).toMatch(/log di PostgreSQL/)
+    }
   })
 
   it('returns undefined for an unknown id', () => {

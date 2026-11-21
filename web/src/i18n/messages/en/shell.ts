@@ -17,6 +17,7 @@ export const shell = {
   'shell.nav.queryPerformance': 'Query performance',
   'shell.nav.waitEvents': 'Wait events',
   'shell.nav.locks': 'Locks and activity',
+  'shell.nav.logs': 'PostgreSQL logs',
   'shell.nav.settings': 'Settings',
   'shell.nav.home': 'pglens home',
   'shell.nav.primary': 'Primary navigation',

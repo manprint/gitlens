@@ -187,5 +187,21 @@
   "action.slot_drop": "Elimina lo slot {slot}, se nessun consumer tornerà (nel suo database):",
   "action.vacuum": "Congela la tabella {relation} (database {database}):",
   "field.threshold": "Soglia",
-  "section.evidence": "Evidenze"
+  "section.evidence": "Evidenze",
+  "page.logs": "Log PostgreSQL › {instance}",
+  "logs.section": "Ultime righe del log PostgreSQL",
+  "logs.line": "{at} {severity} [{class}] {message}",
+  "logs.none": "Nessuna riga corrispondente nel log salvato delle ultime 24 ore.",
+  "rule.log.panic.title": "PANIC o crash nel log PostgreSQL",
+  "rule.log.panic.problem": "Il log di PostgreSQL riporta un PANIC o il crash di un processo del server: PostgreSQL si riavvia e chiude tutte le sessioni.",
+  "rule.log.panic.actions": "Leggi le righe qui sotto e il log del server intorno a esse.\nTrova la causa (storage, memoria, un’estensione) prima del crash successivo.",
+  "rule.log.corruption.title": "Dati corrotti nel log PostgreSQL",
+  "rule.log.corruption.problem": "Il log di PostgreSQL riporta dati corrotti.",
+  "rule.log.corruption.actions": "Trova la relazione citata nelle righe qui sotto e controlla lo storage.\nRipristina da un backup o ricostruisci l’oggetto; amcheck verifica gli indici B-tree.",
+  "rule.log.disk_full.title": "Disco pieno nel log PostgreSQL",
+  "rule.log.disk_full.problem": "Il log di PostgreSQL riporta un disco pieno: PostgreSQL non può scrivere WAL né dati.",
+  "rule.log.disk_full.actions": "Libera spazio o amplia il filesystem subito.\nControlla pg_wal (archiviazione in errore o slot che trattengono WAL) e i file temporanei.",
+  "rule.log.out_of_memory.title": "Memoria esaurita nel log PostgreSQL",
+  "rule.log.out_of_memory.problem": "Il log di PostgreSQL riporta che il server ha esaurito la memoria.",
+  "rule.log.out_of_memory.actions": "Trova lo statement nelle righe qui sotto.\nRiduci work_mem o il numero di connessioni, oppure aggiungi memoria."
 }

@@ -282,6 +282,34 @@ export const alertRulesTopic: HelpTopic = {
               action:
                 'Find the standby that does not stream. Check whether it is down, disconnected, or has not rejoined after a failover.',
             },
+            {
+              term: 'log.panic',
+              meaning:
+                'Default: critical, scope instance. A PANIC or a server process crash in the log, so the threshold is 0 and the duration is 0 seconds. The PostgreSQL log reports a PANIC or a server process crash.',
+              action:
+                'Open the Logs page for the instance, read the lines of class `panic` and `server.crash`, and check whether PostgreSQL restarted. Look for the cause (storage, memory, an extension) before the next crash.',
+            },
+            {
+              term: 'log.corruption',
+              meaning:
+                'Default: critical, scope instance. A line of class `corruption` in the log, so the threshold is 0 and the duration is 0 seconds. The PostgreSQL log reports corrupted data.',
+              action:
+                'Open the Logs page, find the relation named in the line, and check the storage. Restore from a backup or rebuild the object; `amcheck` verifies B-tree indexes.',
+            },
+            {
+              term: 'log.disk_full',
+              meaning:
+                'Default: critical, scope instance. A line of class `disk.full` in the log, so the threshold is 0 and the duration is 0 seconds. The PostgreSQL log reports that a disk is full.',
+              action:
+                'Free space or extend the disk at once: PostgreSQL cannot write WAL or data. The `disk.free_low` rule and the host metrics show which disk fills.',
+            },
+            {
+              term: 'log.out_of_memory',
+              meaning:
+                'Default: warning, scope instance. A line of class `memory.out` in the log, so the threshold is 0 and the duration is 0 seconds. The PostgreSQL log reports that the server ran out of memory.',
+              action:
+                'Open the Logs page to find the statement, then lower `work_mem` or the number of connections, or add memory.',
+            },
           ],
         },
         {

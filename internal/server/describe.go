@@ -265,6 +265,8 @@ func (d *AlertDescriber) page(r alert.Rule, tg target) string {
 	switch {
 	case incidentTypesFor(r) != nil && tg.hasServer:
 		return d.t("page.locks", i18n.Args{"instance": tg.instance})
+	case logClassesFor(r) != nil && tg.hasServer:
+		return d.t("page.logs", i18n.Args{"instance": tg.instance})
 	case isReplicationRule(r) || (r.Scope == alert.ScopeCluster && tg.cluster != ""):
 		return d.t("page.cluster", i18n.Args{"cluster": tg.cluster})
 	case tg.hasServer:

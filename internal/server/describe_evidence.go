@@ -77,6 +77,8 @@ func (d *AlertDescriber) evidence(ctx context.Context, a alert.Alert, r alert.Ru
 		if incErr == nil {
 			d.incidentEvidence(&ev, incs)
 		}
+	case logClassesFor(r) != nil:
+		d.logEvidence(ctx, &ev, a, logClassesFor(r))
 	case r.Metric == "pg_max_datfrozenxid_age":
 		d.tableEvidence(ctx, &ev, a, true)
 	case r.Metric == "host_disk_free_ratio":

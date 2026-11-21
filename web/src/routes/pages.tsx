@@ -13,6 +13,7 @@ import QueryListPageComponent from '@/features/queries/QueryListPage'
 import SlowQueriesPageComponent from '@/features/queries/SlowQueriesPage'
 import IndexAnalysisPageComponent from '@/features/indexes/IndexAnalysisPage'
 import LocksPageComponent from '@/features/locks/BlockingTree'
+import LogsPageComponent from '@/features/logs/LogsPage'
 import { FindingsPage as FindingsPageComponent } from '@/features/findings/FindingsPage'
 import { AlertsPage as AlertsPageComponent } from '@/features/alerts/AlertsPage'
 import { EventsPage as EventsPageComponent } from '@/features/alerts/EventsPage'
@@ -133,6 +134,10 @@ export function QueryDetailPage() {
 
 export function LocksPage() {
   return <LocksPageComponent />
+}
+
+export function LogsPage() {
+  return <LogsPageComponent />
 }
 
 export function FindingsPage() {

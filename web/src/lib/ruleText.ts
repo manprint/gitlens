@@ -116,6 +116,10 @@ const ALERT_RULE_TEXT = {
   'conn.idle_in_transaction': 'A session has been idle in a transaction for over 5 minutes.',
   'db.deadlock_rate': 'Deadlocks are occurring.',
   'disk.free_low': 'Less than 15% of the data disk is free.',
+  'log.panic': 'The PostgreSQL log reports a PANIC or a server process crash.',
+  'log.corruption': 'The PostgreSQL log reports corrupted data.',
+  'log.disk_full': 'The PostgreSQL log reports that a disk is full.',
+  'log.out_of_memory': 'The PostgreSQL log reports that the server ran out of memory.',
 } as const
 
 export const ADVISOR_RULE_IDS = Object.keys(ADVISOR_RULE_TEXT) as readonly string[]

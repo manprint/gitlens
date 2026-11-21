@@ -181,6 +181,11 @@ func TestMigrations_SeededRuleMetricsAreProduced(t *testing.T) {
 		"pg_missing_standby_count":   {"internal/alert/source_sql.go"},
 		// Emitted by the agent's own host collector, not by a PostgreSQL check.
 		"host_disk_free_ratio": {"cmd/pglens-agent/run.go"},
+		// Emitted by the agent's log reader (plan 007 phase 6).
+		"pg_log_panic_events":      {"cmd/pglens-agent/logs_build.go"},
+		"pg_log_corruption_events": {"cmd/pglens-agent/logs_build.go"},
+		"pg_log_disk_full_events":  {"cmd/pglens-agent/logs_build.go"},
+		"pg_log_oom_events":        {"cmd/pglens-agent/logs_build.go"},
 	}
 	checkDir := filepath.Join("..", "check")
 
@@ -192,6 +197,10 @@ func TestMigrations_SeededRuleMetricsAreProduced(t *testing.T) {
 	data = append(data, more...)
 	// 0032 seeds txn.multixact_wraparound_risk (plan 007, 1.2).
 	more, err = migrationFS.ReadFile("migrations/0032_multixact_rule.sql")
+	require.NoError(t, err)
+	data = append(data, more...)
+	// 0037 seeds the four log rules (plan 007, 6.6).
+	more, err = migrationFS.ReadFile("migrations/0037_log_alerts.sql")
 	require.NoError(t, err)
 	data = append(data, more...)
 	seed := regexp.MustCompile(`\('([a-z0-9_.]+)',\s*'(?:critical|warning|info)',\s*'(?:instance|cluster|database)',\s*'([a-z0-9_]+)'`)
@@ -302,4 +311,21 @@ func TestMXW005_MultixactRuleMigration(t *testing.T) {
 	require.Contains(t, sql, "'txn.multixact_wraparound_risk'")
 	require.Contains(t, sql, "'pg_max_datminmxid_age'")
 	require.Contains(t, sql, "ON CONFLICT DO NOTHING")
+}
+
+// Plan 007 6.6: migration 0037 seeds the four log rules, fires on any line
+// at once and keeps an operator's edit.
+func TestMigration0037LogRules(t *testing.T) {
+	data, err := migrationFS.ReadFile("migrations/0037_log_alerts.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	for _, rule := range []string{
+		"('log.panic',         'critical', 'instance', 'pg_log_panic_events',      'gt', 0, 0,",
+		"('log.corruption',    'critical', 'instance', 'pg_log_corruption_events', 'gt', 0, 0,",
+		"('log.disk_full',     'critical', 'instance', 'pg_log_disk_full_events',  'gt', 0, 0,",
+		"('log.out_of_memory', 'warning',  'instance', 'pg_log_oom_events',        'gt', 0, 0,",
+	} {
+		require.Contains(t, sql, rule)
+	}
+	require.Contains(t, sql, "ON CONFLICT DO NOTHING;")
 }

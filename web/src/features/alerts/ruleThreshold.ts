@@ -41,6 +41,19 @@ const FORMATTERS: Readonly<Record<string, Formatter>> = {
   ),
   'archive.failing': anyWhenZero('last archive attempt failed', (threshold) => number(threshold)),
   'disk.free_low': (threshold) => `below ${percent(threshold)} free`,
+  'log.panic': anyWhenZero('any log line', (threshold) => `above ${number(threshold)} log lines`),
+  'log.corruption': anyWhenZero(
+    'any log line',
+    (threshold) => `above ${number(threshold)} log lines`,
+  ),
+  'log.disk_full': anyWhenZero(
+    'any log line',
+    (threshold) => `above ${number(threshold)} log lines`,
+  ),
+  'log.out_of_memory': anyWhenZero(
+    'any log line',
+    (threshold) => `above ${number(threshold)} log lines`,
+  ),
 }
 
 const EVENT_RULES = new Set([

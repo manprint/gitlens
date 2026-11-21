@@ -87,6 +87,10 @@ export const qk = {
     limit?: number,
     instanceId?: string,
   ) => ['getEvents', clusterId, type, queryWindowKey(window), limit, instanceId] as const,
+  logs: (params: Readonly<Record<string, string | number | undefined>>, window: QueryWindow) =>
+    ['getLogs', params, queryWindowKey(window)] as const,
+  logClasses: (instanceId: string, window: QueryWindow) =>
+    ['getLogClasses', instanceId, queryWindowKey(window)] as const,
   statements: (
     instanceId: string,
     database: string | undefined,
