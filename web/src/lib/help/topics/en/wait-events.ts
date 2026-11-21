@@ -133,6 +133,40 @@ export const waitEventsTopic: HelpTopic = {
       ],
     },
     {
+      id: 'session-dimensions',
+      title: 'Users, client addresses and applications',
+      blocks: [
+        {
+          kind: 'text',
+          text: 'The control labelled {{ui:ash.groupBy.label}} switches the chart between the drill path of {{ui:ash.groupBy.wait}} and three session dimensions: {{ui:ash.group.usename}}, {{ui:ash.group.clientAddr}} and {{ui:ash.group.applicationName}}. Each is plotted in one stacked chart. A session whose value is empty, a local socket for the client address for example, is shown as {{ui:ash.dimension.unknown}}.',
+        },
+        {
+          kind: 'steps',
+          items: [
+            'Choose {{ui:ash.group.usename}}, {{ui:ash.group.clientAddr}} or {{ui:ash.group.applicationName}} in {{ui:ash.groupBy.label}}.',
+            'Select a series. The page filters on that value and goes back to {{ui:ash.group.waitEventType}}, so you see what those sessions wait for.',
+            'The filter shows as a chip above the chart. It narrows every chart and {{ui:ash.top.title}}; the button on the chip removes it.',
+          ],
+        },
+        {
+          kind: 'terms',
+          items: [
+            {
+              term: 'usename, client_addr, application_name',
+              meaning:
+                'URL parameters of the filters. The value `-` selects the sessions whose value is empty.',
+            },
+            {
+              term: 'checks.ash.dimensions',
+              meaning:
+                'Agent setting that lists the dimensions kept, by default all three. A dimension left out is stored empty and shows as {{ui:ash.dimension.unknown}}.',
+              action: 'Leave out a dimension when its values must not reach the pglens server.',
+            },
+          ],
+        },
+      ],
+    },
+    {
       id: 'chart-layout',
       title: '{{ui:ash.layout.label}}',
       blocks: [

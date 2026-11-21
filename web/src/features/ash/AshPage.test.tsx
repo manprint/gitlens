@@ -645,3 +645,83 @@ describe('AshPage', () => {
     expect(new URLSearchParams(view.router.state.location.search).has('view')).toBe(false)
   })
 })
+
+describe('AshPage session dimensions', () => {
+  const userResponse = {
+    ...ashResponse,
+    buckets: [
+      {
+        avg_active_sessions: 1.5,
+        samples: 15,
+        ticks: 10,
+        ts: '2026-09-01T10:00:00Z',
+        usename: 'alice',
+      },
+      { avg_active_sessions: 1, samples: 10, ticks: 10, ts: '2026-09-01T10:00:00Z', usename: '' },
+    ],
+  }
+
+  function lastChart() {
+    return mocks.chart.mock.calls.at(-1)?.[0] as {
+      option: EChartsOption
+      onEvents?: Record<string, (event: unknown) => void>
+    }
+  }
+
+  it('UI-ASHD-002 choosing User requests group_by=usename', () => {
+    const view = renderAsh()
+    const control = screen.getByRole('radiogroup', { name: 'Group by' })
+    fireEvent.click(within(control).getByLabelText('User'))
+
+    expect(new URLSearchParams(view.router.state.location.search).get('group')).toBe('usename')
+    expect(mocks.ash).toHaveBeenLastCalledWith(
+      expect.objectContaining({ group_by: 'usename', instance_id: 'instance-1' }),
+      expect.anything(),
+    )
+  })
+
+  it('UI-ASHD-003 selecting a user filters the requests and shows a removable chip', () => {
+    const view = renderAsh('/instances/instance-1/ash?range=1h&group=usename', userResponse)
+    act(() => lastChart().onEvents?.click?.({ seriesName: 'alice' }))
+
+    const params = new URLSearchParams(view.router.state.location.search)
+    expect(params.get('usename')).toBe('alice')
+    expect(params.get('group')).toBe('wait_event_type')
+    expect(mocks.ash).toHaveBeenLastCalledWith(
+      expect.objectContaining({ group_by: 'wait_event_type', usename: 'alice' }),
+      expect.anything(),
+    )
+    const chips = screen.getByRole('list', { name: 'Session filters' })
+    expect(within(chips).getByText('User: alice')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the filter User: alice' }))
+    expect(new URLSearchParams(view.router.state.location.search).get('usename')).toBeNull()
+    expect(mocks.ash.mock.lastCall?.[0]).not.toHaveProperty('usename')
+  })
+
+  it('UI-ASHD-004 an empty user is plotted as (unknown) and filters with -', () => {
+    const view = renderAsh('/instances/instance-1/ash?range=1h&group=usename', userResponse)
+    const names = JSON.stringify(lastChart().option.series)
+    expect(names).toContain('(unknown)')
+    expect(names).not.toContain('"name":"-"')
+
+    act(() => lastChart().onEvents?.click?.({ seriesName: '(unknown)' }))
+    expect(new URLSearchParams(view.router.state.location.search).get('usename')).toBe('-')
+    expect(mocks.ash).toHaveBeenLastCalledWith(
+      expect.objectContaining({ usename: '-' }),
+      expect.anything(),
+    )
+    expect(screen.getByText('User: (unknown)')).toBeInTheDocument()
+  })
+
+  it('UI-ASHD-003 the session filters reach the top queries too', () => {
+    renderAsh(
+      '/instances/instance-1/ash?range=1h&group=queryid&client_addr=10.0.0.1',
+      ashQueryIdResponse,
+    )
+    expect(mocks.ashTop).toHaveBeenLastCalledWith(
+      expect.objectContaining({ client_addr: '10.0.0.1' }),
+      expect.anything(),
+    )
+  })
+})

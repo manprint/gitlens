@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useT } from '@/i18n/react'
 
 import { useAshTop } from '@/api/queries'
-import type { AshTopQuery } from '@/lib/ash'
+import type { AshDimensionFilters, AshTopQuery } from '@/lib/ash'
 import { topQueries } from '@/lib/ash'
 import type { QueryWindow } from '@/lib/timerange'
 import { HelpLink } from '@/components/layout/HelpLink'
@@ -12,6 +12,8 @@ import { EmptyState, ErrorState } from '@/components/state'
 
 interface AshTopQueriesProps {
   database?: string
+  /** The page's session filters (user, client, application). */
+  dimensions?: AshDimensionFilters
   instanceId: string
   timeWindow: QueryWindow
   /** The drilled wait event, so the list ranks the queries seen in it. */
@@ -72,6 +74,7 @@ function scopeDescription(
 
 export function AshTopQueries({
   database,
+  dimensions,
   instanceId,
   timeWindow,
   waitEvent,
@@ -84,6 +87,7 @@ export function AshTopQueries({
     ...(database === undefined ? {} : { database }),
     ...(waitEventType === undefined ? {} : { wait_event_type: waitEventType }),
     ...(waitEvent === undefined ? {} : { wait_event: waitEvent }),
+    ...dimensions,
   }
   const query = useAshTop(params, timeWindow)
 

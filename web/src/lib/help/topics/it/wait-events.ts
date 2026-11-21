@@ -133,6 +133,41 @@ export const waitEventsTopic: HelpTopic = {
       ],
     },
     {
+      id: 'session-dimensions',
+      title: 'Utenti, indirizzi client e applicazioni',
+      blocks: [
+        {
+          kind: 'text',
+          text: 'Il controllo {{ui:ash.groupBy.label}} passa il grafico dal percorso di {{ui:ash.groupBy.wait}} a tre dimensioni della sessione: {{ui:ash.group.usename}}, {{ui:ash.group.clientAddr}} e {{ui:ash.group.applicationName}}. Ognuna è disegnata in un solo grafico impilato. Una sessione con valore vuoto, per esempio un socket locale per l’indirizzo client, è mostrata come {{ui:ash.dimension.unknown}}.',
+        },
+        {
+          kind: 'steps',
+          items: [
+            'Scegli {{ui:ash.group.usename}}, {{ui:ash.group.clientAddr}} o {{ui:ash.group.applicationName}} in {{ui:ash.groupBy.label}}.',
+            'Seleziona una serie. La pagina filtra su quel valore e torna a {{ui:ash.group.waitEventType}}, così vedi cosa aspettano quelle sessioni.',
+            'Il filtro appare come chip sopra il grafico. Restringe ogni grafico e {{ui:ash.top.title}}; il pulsante sulla chip lo rimuove.',
+          ],
+        },
+        {
+          kind: 'terms',
+          items: [
+            {
+              term: 'usename, client_addr, application_name',
+              meaning:
+                'Parametri URL dei filtri. Il valore `-` seleziona le sessioni con valore vuoto.',
+            },
+            {
+              term: 'checks.ash.dimensions',
+              meaning:
+                'Impostazione dell’agent che elenca le dimensioni conservate, per default tutte e tre. Una dimensione esclusa è memorizzata vuota e appare come {{ui:ash.dimension.unknown}}.',
+              action:
+                'Escludi una dimensione quando i suoi valori non devono arrivare al server pglens.',
+            },
+          ],
+        },
+      ],
+    },
+    {
       id: 'chart-layout',
       title: '{{ui:ash.layout.label}}',
       blocks: [

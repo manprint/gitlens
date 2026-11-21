@@ -1,7 +1,20 @@
 import type { MessageKey } from '@/i18n/messages/en'
 import { activeIntl, translate } from '@/i18n/store'
 
-import type { AshGroupBy } from './ash'
+import type { AshDimension, AshGroupBy } from './ash'
+
+export type AshChartGroup =
+  Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'> | AshDimension
+
+/** The console label of each group, also the dimension's name on a filter chip. */
+export const ASH_GROUP_LABELS: Record<AshChartGroup, MessageKey> = {
+  queryid: 'ash.group.queryid',
+  wait_event: 'ash.group.waitEvent',
+  wait_event_type: 'ash.group.waitEventType',
+  usename: 'ash.group.usename',
+  client_addr: 'ash.group.clientAddr',
+  application_name: 'ash.group.applicationName',
+}
 
 export type AshWaitGroupId = 'cpu' | 'io' | 'locks' | 'client' | 'other'
 

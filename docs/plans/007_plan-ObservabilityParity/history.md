@@ -38,3 +38,6 @@ Gates: G-GO-FOCUS ./internal/server TestASHD008 pass; server+store -race pass; G
 
 ## 2026-11-21 2.4/1 complete unit:2.4:1
 Gates: G-GO-FOCUS (ASH-D-009..011, server/ash/store/cmd), G-GO-INT TestINTASHD004 + TestIntASH0*, G-API (gen:api, api-docs), web typecheck; review: self-review (agent:opus) accepted; changes: api_ash.go: group_by usename/client_addr/application_name, filters as bind params (- = empty), echo on grouped rows, fold keeps dims; openapi enum + 3 params + AshBucket fields; generated.ts; notes: doc comments reworded from '' to empty (gofmt rewrites '' into a curly quote); raw ungrouped rows keep wait-event dimensions only, documented
+
+## 2026-11-21 2.5/1 complete unit:2.5:1
+Gates: G-WEB-STATIC (make web-typecheck web-lint), G-WEB-UNIT (features/ash, lib, api, i18n: 728 tests), UI-ASHD-001..004; review: self-review (agent:opus) accepted; changes: AshPage Group by control + filter chips; AshBreakdown dimension groups ((unknown) <-> -); lib/ash dimension helpers; query keys carry filters; captions ash.breakdown-dimension/ash.stack-dimension en+it; help wait-events#session-dimensions en+it; README; notes: A5 recorded

@@ -103,6 +103,7 @@ export const qk = {
     limit?: number,
     waitEventType?: string,
     waitEvent?: string,
+    dimensions?: string,
   ) =>
     [
       'getAsh',
@@ -113,6 +114,7 @@ export const qk = {
       limit,
       waitEventType,
       waitEvent,
+      dimensions,
     ] as const,
   ashTop: (
     instanceId: string,
@@ -121,6 +123,7 @@ export const qk = {
     limit?: number,
     waitEventType?: string,
     waitEvent?: string,
+    dimensions?: string,
   ) =>
     [
       'getAshTop',
@@ -130,6 +133,7 @@ export const qk = {
       limit,
       waitEventType,
       waitEvent,
+      dimensions,
     ] as const,
   plans: (queryId: string | number, instanceId?: string, datname?: string, limit?: number) =>
     ['getPlans', queryId, instanceId, datname, limit] as const,

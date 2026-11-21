@@ -61,6 +61,26 @@ export const activity: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     howToRead:
       'Seleziona una serie per vedere le query campionate in quell’evento. Un vuoto: nessun campione memorizzato per quel bucket.',
   },
+  'ash.breakdown-dimension': {
+    what: 'Numero medio di backend non idle nel tempo, suddiviso per l’utente, l’indirizzo client o l’applicazione della loro sessione.',
+    source:
+      'Campioni ASH: l’agent legge usename, client_addr e application_name di pg_stat_activity una volta al secondo (solo le dimensioni che checks.ash.dimensions mantiene) e memorizza i conteggi per finestra di 10 secondi.',
+    unit: 'backend medi (campioni divisi per i tick di campionamento del bucket)',
+    window:
+      'Intervallo di tempo selezionato, in bucket da 10 secondi o più (al massimo 180 per grafico).',
+    howToRead:
+      'Un valore vuoto è mostrato come (sconosciuto). Seleziona una serie per filtrare la pagina; i gruppi più piccoli sono raggruppati in altro. Un vuoto: nessun campione memorizzato per quel bucket.',
+  },
+  'ash.stack-dimension': {
+    what: 'Un solo grafico impilato: ogni serie è un utente, un indirizzo client o un’applicazione e l’altezza della pila è il numero medio di backend non idle.',
+    source:
+      'Campioni ASH: usename, client_addr e application_name di pg_stat_activity, letti una volta al secondo e memorizzati per finestra di 10 secondi.',
+    unit: 'backend medi (campioni divisi per i tick di campionamento del bucket)',
+    window:
+      'Intervallo di tempo selezionato, in bucket da 10 secondi o più (al massimo 180 per grafico).',
+    howToRead:
+      'Seleziona una serie per filtrare la pagina; il filtro appare come chip sopra il grafico. Un vuoto: nessun campione memorizzato per quel bucket.',
+  },
   'ash.stack-queries': {
     what: 'Un solo grafico impilato: ogni serie è un query id e l’altezza della pila è il numero medio di backend non idle.',
     source:

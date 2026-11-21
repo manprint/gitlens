@@ -17,6 +17,7 @@ import { qk } from './keys'
 import { REFRESH, type RefreshPolicy } from './policy'
 import { useRefreshTiming } from '@/hooks/usePreferences'
 import { resolveQueryWindow, type QueryWindow } from '@/lib/timerange'
+import { dimensionFiltersKey } from '@/lib/ash'
 
 export { useCommand } from './commands'
 
@@ -838,6 +839,7 @@ export function useAsh(params: WindowlessParameters<'/api/v1/ash'>, window: Quer
       params.limit,
       params.wait_event_type,
       params.wait_event,
+      dimensionFiltersKey(params),
     ),
   })
 }
@@ -860,6 +862,7 @@ export function useAshTop(params: WindowlessParameters<'/api/v1/ash/top'>, windo
       params.limit,
       params.wait_event_type,
       params.wait_event,
+      dimensionFiltersKey(params),
     ),
   })
 }

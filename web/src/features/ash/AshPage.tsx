@@ -1,4 +1,4 @@
-import { Activity } from 'lucide-react'
+import { Activity, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
@@ -11,19 +11,27 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Degraded, Disabled, ErrorState } from '@/components/state'
 import { displayName } from '@/components/charts/ash.options'
 import { useTimeRange } from '@/hooks/useTimeRange'
-import { totalSamples } from '@/lib/ash'
-import type { AshGroupBy } from '@/lib/ash'
+import {
+  ASH_DIMENSIONS,
+  ASH_UNKNOWN,
+  dimensionFiltersOf,
+  isAshDimension,
+  totalSamples,
+} from '@/lib/ash'
+import type { AshDimension, AshDimensionFilters, AshGroupBy } from '@/lib/ash'
 import { useT } from '@/i18n/react'
 import { queryWindowOf, rangeLabelKey } from '@/lib/timerange'
 
 import { AshBreakdown } from './AshBreakdown'
+import { ASH_GROUP_LABELS as GROUP_LABELS, type AshChartGroup } from '@/lib/ashGroups'
 import { AshTopQueries } from './AshTopQueries'
 import { Callout } from '@/components/ui/callout'
 import { cn } from '@/lib/utils'
 
-type DrillGroup = Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>
+type WaitGroup = Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>
+type DrillGroup = AshChartGroup
 
-const DEFAULT_GROUP: DrillGroup = 'wait_event_type'
+const DEFAULT_GROUP: WaitGroup = 'wait_event_type'
 
 // Rows for 24 groups and "other" in each of the server's 180 buckets. At the
 // old 1,000 the server kept only the 4 largest groups of a long range.
@@ -101,7 +109,94 @@ function ChartLayoutToggle({ onChange, view }: ChartLayoutToggleProps) {
 }
 
 function readGroup(value: string | null): DrillGroup {
+  if (isAshDimension(value)) return value
   return value === 'wait_event' || value === 'queryid' ? value : DEFAULT_GROUP
+}
+
+type GroupChoice = 'wait' | AshDimension
+
+const GROUP_CHOICES: readonly GroupChoice[] = ['wait', ...ASH_DIMENSIONS]
+
+interface GroupByControlProps {
+  groupBy: DrillGroup
+  onChange: (choice: GroupChoice) => void
+}
+
+// The wait drill-down (types, events, queries) is one choice; each session
+// dimension is another.
+function GroupByControl({ groupBy, onChange }: GroupByControlProps) {
+  const t = useT()
+  const current: GroupChoice = isAshDimension(groupBy) ? groupBy : 'wait'
+  return (
+    <div
+      aria-label={t('ash.groupBy.label')}
+      className="bg-muted/40 inline-flex flex-wrap items-center gap-1 rounded-lg border p-1 text-sm"
+      data-testid="ash-group-by"
+      role="radiogroup"
+    >
+      {GROUP_CHOICES.map((choice) => (
+        <label
+          className={cn(
+            'focus-within:ring-ring cursor-pointer rounded-md px-3 py-1 focus-within:ring-2',
+            current === choice ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground',
+          )}
+          key={choice}
+        >
+          <input
+            checked={current === choice}
+            className="sr-only"
+            name="ash-group-by"
+            onChange={() => onChange(choice)}
+            type="radio"
+            value={choice}
+          />
+          {t(choice === 'wait' ? 'ash.groupBy.wait' : GROUP_LABELS[choice])}
+        </label>
+      ))}
+    </div>
+  )
+}
+
+interface FilterChipsProps {
+  filters: AshDimensionFilters
+  onRemove: (dimension: AshDimension) => void
+}
+
+function FilterChips({ filters, onRemove }: FilterChipsProps) {
+  const t = useT()
+  const active = ASH_DIMENSIONS.filter((dimension) => filters[dimension] !== undefined)
+  if (active.length === 0) return null
+  return (
+    <ul
+      aria-label={t('ash.filters.label')}
+      className="flex flex-wrap gap-2"
+      data-testid="ash-filter-chips"
+    >
+      {active.map((dimension) => {
+        const raw = filters[dimension] ?? ''
+        const vars = {
+          dimension: t(GROUP_LABELS[dimension]),
+          value: raw === ASH_UNKNOWN ? t('ash.dimension.unknown') : raw,
+        }
+        return (
+          <li
+            className="bg-muted inline-flex items-center gap-1 rounded-full border px-3 py-0.5 text-sm"
+            key={dimension}
+          >
+            {t('ash.filters.chip', vars)}
+            <button
+              aria-label={t('ash.filters.remove', vars)}
+              className="text-muted-foreground hover:text-foreground rounded-full"
+              onClick={() => onRemove(dimension)}
+              type="button"
+            >
+              <X aria-hidden="true" className="size-3.5" />
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 // The drill-down narrows on the server. Grouped rows carry only their group
@@ -119,8 +214,8 @@ function drillFilters(
 }
 
 interface DrillBreadcrumbProps {
-  groupBy: DrillGroup
-  onNavigate: (groupBy: DrillGroup) => void
+  groupBy: WaitGroup
+  onNavigate: (groupBy: WaitGroup) => void
   waitEvent: string | null
   waitEventType: string | null
 }
@@ -191,12 +286,14 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   const database = searchParams.get('db') ?? undefined
   const view = readView(searchParams.get('view'))
   const filters = drillFilters(groupBy, waitEventType, waitEvent)
+  const dimensionFilters = dimensionFiltersOf(searchParams)
   const params = {
     group_by: groupBy,
     instance_id: instanceId,
     limit: ASH_ROW_LIMIT,
     ...(database === undefined ? {} : { database }),
     ...filters,
+    ...dimensionFilters,
   }
   const ashQuery = useAsh(params, timeWindow)
   const settingsQuery = useInstanceSettings(instanceId)
@@ -214,6 +311,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
     ...(database === undefined ? {} : { database }),
     ...(filters.wait_event_type === undefined ? {} : { waitEventType: filters.wait_event_type }),
     ...(filters.wait_event === undefined ? {} : { waitEvent: filters.wait_event }),
+    dimensions: dimensionFilters,
   }
   const sampleCount = totalSamples(ashQuery.data?.buckets ?? [])
   // Key the note on the sampled data as well as the setting. Auto, the default,
@@ -230,7 +328,26 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
       (bucket) => bucket.queryid === null || bucket.queryid === undefined,
     )
 
-  function navigateTo(nextGroup: DrillGroup) {
+  function chooseGroup(choice: GroupChoice) {
+    if (choice === 'wait') {
+      navigateTo(DEFAULT_GROUP)
+      return
+    }
+    const next = new URLSearchParams(searchParams)
+    next.set('group', choice)
+    next.delete('wait_event_type')
+    next.delete('wait_event')
+    next.delete('queryid')
+    setSearchParams(next)
+  }
+
+  function removeFilter(dimension: AshDimension) {
+    const next = new URLSearchParams(searchParams)
+    next.delete(dimension)
+    setSearchParams(next)
+  }
+
+  function navigateTo(nextGroup: WaitGroup) {
     const next = new URLSearchParams(searchParams)
     next.set('group', nextGroup)
     if (nextGroup === DEFAULT_GROUP) {
@@ -254,7 +371,12 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
   function selectSeries(name: string) {
     if (name === displayName('other') || name.toLocaleLowerCase('en-US') === 'other') return
     const next = new URLSearchParams(searchParams)
-    if (groupBy === DEFAULT_GROUP) {
+    if (isAshDimension(groupBy)) {
+      // A selected user, client or application filters the page, which goes
+      // back to the wait event types of those sessions.
+      next.set(groupBy, name)
+      next.set('group', DEFAULT_GROUP)
+    } else if (groupBy === DEFAULT_GROUP) {
       next.set('group', 'wait_event')
       next.set('wait_event_type', name)
       next.delete('wait_event')
@@ -298,7 +420,7 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
         icon={Activity}
         eyebrow={t('ash.page.eyebrow')}
         freshness={<FreshnessBadge dataUpdatedAt={ashQuery.dataUpdatedAt} policy="ash" />}
-        {...(groupBy === 'queryid'
+        {...(groupBy !== DEFAULT_GROUP && groupBy !== 'wait_event'
           ? {}
           : { actions: <ChartLayoutToggle onChange={changeView} view={view} /> })}
         title={t('ash.page.title')}
@@ -309,7 +431,11 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
         <Caption className="text-xs" id="ash.page" oneLine />
         <InfoHint className="shrink-0" id="ash.page" label={t('ash.page.title')} />
       </div>
-      {groupBy === DEFAULT_GROUP ? null : (
+      <div className="flex flex-wrap items-center gap-3">
+        <GroupByControl groupBy={groupBy} onChange={chooseGroup} />
+        <FilterChips filters={dimensionFilters} onRemove={removeFilter} />
+      </div>
+      {groupBy === DEFAULT_GROUP || isAshDimension(groupBy) ? null : (
         <DrillBreadcrumb
           groupBy={groupBy}
           onNavigate={navigateTo}

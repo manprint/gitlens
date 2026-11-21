@@ -2406,6 +2406,8 @@ Configuration: `ash.interval` (default `1s`). Lower the interval for sensitive i
 
 Each sample also keeps three text dimensions: the user (`usename`), the client address (`client_addr`, the host without netmask, empty for a Unix socket) and the application (`application_name`). Values longer than 64 bytes are cut. `checks.ash.dimensions` lists the ones to keep (default all three); `[]` turns them all off, and an unknown name is a configuration error. A dimension that is off, or a value that is unknown, sends no label, so those samples merge.
 
+`/api/v1/ash` takes `group_by=usename`, `client_addr` or `application_name`, and both `/api/v1/ash` and `/api/v1/ash/top` take the filters `usename=`, `client_addr=` and `application_name=`; the value `-` selects the samples whose dimension is empty. In the console, Wait events › Group by offers User, Client address and Application; an empty value reads `(unknown)`, and selecting a series filters the page on it (a removable chip, kept in the URL).
+
 ## Events
 
 Events are the system's way of notifying you of changes in replication topology and cluster health. Access them via `GET /api/v1/events?cluster_id=...&type=...`.

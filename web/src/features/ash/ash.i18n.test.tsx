@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { cleanup, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { refreshLocale, setServerLanguage } from '@/i18n/store'
@@ -77,5 +77,35 @@ describe('ash i18n (plan 006 F3)', () => {
     expect(screen.getByLabelText('Impilati')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Tipi di wait event' })).toBeInTheDocument()
     expect(screen.getByText(/campionamento statistico di 1 s/)).toBeInTheDocument()
+  })
+
+  it('UI-ASHD-001 the group by control lists User, Client address and Application', async () => {
+    renderWithProviders(<AshPage instanceId="instance-1" />, {
+      route: '/instances/instance-1/ash?range=1h',
+    })
+    const en = await screen.findByRole('radiogroup', { name: 'Group by' })
+    for (const label of ['Wait events', 'User', 'Client address', 'Application']) {
+      expect(within(en).getByLabelText(label)).toBeInTheDocument()
+    }
+    cleanup()
+
+    await setServerLanguage('it')
+    renderWithProviders(<AshPage instanceId="instance-1" />, {
+      route: '/instances/instance-1/ash?range=1h',
+    })
+    const it = await screen.findByRole('radiogroup', { name: 'Raggruppa per' })
+    for (const label of ['Utente', 'Indirizzo client', 'Applicazione']) {
+      expect(within(it).getByLabelText(label)).toBeInTheDocument()
+    }
+  })
+
+  it('UI-ASHD-004 an empty dimension reads (sconosciuto) in Italian', async () => {
+    await setServerLanguage('it')
+    renderWithProviders(<AshPage instanceId="instance-1" />, {
+      route: '/instances/instance-1/ash?range=1h&usename=-',
+    })
+    expect(
+      await screen.findByRole('button', { name: 'Rimuovi il filtro Utente: (sconosciuto)' }),
+    ).toBeInTheDocument()
   })
 })

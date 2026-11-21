@@ -10,6 +10,9 @@ export type AshBucket = Pick<
   state?: string | undefined
   /** Runtime JSON may preserve an int64 query id as text. */
   queryid?: number | string | null | undefined
+  usename?: string | undefined
+  client_addr?: string | undefined
+  application_name?: string | undefined
 }
 
 export type AshTopEntry = Omit<Schemas['AshTopEntry'], 'queryid'> & {
@@ -17,7 +20,40 @@ export type AshTopEntry = Omit<Schemas['AshTopEntry'], 'queryid'> & {
   queryid: number | string
 }
 
-export type AshGroupBy = 'wait_event_type' | 'wait_event' | 'queryid' | 'state' | 'datname'
+/** The session dimensions a range can be grouped and filtered by. */
+export const ASH_DIMENSIONS = ['usename', 'client_addr', 'application_name'] as const
+
+export type AshDimension = (typeof ASH_DIMENSIONS)[number]
+
+export type AshGroupBy =
+  'wait_event_type' | 'wait_event' | 'queryid' | 'state' | 'datname' | AshDimension
+
+/** A dimension's empty value: the series name and the filter that selects it. */
+export const ASH_UNKNOWN = '-'
+
+export type AshDimensionFilters = Partial<Record<AshDimension, string>>
+
+export function isAshDimension(value: string | null | undefined): value is AshDimension {
+  return (ASH_DIMENSIONS as readonly (string | null | undefined)[]).includes(value)
+}
+
+/** The dimension filters held in the page URL, in fixed order. */
+export function dimensionFiltersOf(params: URLSearchParams): AshDimensionFilters {
+  const filters: AshDimensionFilters = {}
+  for (const dimension of ASH_DIMENSIONS) {
+    const value = params.get(dimension)
+    if (value !== null && value !== '') filters[dimension] = value
+  }
+  return filters
+}
+
+/** A stable cache key part for the dimension filters. */
+export function dimensionFiltersKey(filters: AshDimensionFilters): string | undefined {
+  const parts = ASH_DIMENSIONS.flatMap((dimension) =>
+    filters[dimension] === undefined ? [] : [`${dimension}=${filters[dimension]}`],
+  )
+  return parts.length === 0 ? undefined : parts.join('&')
+}
 
 export interface AshPoint {
   ts: string
@@ -44,6 +80,9 @@ const GROUP_COLUMNS: Record<AshGroupBy, keyof AshBucket> = {
   state: 'state',
   wait_event: 'wait_event',
   wait_event_type: 'wait_event_type',
+  usename: 'usename',
+  client_addr: 'client_addr',
+  application_name: 'application_name',
 }
 
 const OTHER = 'other'
@@ -54,6 +93,7 @@ function groupName(bucket: AshBucket, groupBy: AshGroupBy): string {
   const value = bucket[GROUP_COLUMNS[groupBy]]
 
   if (value === undefined || value === null || value === '') {
+    if (isAshDimension(groupBy)) return ASH_UNKNOWN
     return groupBy === 'wait_event_type' || groupBy === 'wait_event' ? CPU : OTHER
   }
 

@@ -53,6 +53,22 @@ export const activityCaptions = {
     window: ASH_WINDOW,
     howToRead: `Select a series to see the queries sampled in that event. ${ASH_GAPS}`,
   },
+  'ash.breakdown-dimension': {
+    what: 'Average number of non-idle backends over time, split by the user, client address or application of their session.',
+    source:
+      'ASH samples: the agent reads usename, client_addr and application_name of pg_stat_activity once per second (only the dimensions checks.ash.dimensions keeps) and stores the counts per 10 second window.',
+    unit: ASH_UNIT,
+    window: ASH_WINDOW,
+    howToRead: `An empty value is shown as (unknown). Select a series to filter the page by it; the smallest groups are folded into other. ${ASH_GAPS}`,
+  },
+  'ash.stack-dimension': {
+    what: 'One stacked chart: each series is a user, client address or application, and the height of the stack is the average number of non-idle backends.',
+    source:
+      'ASH samples: usename, client_addr and application_name of pg_stat_activity, read once per second and stored per 10 second window.',
+    unit: ASH_UNIT,
+    window: ASH_WINDOW,
+    howToRead: `Select a series to filter the page by it; the filter shows as a chip above the chart. ${ASH_GAPS}`,
+  },
   'ash.stack-queries': {
     what: 'One stacked chart: each series is a query id, and the height of the stack is the average number of non-idle backends.',
     source:

@@ -9,45 +9,45 @@ import {
   type AshChartPoint,
   type AshChartSeries,
 } from '@/components/charts/ash.options'
-import { foldOther, orderGroups, toStackedSeries, type AshBucket, type AshGroupBy } from '@/lib/ash'
+import {
+  ASH_UNKNOWN,
+  foldOther,
+  isAshDimension,
+  orderGroups,
+  toStackedSeries,
+  type AshBucket,
+  type AshGroupBy,
+} from '@/lib/ash'
 import { useT } from '@/i18n/react'
-import { groupSeries } from '@/lib/ashGroups'
+import type { MessageKey } from '@/i18n/messages/en'
+import { ASH_GROUP_LABELS as GROUP_LABELS, groupSeries, type AshChartGroup } from '@/lib/ashGroups'
 import type { CaptionId } from '@/lib/captions'
 
 const MAX_VISIBLE_SERIES = ASH_WAIT_TYPES.length
 const OTHER = 'other'
 
-const GROUP_LABELS: Record<
-  Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>,
-  'ash.group.queryid' | 'ash.group.waitEvent' | 'ash.group.waitEventType'
-> = {
-  queryid: 'ash.group.queryid',
-  wait_event: 'ash.group.waitEvent',
-  wait_event_type: 'ash.group.waitEventType',
-}
-
-const EMPTY_LABELS: Record<
-  Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>,
-  'ash.empty.queryid' | 'ash.empty.waitEvent' | 'ash.empty.waitEventType'
-> = {
+const EMPTY_LABELS: Record<AshChartGroup, MessageKey> = {
   queryid: 'ash.empty.queryid',
   wait_event: 'ash.empty.waitEvent',
   wait_event_type: 'ash.empty.waitEventType',
+  usename: 'ash.empty.dimension',
+  client_addr: 'ash.empty.dimension',
+  application_name: 'ash.empty.dimension',
 }
 
-const STACK_CAPTIONS: Record<
-  Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>,
-  CaptionId
-> = {
+const STACK_CAPTIONS: Record<AshChartGroup, CaptionId> = {
   queryid: 'ash.stack-queries',
   wait_event: 'ash.stack-events',
   wait_event_type: 'ash.stack-types',
+  usename: 'ash.stack-dimension',
+  client_addr: 'ash.stack-dimension',
+  application_name: 'ash.stack-dimension',
 }
 
 interface AshBreakdownProps {
   buckets: readonly AshBucket[]
   filterLabel?: string | null
-  groupBy: Extract<AshGroupBy, 'wait_event_type' | 'wait_event' | 'queryid'>
+  groupBy: AshChartGroup
   onSeriesSelect?: AshChartProps['onSeriesSelect']
   /** The server's bucket width, so a missing bucket is drawn as a gap. */
   resolutionSeconds?: number
@@ -76,9 +76,12 @@ function groupValue(bucket: AshBucket, groupBy: AshGroupBy): string {
           ? bucket.queryid
           : groupBy === 'state'
             ? bucket.state
-            : bucket.datname
+            : isAshDimension(groupBy)
+              ? bucket[groupBy]
+              : bucket.datname
 
   if (value === undefined || value === null || value === '') {
+    if (isAshDimension(groupBy)) return ASH_UNKNOWN
     return groupBy === 'wait_event_type' || groupBy === 'wait_event' ? 'CPU' : OTHER
   }
   return String(value)
@@ -138,10 +141,25 @@ export function AshBreakdown({
 }: AshBreakdownProps) {
   const t = useT()
   const { range } = useTimeRange()
-  const { folded, series } = chartSeries(buckets, groupBy, resolutionSeconds)
+  const dimension = isAshDimension(groupBy)
+  const unknown = t('ash.dimension.unknown')
+  const charted = chartSeries(buckets, groupBy, resolutionSeconds)
+  const folded = charted.folded
+  // A dimension's empty value is plotted as (unknown) and selected as "-".
+  const series = dimension
+    ? charted.series.map((entry) =>
+        entry.name === ASH_UNKNOWN ? { ...entry, name: unknown } : entry,
+      )
+    : charted.series
   const title = t(GROUP_LABELS[groupBy])
   const eventTypes = eventTypesOf(buckets)
-  const interactionProps = onSeriesSelect === undefined ? {} : { onSeriesSelect }
+  const interactionProps =
+    onSeriesSelect === undefined
+      ? {}
+      : {
+          onSeriesSelect: (name: string) =>
+            onSeriesSelect(dimension && name === unknown ? ASH_UNKNOWN : name),
+        }
   const filterNote = filterLabel ? (
     <p className="text-muted-foreground mb-3 text-sm">
       {t('ash.breakdown.filtered', { title, filter: filterLabel })}
@@ -150,7 +168,9 @@ export function AshBreakdown({
   const body = (
     <>
       {filterNote}
-      {series.length > 0 && view === 'separate' && groupBy !== 'queryid' ? (
+      {series.length > 0 &&
+      view === 'separate' &&
+      (groupBy === 'wait_event_type' || groupBy === 'wait_event') ? (
         <AshChartGrid
           eventTypes={eventTypes}
           foldedCount={folded}
@@ -193,6 +213,13 @@ export function AshBreakdown({
   if (groupBy === 'wait_event') {
     return (
       <Section captionId="ash.breakdown-events" title={title}>
+        {body}
+      </Section>
+    )
+  }
+  if (dimension) {
+    return (
+      <Section captionId="ash.breakdown-dimension" title={title}>
         {body}
       </Section>
     )

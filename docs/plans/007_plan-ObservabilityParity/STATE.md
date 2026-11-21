@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 07:54 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 08:04 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD 5d1a0ebeee14ab94be48b2f651712b9c27635013 + tree 9cf9b193f9a6f35d735a3090ebdcd11c0aa2a61c · branch main · last WIP tree none
-- Last closure: unit:2.4:1
-- Next: open 2.5 · next eligible: 2.5
+- Base: HEAD 7b2e5647b55a3feaaad27e76894a1db0a9d389f8 + tree 70847adbf49a3f1fbc61fda85766a6d941b6ea1c · branch main · last WIP tree none
+- Last closure: unit:2.5:1
+- Next: open P2 · next eligible: P2
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -59,6 +59,7 @@ none
 - Baseline for regression comparison (0.1): G-GO-FULL 35 packages ok, 0 FAIL, 1 SKIP; vitest 227 files / 2027 tests; G-I18N and G-RO pass. B1: `make web-lint` fails at `web-gen-api` (`git diff --exit-code -- web/src/api/generated.ts`) only because that file holds uncommitted plan-006 hunks; gen output is idempotent.
 - A4 (autonomous, 2026-11-21 07:30 UTC): plan-007 units edit files that the uncommitted plan 006 created (untracked locale catalogs, help topics, `findingCheck.ts`, …), so no unit commit could hold them without capturing plan-006 content (§6 safety stop). Options: stop and ask; leave those edits uncommitted; commit the plan-006 tree separately first. Plan 006 is complete and live (dev-20261121b), no other session writes, and the plan recommended this commit (D20). Chosen: separate commit bf38f97 `chore(006): record plan 006 I18n work …` = HEAD + baseline snapshot 1d7158a without plan 007, without `web/src/**/node_modules/`, `internal/webui/dist/index.html`, `BUGFIX_ENHANCEMENTS_20_11_2026.md` (528 paths, includes the previously staged SuggestionsPanel deletions). Local only, no push; reverse with an interactive history edit dropping bf38f97 (content stays identical in the working tree). A1 is moot from here: the index is clean.
 - A3 (autonomous): G-WEB-FULL substitution for B1. Retired at P1 (2026-11-21): with plan 006 committed (A4) `make web-lint` is green again, so G-WEB-FULL runs as registered.
+- A5 (autonomous, 2026-11-21, unit 2.5): the console had no group-by control, only the wait drill path. Options: add the dimensions as drill levels; one Group by control with the wait drill path as one choice plus the three dimensions. Chosen: the control; selecting a dimension value sets its filter (chip, URL `usename=`/`client_addr=`/`application_name=`) and returns to wait event types, so the drill continues on those sessions. Dimension groups always stack (wait-group cards do not apply).
 
 ## 9. Blockers
 none
@@ -76,7 +77,7 @@ none
 | · 2.2 Agent emits the labels, checks.ash.dimensions | DONE | 1 | — | unit:2.2:1 |
 | · 2.3 Schema, store, pipeline | DONE | 1 | — | unit:2.3:1 |
 | · 2.4 API: group_by and filters | DONE | 1 | — | unit:2.4:1 |
-| · 2.5 Console: group and filter controls, help, README | TODO | 1 | — | — |
+| · 2.5 Console: group and filter controls, help, README | DONE | 1 | — | unit:2.5:1 |
 | 3 Notification channels | TODO | 1 | 3.1–3.4 | — |
 | 4 Period A versus B | TODO | 1 | 4.1–4.3 | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |
