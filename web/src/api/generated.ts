@@ -716,6 +716,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List PostgreSQL log events of an instance, newest first.
+         * @description The log lines the agent ships with checks.logs.enabled. Without from, the hour before to (or before now). q matches a plain substring of the message, ignoring case. before pages back: pass the ts of the last row.
+         */
+        get: operations["getLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/classes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count the log events of an instance per class.
+         * @description Ordered by count, highest first. Without from, the hour before to (or before now).
+         */
+        get: operations["getLogClasses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/statements": {
         parameters: {
             query?: never;
@@ -1426,6 +1466,34 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+        };
+        LogEvent: {
+            ts: components["schemas"]["Timestamp"];
+            /** @description The class the agent gave the line (for example lock.deadlock, error.statement). */
+            class: string;
+            /** @description PostgreSQL error_severity (LOG */
+            severity: string;
+            sqlstate: string;
+            datname: string;
+            usename: string;
+            application_name: string;
+            /** Format: int32 */
+            pid: number | null;
+            /** @description The query identifier as a decimal string. */
+            queryid: string | null;
+            /** @description The message, cut to 2000 bytes; a text that may hold a credential reads "[withheld: may hold a credential]". */
+            message: string;
+            /** @description detail, hint, context and statement, shipped only with the agent setting checks.logs.statement_text. */
+            extra: {
+                [key: string]: string;
+            } | null;
+            trace_id: string | null;
+        };
+        LogClassCount: {
+            class: string;
+            /** Format: int64 */
+            count: number;
+            last_ts: components["schemas"]["Timestamp"];
         };
         InstanceSummary: {
             instance_id: components["schemas"]["InstanceId"];
@@ -4301,6 +4369,63 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Event"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getLogs: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                from?: components["schemas"]["Timestamp"];
+                to?: components["schemas"]["Timestamp"];
+                /** @description One log class, or several separated by commas; an unknown class is refused. */
+                class?: string;
+                severity?: string;
+                database?: string;
+                q?: string;
+                limit?: number;
+                before?: components["schemas"]["Timestamp"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Log events newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogEvent"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getLogClasses: {
+        parameters: {
+            query: {
+                instance_id: components["schemas"]["InstanceId"];
+                from?: components["schemas"]["Timestamp"];
+                to?: components["schemas"]["Timestamp"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Counts per class. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogClassCount"][];
                 };
             };
             400: components["responses"]["BadRequest"];

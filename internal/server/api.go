@@ -92,6 +92,7 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/statements", a.handleStatements)
 	r.Get("/api/v1/statements/compare", a.handleStatementsCompare)
 	a.registerContentionRoutes(r)
+	a.registerLogRoutes(r)
 	a.registerRelationRoutes(r)
 	a.registerIndexSuggestionRoutes(r)
 	a.registerIndexHistoryRoutes(r)

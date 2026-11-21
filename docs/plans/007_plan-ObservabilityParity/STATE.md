@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:15 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 11:16 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -9,10 +9,10 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Settings: autonomy true (explicit (prompt) `full-autonomous:true`) · WIP on (explicit (prompt) `--wip-commit`) · deadline none
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
-- Unit: none
-- Base: HEAD 9aa8e510c83d89b18d77b9624db393155229d609 + tree 9f283d3206a73c1117000ca93d45ca79072461c4 · branch main · last WIP tree none
+- Unit: 6.6 attempt 1 · OPEN · step S1 · assigned agent-2 → actual agent:opus (claude-opus-5-5)
+- Base: HEAD 9df747293847551697d7e3083f1da37a38c9f338 + tree c6f08b221aab21629f899f81753316568a5fd07d · branch main · last WIP tree none
 - Last closure: unit:6.5:1
-- Next: open 6.6 · next eligible: 6.6
+- Next: finish 6.6 · next eligible: 6.6
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -45,7 +45,7 @@ READY rev 1 — agent-1 checked: 16 phase files, 60 sub-phases with the seven fi
 none
 
 ## 5. Owned files
-none
+6.6: internal/server/api_logs.go internal/store/migrations/0037_log_alerts.sql web/src/features/logs
 
 ## 6. Checkpoint
 none
@@ -101,7 +101,7 @@ none
 | · 6.3 | DONE | 1 | — | unit:6.3:1 |
 | · 6.4 | DONE | 1 | — | unit:6.4:1 |
 | · 6.5 | DONE | 1 | — | unit:6.5:1 |
-| · 6.6 | TODO | 1 | — | — |
+| · 6.6 | IN_PROGRESS | 1 | — | — |
 | · P6 closure | TODO | 1 | — | — |
 | 7 Automatic plans | TODO | 1 | 7.1–7.4 | — |
 | 8 Autovacuum history | TODO | 1 | 8.1–8.3 | — |

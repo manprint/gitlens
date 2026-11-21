@@ -13,6 +13,7 @@ tags:
   - name: instances
   - name: metrics
   - name: events
+  - name: logs
   - name: statements
   - name: ash
   - name: commands
@@ -176,6 +177,32 @@ components:
         cluster_id: { type: [string, 'null'] }
         instance_id: { type: [string, 'null'], format: uuid }
         payload: { type: object, additionalProperties: true }
+    LogEvent:
+      type: object
+      required: [ts, class, severity, sqlstate, datname, usename, application_name, pid, queryid, message, extra, trace_id]
+      properties:
+        ts: { $ref: '#/components/schemas/Timestamp' }
+        class: { type: string, description: 'The class the agent gave the line (for example lock.deadlock, error.statement).' }
+        severity: { type: string, description: PostgreSQL error_severity (LOG, WARNING, ERROR, FATAL, PANIC, ...). }
+        sqlstate: { type: string }
+        datname: { type: string }
+        usename: { type: string }
+        application_name: { type: string }
+        pid: { type: [integer, 'null'], format: int32 }
+        queryid: { type: [string, 'null'], description: The query identifier as a decimal string. }
+        message: { type: string, description: 'The message, cut to 2000 bytes; a text that may hold a credential reads "[withheld: may hold a credential]".' }
+        extra:
+          type: [object, 'null']
+          additionalProperties: { type: string }
+          description: detail, hint, context and statement, shipped only with the agent setting checks.logs.statement_text.
+        trace_id: { type: [string, 'null'] }
+    LogClassCount:
+      type: object
+      required: [class, count, last_ts]
+      properties:
+        class: { type: string }
+        count: { type: integer, format: int64 }
+        last_ts: { $ref: '#/components/schemas/Timestamp' }
     InstanceSummary:
       type: object
       required: [instance_id, addr, port, role, pg_version, perm_tier, last_seen, up]
@@ -3666,6 +3693,78 @@ paths:
                       cluster_id: '7381927364512345678'
                       instance_id: 22222222-2222-2222-2222-222222222222
                       payload: { old_primary: 11111111-1111-1111-1111-111111111111, new_primary: 22222222-2222-2222-2222-222222222222 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/logs:
+    get:
+      tags: [logs]
+      operationId: getLogs
+      summary: List PostgreSQL log events of an instance, newest first.
+      description: >-
+        The log lines the agent ships with checks.logs.enabled. Without from,
+        the hour before to (or before now). q matches a plain substring of the
+        message, ignoring case. before pages back: pass the ts of the last row.
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - name: class
+          in: query
+          required: false
+          schema: { type: string }
+          description: One log class, or several separated by commas; an unknown class is refused.
+        - { name: severity, in: query, required: false, schema: { type: string } }
+        - { name: database, in: query, required: false, schema: { type: string } }
+        - { name: q, in: query, required: false, schema: { type: string } }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, default: 100, minimum: 1, maximum: 500 }
+        - { name: before, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+      responses:
+        '200':
+          description: Log events newest first.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/LogEvent' } }
+              examples:
+                default:
+                  value:
+                    - ts: '2026-11-21T10:00:00.123Z'
+                      class: error.statement
+                      severity: ERROR
+                      sqlstate: '23505'
+                      datname: app
+                      usename: app
+                      application_name: psql
+                      pid: 4242
+                      queryid: '-7184728350012345678'
+                      message: duplicate key value violates unique constraint "orders_pkey"
+                      extra: null
+                      trace_id: null
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/logs/classes:
+    get:
+      tags: [logs]
+      operationId: getLogClasses
+      summary: Count the log events of an instance per class.
+      description: Ordered by count, highest first. Without from, the hour before to (or before now).
+      parameters:
+        - { name: instance_id, in: query, required: true, schema: { $ref: '#/components/schemas/InstanceId' } }
+        - { name: from, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+        - { name: to, in: query, required: false, schema: { $ref: '#/components/schemas/Timestamp' } }
+      responses:
+        '200':
+          description: Counts per class.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/LogClassCount' } }
+              examples:
+                default:
+                  value:
+                    - { class: error.statement, count: 12, last_ts: '2026-11-21T10:00:00Z' }
+                    - { class: lock.deadlock, count: 1, last_ts: '2026-11-21T09:41:07Z' }
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /api/v1/statements:

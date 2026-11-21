@@ -60,6 +60,13 @@ Generated from [`api/openapi.yaml`](../api/openapi.yaml) by `make api-docs`. Do 
 |---|---|---|---|
 | GET | `/api/v1/events` | `getEvents` | List events newest first. |
 
+## logs
+
+| METHOD | Path | operationId | Summary |
+|---|---|---|---|
+| GET | `/api/v1/logs` | `getLogs` | List PostgreSQL log events of an instance, newest first. |
+| GET | `/api/v1/logs/classes` | `getLogClasses` | Count the log events of an instance per class. |
+
 ## statements
 
 | METHOD | Path | operationId | Summary |
