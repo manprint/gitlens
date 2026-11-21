@@ -135,6 +135,10 @@ export const qk = {
       waitEvent,
       dimensions,
     ] as const,
+  statementsCompare: (params: Readonly<Record<string, string | number | undefined>>) =>
+    ['getStatementsCompare', params] as const,
+  ashCompare: (params: Readonly<Record<string, string | number | undefined>>) =>
+    ['getAshCompare', params] as const,
   plans: (queryId: string | number, instanceId?: string, datname?: string, limit?: number) =>
     ['getPlans', queryId, instanceId, datname, limit] as const,
   alerts: (

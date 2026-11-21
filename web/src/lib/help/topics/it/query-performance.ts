@@ -601,6 +601,31 @@ export const queryPerformanceTopic: HelpTopic = {
       ],
     },
     {
+      id: 'compare-periods',
+      title: 'Confrontare due periodi',
+      blocks: [
+        {
+          kind: 'text',
+          text: 'Passa la pagina a {{ui:queries.compare.modeCompare}} per vedere ogni statement in due periodi affiancati. Il periodo B è l’intervallo del selettore temporale; il periodo A è {{ui:queries.compare.preset.previous}}, {{ui:queries.compare.preset.yesterday}}, {{ui:queries.compare.preset.week}} o un intervallo {{ui:queries.compare.preset.custom}}. Ogni valore è al secondo del proprio periodo (il tempo medio resta per chiamata), quindi periodi di durata diversa si confrontano correttamente.',
+        },
+        {
+          kind: 'steps',
+          items: [
+            'Scegli il periodo B con il selettore temporale, per esempio l’ora del rallentamento.',
+            'Fai clic su {{ui:queries.compare.modeCompare}}, poi scegli {{ui:queries.compare.presetLabel}}.',
+            'Scegli la {{ui:queries.compare.metricLabel}}. Le righe seguono l’ampiezza della variazione, dalla più grande.',
+            'Leggi {{ui:queries.compare.colRatio}}: ×3,0 significa il triplo del periodo A, e un rapporto di ×2,0 o più è evidenziato. {{ui:queries.compare.new}} è stato eseguito solo in B, {{ui:queries.compare.gone}} solo in A.',
+            'Apri uno statement dal suo link per esaminarlo.',
+          ],
+        },
+        {
+          kind: 'note',
+          tone: 'info',
+          text: 'Il confronto legge `GET /api/v1/statements/compare`; il suo URL conserva `mode=compare`, `compare` e, per un periodo personalizzato, `a_from` e `a_to`. Ogni periodo può durare al massimo 31 giorni.',
+        },
+      ],
+    },
+    {
       id: 'act-on-slow-query',
       title: 'Come intervenire su una query lenta o in regressione',
       blocks: [

@@ -437,6 +437,30 @@ export const waitEventsTopic: HelpTopic = {
       ],
     },
     {
+      id: 'compare-periods',
+      title: 'Confrontare due periodi',
+      blocks: [
+        {
+          kind: 'text',
+          text: 'Passa la pagina a {{ui:ash.compare.modeCompare}} per vedere le sessioni attive medie di ogni gruppo in due periodi affiancati. Il periodo B è l’intervallo del selettore temporale; il periodo A è {{ui:ash.compare.preset.previous}}, {{ui:ash.compare.preset.yesterday}}, {{ui:ash.compare.preset.week}} o un intervallo {{ui:ash.compare.preset.custom}}. I filtri della pagina (database, tipo di wait event, utente, client, applicazione) valgono per entrambi i periodi.',
+        },
+        {
+          kind: 'steps',
+          items: [
+            'Scegli il periodo B con il selettore temporale.',
+            'Fai clic su {{ui:ash.compare.modeCompare}}, poi scegli {{ui:ash.compare.presetLabel}}.',
+            'Scegli il {{ui:ash.compare.groupLabel}}: tipo di wait event, wait event, query o una dimensione di sessione.',
+            'Leggi {{ui:ash.compare.colRatio}}: un rapporto di ×2,0 o più è evidenziato; i gruppi {{ui:ash.compare.new}} compaiono solo in B, quelli {{ui:ash.compare.gone}} solo in A.',
+          ],
+        },
+        {
+          kind: 'note',
+          tone: 'info',
+          text: 'Il confronto legge `GET /api/v1/ash/compare`, con la formula della tabella delle query principali: campioni sui tick di campionamento. I filtri restringono i campioni, mai i tick.',
+        },
+      ],
+    },
+    {
       id: 'reading-together',
       title: 'Lettura dei gruppi insieme',
       blocks: [

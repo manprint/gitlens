@@ -304,4 +304,14 @@ export const activity: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     window: 'Ultimi valori; ricalcolati al massimo ogni 30 s.',
     howToRead: 'Senza il riavvio la modifica non ha effetto.',
   },
+  'ash.compare-table': {
+    what: 'Sessioni attive medie di ogni gruppo nel periodo A e nel periodo B, con la variazione e il rapporto B / A.',
+    source:
+      'Campioni ASH di ciascun periodo sui suoi tick di campionamento, come nella tabella delle query principali; i filtri restringono i campioni, non i tick.',
+    unit: 'sessioni attive medie',
+    window:
+      'Il periodo B è l’intervallo della pagina; il periodo A viene dal preset scelto o dall’intervallo personalizzato.',
+    howToRead:
+      'Nuovo: visto solo in B; sparito: visto solo in A. Un rapporto di ×2,0 o più è evidenziato.',
+  },
 }

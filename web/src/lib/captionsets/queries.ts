@@ -261,4 +261,13 @@ export const queriesCaptions = {
     howToRead:
       'Connect to the database named in step 1 and run the script. It runs in a read-only transaction that is rolled back, so it changes nothing. Compare its numbers with the evidence below.',
   },
+  'queries.compare-table': {
+    what: 'Each statement in period A and in period B, with the change and the ratio B / A of the chosen measure.',
+    source:
+      'pg_stat_statements samples summed over each period as in the statement list, divided by the period length in seconds.',
+    unit: 'the chosen measure per second; mean time in ms per call',
+    window: 'Period B is the page range; period A comes from the chosen preset or custom range.',
+    howToRead:
+      'New: seen in B only; gone: seen in A only. A ratio of ×2.0 or more is marked. Periods of different length compare fairly because values are per second.',
+  },
 } as const satisfies Record<string, CaptionEntry>

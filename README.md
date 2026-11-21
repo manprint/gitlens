@@ -416,6 +416,22 @@ older link that carried the table search (`slow.q` on Slowest queries,
 `statement-statistics.q` on Query Inspector) still works: on load its term
 moves to `q`, unless the link already has a `q`.
 
+#### Comparing two periods
+
+Query Inspector and Wait events have a **Compare periods** mode (URL
+`mode=compare`). Period B is the page's time range; period A is the previous
+period of the same length, the same hours yesterday, the same hours a week
+earlier, or a custom range (`compare=previous|yesterday|week|custom`, a custom
+period in `a_from` and `a_to`). The table lists each statement, or each group
+of active sessions, with its value in A and B, the change B − A and the ratio
+B / A; a row seen only in B is `new`, only in A `gone`, and a ratio of ×2.0 or
+more is marked. Statement figures are per second of their own period (the
+mean time stays per call), so periods of different length compare fairly;
+Wait events compares average active sessions under the page's filters. The
+views read `GET /api/v1/statements/compare` and `GET /api/v1/ash/compare`
+(`a_from`, `a_to`, `b_from`, `b_to`, each period at most 31 days and not in
+the future); they do not poll.
+
 #### Locks and activity
 
 Locks and Activity shows the latest blocking-tree sample and session activity,

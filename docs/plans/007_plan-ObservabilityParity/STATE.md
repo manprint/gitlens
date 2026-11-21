@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 09:21 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 09:43 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD c679b7764b09f7df60d1b3ad90ab8abfebd4e564 + tree 62b7650e8ca8512484a23cb12a1c50437815a7e4 · branch main · last WIP tree none
-- Last closure: unit:4.2:1
-- Next: open 4.3 · next eligible: 4.3
+- Base: HEAD 6f596c64e4180eddbb7ebc7cc1b1f0504246b3ba + tree 7a600d9705836bf5753bd4337ac702af8bb2eb63 · branch main · last WIP tree none
+- Last closure: unit:4.3:1
+- Next: open P4 · next eligible: P4
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -51,7 +51,7 @@ none
 none
 
 ## 7. Open-phase evidence
-none
+- 4.3 owned also: web/src/hooks/useComparePeriods.ts web/src/components/layout/ComparePeriodPicker.tsx web/src/lib/captionsets/queries.ts web/src/lib/captionsets/activity.ts web/src/i18n/domain/it/captions/queries.ts web/src/i18n/domain/it/captions/activity.ts
 
 ## 8. Revisions and decisions still needed
 - A1 (autonomous, 2026-11-21): the index holds staged deletions not owned by this plan (`web/src/features/indexes/SuggestionsPanel{,.test}.tsx`). Options: stop as blocker; unstage them; commit through a temporary index. Chosen: every plan-007 commit is built in a temporary index seeded from HEAD with only the unit's owned patch (base tree..closure tree), then the real index is reset for those paths only; the foreign staged entries stay untouched. Shared dirty files: each owned file is rebuilt as HEAD plus the unit's base→closure hunks projected line-wise (helper `pevc.py`); a hunk touching foreign lines stops the commit as a conflict. Risk: none to foreign work; reverse by `git reset --soft` of the plan commits. No hooks exist, so hooks are not bypassed (`GIT_INDEX_FILE=… git commit` runs them anyway).
@@ -66,6 +66,7 @@ none
 - A9 (3.4, autonomous): webhook kinds keep the field label "Console URL" (existing contract, e2e selector); PagerDuty shows "Routing key", email "Recipients". The panel checks the address while typing and disables Save while invalid; the buttons keep "Set URL"/"Replace URL" for every kind. The 409 smtp_not_configured carries detail "set PGLENS_SMTP_HOST and PGLENS_SMTP_FROM on the server" (OpenAPI Error requires detail), via kind field unavailableDetail. deploy/server.example.env gains the Teams, PagerDuty and SMTP examples.
 - A10 (autonomous, 2026-11-21, unit 4.1): `handleStatements` groups by (cluster_id, queryid, datname); the compare CTEs group by (queryid, datname) with MIN(cluster_id) for the text lookup, so a FULL OUTER JOIN on (datname, queryid) gives one row per statement even if the instance changed cluster. Sums and the per-row seconds expression are copied unchanged. The 404 for an unknown instance is a separate `SELECT 1 FROM instances` (handleStatements has no 404); the compare itself is one statement with the 4 period bounds plus the 2 period lengths and limit as bind parameters. Ratio of a `gone` row is 0 (B counted as 0), null only when A is 0 or missing. All eight metrics appear in a, b, delta and ratio (superset of the example).
 - A11 (autonomous, 2026-11-21, unit 4.2): the inline group_by whitelist of `handleASH` became the package var `ashGroupColumns`, shared by `/api/v1/ash/compare` (no copy; behaviour of `/api/v1/ash` unchanged). `group_by` on compare takes exactly one column (a comma list is a 400), the row `key` is the value as text, '' when unknown. Each period's samples and ticks come from `ashWhere` built four times, placeholders renumbered into one statement; filters narrow samples, not ticks, as `/ash/top`. The response carries `group_by` instead of `order_by` and no `normalized` field (AAS is already a rate).
+- A12 (4.3): compare mode is URL `mode=compare` on Query Inspector and Wait events (AshPage already uses `view`), switched by a shared `ModeToggle` radiogroup in the PageHeader actions; A preset in `compare` (`previous` default, unwritten), custom A in `a_from`/`a_to` (datetime-local in the console zone). B = page range floored to the minute (stable key); hooks `useStatementsCompare`/`useAshCompare` use `REFRESH.static` (no polling). `formatRatio(r, status?)` takes the row status to tell new/gone from a missing ratio; the views translate `new`/`gone`. Warning style = `Badge variant="warning"` on the ratio cell (DataTable has no row-class hook; not widened). Queries measure follows the list's `sort`; Activity group follows the page `group` plus its filters. Added captions `queries.compare-table`/`ash.compare-table` (en+it), `queryPath` moved to `lib/statements.ts`, hook `hooks/useComparePeriods.ts` and `ComparePeriodPicker` added to the unit's files.
 
 ## 9. Blockers
 none
@@ -83,7 +84,7 @@ none
 | 4 Period A versus B | IN_PROGRESS | 1 | 4.1–4.3 | — |
 | · 4.1 statements/compare | DONE | 1 | — | unit:4.1:1 |
 | · 4.2 ash/compare | DONE | 1 | — | unit:4.2:1 |
-| · 4.3 console compare views | TODO | 1 | — | — |
+| · 4.3 console compare views | DONE | 1 | — | unit:4.3:1 |
 | · P4 closure | TODO | 1 | — | — |
 | 5 Rollups | TODO | 1 | 5.1–5.4 | — |
 | 6 Log ingest | TODO | 1 | 6.1–6.6 | — |

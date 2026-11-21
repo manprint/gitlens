@@ -274,4 +274,12 @@ export const activityCaptions = {
     window: 'Latest values; recomputed at most every 30 s.',
     howToRead: 'Without the restart the change has no effect.',
   },
+  'ash.compare-table': {
+    what: 'Average active sessions of each group in period A and in period B, with the change and the ratio B / A.',
+    source:
+      'ASH samples of each period over its sampling ticks, as in the top queries table; filters narrow the samples, not the ticks.',
+    unit: 'average active sessions',
+    window: 'Period B is the page range; period A comes from the chosen preset or custom range.',
+    howToRead: 'New: seen in B only; gone: seen in A only. A ratio of ×2.0 or more is marked.',
+  },
 } as const satisfies Record<string, CaptionEntry>

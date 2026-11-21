@@ -867,6 +867,40 @@ export function useAshTop(params: WindowlessParameters<'/api/v1/ash/top'>, windo
   })
 }
 
+// A comparison covers two fixed periods: it does not poll. Null params wait
+// for a valid period A.
+export function useStatementsCompare(params: QueryParameters<'/api/v1/statements/compare'> | null) {
+  return useApiQuery({
+    enabled: params !== null,
+    keepPrevious: true,
+    policy: REFRESH.static,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/statements/compare', {
+          params: { query: params ?? ({} as QueryParameters<'/api/v1/statements/compare'>) },
+          signal,
+        }),
+      ),
+    queryKey: qk.statementsCompare(params ?? {}),
+  })
+}
+
+export function useAshCompare(params: QueryParameters<'/api/v1/ash/compare'> | null) {
+  return useApiQuery({
+    enabled: params !== null,
+    keepPrevious: true,
+    policy: REFRESH.static,
+    queryFn: (signal) =>
+      getApi(() =>
+        client.GET('/api/v1/ash/compare', {
+          params: { query: params ?? ({} as QueryParameters<'/api/v1/ash/compare'>) },
+          signal,
+        }),
+      ),
+    queryKey: qk.ashCompare(params ?? {}),
+  })
+}
+
 export function usePlans(params: QueryParameters<'/api/v1/plans'>) {
   return useApiQuery({
     policy: REFRESH.statements,

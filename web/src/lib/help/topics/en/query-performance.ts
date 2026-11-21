@@ -597,6 +597,31 @@ export const queryPerformanceTopic: HelpTopic = {
       ],
     },
     {
+      id: 'compare-periods',
+      title: 'Comparing two periods',
+      blocks: [
+        {
+          kind: 'text',
+          text: 'Switch the page to {{ui:queries.compare.modeCompare}} to see each statement in two periods side by side. Period B is the range of the time range picker; period A is {{ui:queries.compare.preset.previous}}, {{ui:queries.compare.preset.yesterday}}, {{ui:queries.compare.preset.week}} or a {{ui:queries.compare.preset.custom}} range. Every figure is per second of its own period (the mean time stays per call), so periods of different length compare fairly.',
+        },
+        {
+          kind: 'steps',
+          items: [
+            'Choose period B with the time range picker, for example the hour of the slowdown.',
+            'Click {{ui:queries.compare.modeCompare}}, then choose {{ui:queries.compare.presetLabel}}.',
+            'Choose the {{ui:queries.compare.metricLabel}}. Rows come by the size of the change, largest first.',
+            'Read {{ui:queries.compare.colRatio}}: ×3.0 means three times period A, and a ratio of ×2.0 or more is marked. {{ui:queries.compare.new}} ran only in B, {{ui:queries.compare.gone}} only in A.',
+            'Open a statement from its link to inspect it.',
+          ],
+        },
+        {
+          kind: 'note',
+          tone: 'info',
+          text: 'The comparison reads `GET /api/v1/statements/compare`; its URL keeps `mode=compare`, `compare` and, for a custom period, `a_from` and `a_to`. Each period can be at most 31 days.',
+        },
+      ],
+    },
+    {
       id: 'act-on-slow-query',
       title: 'Acting on a slow or regressed query',
       blocks: [

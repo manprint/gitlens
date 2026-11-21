@@ -1,5 +1,5 @@
 import { Zap } from 'lucide-react'
-import { useMemo } from 'react'
+import { type ReactNode, useMemo } from 'react'
 
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
@@ -8,6 +8,7 @@ import { DataTable, type DataTableProps } from '@/components/layout/DataTable'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { HelpLink } from '@/components/layout/HelpLink'
+import { ModeToggle } from '@/components/layout/ModeToggle'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SearchBox } from '@/components/layout/SearchBox'
 import { Section } from '@/components/layout/Section'
@@ -25,6 +26,7 @@ import { useKeepFocus } from '@/hooks/useKeepFocus'
 import { useLegacySearchParam, useSearchDraft, useShownTerm } from '@/hooks/useSearch'
 import {
   normaliseQueryText,
+  queryPath,
   shareOfTotal,
   summariseStatement,
   type StatementOrderBy,
@@ -32,6 +34,8 @@ import {
 } from '@/lib/statements'
 import { useTimeRange } from '@/hooks/useTimeRange'
 import { queryWindowOf } from '@/lib/timerange'
+import { type CompareMode, readCompareMode } from '@/lib/compare'
+import { QueryCompare } from './QueryCompare'
 import { NativeSelect } from '@/components/ui/native-select'
 
 const STATEMENT_LIMIT = 50
@@ -78,11 +82,6 @@ function readSort(value: string | null): StatementSort {
 
 // The same queryid can name different statements in different databases, and
 // EXPLAIN runs in the database it is given, so the link carries the database.
-function queryPath(instanceId: string, queryid: number | string, datname?: string | null): string {
-  const path = `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(String(queryid))}`
-  return datname ? `${path}?db=${encodeURIComponent(datname)}` : path
-}
-
 function formatNumber(value: number | null | undefined): string {
   return value == null
     ? '—'
@@ -281,7 +280,10 @@ function DisabledStatementsState({ reason }: { reason: string | undefined }) {
   )
 }
 
-export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageProps = {}) {
+function StatementListView({
+  instanceId: instanceIdOverride,
+  modeToggle,
+}: QueryListPageProps & { modeToggle: ReactNode }) {
   const t = useT()
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -437,6 +439,7 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
         eyebrow={t('queries.overview.eyebrow')}
         title={t('queries.list.inspectorTitle')}
         subtitle={t('queries.list.inspectorSubtitleRange')}
+        actions={modeToggle}
         freshness={
           <FreshnessBadge dataUpdatedAt={statementsQuery.dataUpdatedAt} policy="statements" />
         }
@@ -517,6 +520,53 @@ export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageP
         {/* Without rows the table has no toolbar line: the notes follow the empty state. */}
         {rows.length === 0 ? <div className="mt-3 flex">{statementNotes}</div> : null}
       </Section>
+    </div>
+  )
+}
+
+/** The statement list, or with `mode=compare` the same statements in two periods. */
+export function QueryListPage({ instanceId: instanceIdOverride }: QueryListPageProps = {}) {
+  const t = useT()
+  const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const mode = readCompareMode(searchParams.get('mode'))
+  const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
+  const toggle = (
+    <ModeToggle
+      ariaLabel={t('queries.compare.modeLabel')}
+      name="queries-mode"
+      onChange={(next: CompareMode) => {
+        const params = new URLSearchParams(searchParams)
+        if (next === 'compare') params.set('mode', 'compare')
+        else params.delete('mode')
+        setSearchParams(params)
+      }}
+      options={[
+        { value: 'view', label: t('queries.compare.modeList') },
+        { value: 'compare', label: t('queries.compare.modeCompare') },
+      ]}
+      value={mode}
+    />
+  )
+  if (mode === 'view') {
+    return <StatementListView instanceId={instanceId} modeToggle={toggle} />
+  }
+  return (
+    <div className="space-y-8 min-[1600px]:space-y-2">
+      <PageHeader
+        help={
+          <HelpLink
+            anchor="query-performance#compare-periods"
+            label={t('queries.compare.helpLabel')}
+          />
+        }
+        icon={Zap}
+        eyebrow={t('queries.overview.eyebrow')}
+        title={t('queries.compare.title')}
+        subtitle={t('queries.compare.subtitle')}
+        actions={toggle}
+      />
+      <QueryCompare instanceId={instanceId} />
     </div>
   )
 }

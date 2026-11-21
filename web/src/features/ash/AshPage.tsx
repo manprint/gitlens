@@ -1,5 +1,5 @@
 import { Activity, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useAsh, useInstanceSettings } from '@/api/queries'
@@ -7,6 +7,7 @@ import { Caption } from '@/components/layout/Caption'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 import { InfoHint } from '@/components/layout/InfoHint'
 import { HelpLink } from '@/components/layout/HelpLink'
+import { ModeToggle } from '@/components/layout/ModeToggle'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Degraded, Disabled, ErrorState } from '@/components/state'
 import { displayName } from '@/components/charts/ash.options'
@@ -25,6 +26,8 @@ import { queryWindowOf, rangeLabelKey } from '@/lib/timerange'
 import { AshBreakdown } from './AshBreakdown'
 import { ASH_GROUP_LABELS as GROUP_LABELS, type AshChartGroup } from '@/lib/ashGroups'
 import { AshTopQueries } from './AshTopQueries'
+import { AshCompare } from './AshCompare'
+import { type CompareMode, readCompareMode } from '@/lib/compare'
 import { Callout } from '@/components/ui/callout'
 import { cn } from '@/lib/utils'
 
@@ -270,7 +273,10 @@ export interface AshPageProps {
   instanceId?: string
 }
 
-export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
+function AshChartsView({
+  instanceId: instanceIdOverride,
+  modeToggle,
+}: AshPageProps & { modeToggle: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
@@ -420,9 +426,14 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
         icon={Activity}
         eyebrow={t('ash.page.eyebrow')}
         freshness={<FreshnessBadge dataUpdatedAt={ashQuery.dataUpdatedAt} policy="ash" />}
-        {...(groupBy !== DEFAULT_GROUP && groupBy !== 'wait_event'
-          ? {}
-          : { actions: <ChartLayoutToggle onChange={changeView} view={view} /> })}
+        actions={
+          <>
+            {groupBy !== DEFAULT_GROUP && groupBy !== 'wait_event' ? null : (
+              <ChartLayoutToggle onChange={changeView} view={view} />
+            )}
+            {modeToggle}
+          </>
+        }
         title={t('ash.page.title')}
         // The breadcrumb names the instance; its id stays out of the title area.
         subtitle={<span>{t(rangeLabelKey(range))}</span>}
@@ -511,6 +522,59 @@ export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
         </>
       )}
       <AshFootnote />
+    </div>
+  )
+}
+
+/** The Wait events charts, or with `mode=compare` the groups in two periods. */
+export function AshPage({ instanceId: instanceIdOverride }: AshPageProps = {}) {
+  const t = useT()
+  const { instanceId: routeInstanceId } = useParams<{ instanceId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const mode = readCompareMode(searchParams.get('mode'))
+  const instanceId = instanceIdOverride ?? routeInstanceId ?? ''
+  const toggle = (
+    <ModeToggle
+      ariaLabel={t('ash.compare.modeLabel')}
+      name="ash-mode"
+      onChange={(next: CompareMode) => {
+        const params = new URLSearchParams(searchParams)
+        if (next === 'compare') params.set('mode', 'compare')
+        else params.delete('mode')
+        setSearchParams(params)
+      }}
+      options={[
+        { value: 'view', label: t('ash.compare.modeList') },
+        { value: 'compare', label: t('ash.compare.modeCompare') },
+      ]}
+      value={mode}
+    />
+  )
+  if (mode === 'view') return <AshChartsView instanceId={instanceId} modeToggle={toggle} />
+  const groupBy = readGroup(searchParams.get('group'))
+  const filters = drillFilters(
+    groupBy,
+    searchParams.get('wait_event_type'),
+    searchParams.get('wait_event'),
+  )
+  return (
+    <div className="space-y-8 min-[1600px]:space-y-4">
+      <PageHeader
+        help={<HelpLink anchor="wait-events#compare-periods" label={t('ash.compare.helpLabel')} />}
+        icon={Activity}
+        eyebrow={t('ash.page.eyebrow')}
+        title={t('ash.compare.title')}
+        subtitle={t('ash.compare.subtitle')}
+        actions={toggle}
+      />
+      <AshCompare
+        database={searchParams.get('db') ?? undefined}
+        dimensions={dimensionFiltersOf(searchParams)}
+        groupBy={groupBy}
+        instanceId={instanceId}
+        waitEvent={filters.wait_event}
+        waitEventType={filters.wait_event_type}
+      />
     </div>
   )
 }

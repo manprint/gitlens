@@ -435,6 +435,30 @@ export const waitEventsTopic: HelpTopic = {
       ],
     },
     {
+      id: 'compare-periods',
+      title: 'Comparing two periods',
+      blocks: [
+        {
+          kind: 'text',
+          text: 'Switch the page to {{ui:ash.compare.modeCompare}} to see the average active sessions of each group in two periods side by side. Period B is the range of the time range picker; period A is {{ui:ash.compare.preset.previous}}, {{ui:ash.compare.preset.yesterday}}, {{ui:ash.compare.preset.week}} or a {{ui:ash.compare.preset.custom}} range. The page filters (database, wait event type, user, client, application) apply to both periods.',
+        },
+        {
+          kind: 'steps',
+          items: [
+            'Choose period B with the time range picker.',
+            'Click {{ui:ash.compare.modeCompare}}, then choose {{ui:ash.compare.presetLabel}}.',
+            'Choose the {{ui:ash.compare.groupLabel}}: wait event type, wait event, query or a session dimension.',
+            'Read {{ui:ash.compare.colRatio}}: a ratio of ×2.0 or more is marked; {{ui:ash.compare.new}} groups appear only in B, {{ui:ash.compare.gone}} groups only in A.',
+          ],
+        },
+        {
+          kind: 'note',
+          tone: 'info',
+          text: 'The comparison reads `GET /api/v1/ash/compare`, with the formula of the top queries table: samples over sampling ticks. Filters narrow the samples, never the ticks.',
+        },
+      ],
+    },
+    {
       id: 'reading-together',
       title: 'Reading the groups together',
       blocks: [

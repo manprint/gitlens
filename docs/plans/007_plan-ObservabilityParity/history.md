@@ -68,3 +68,6 @@ Gates: G-GO-FOCUS TestCMP001-003 race+shuffle pass; server+cmd packages pass; G-
 
 ## 2026-11-21 4.2/1 complete unit:4.2:1
 Gates: G-GO-FOCUS TestCMP004-005 + server package race+shuffle pass; G-GO-INT TestINTCMP001/002 + ASH integration pass; golangci-lint 0 (plain + integration); G-API regenerated; review: self-review (agent:opus) accepted; changes: GET /api/v1/ash/compare: one group_by column from shared ashGroupColumns, per-period samples/ticks via ashWhere renumbered, AAS = samples/ticks, delta/ratio/status, order by abs delta then key; OpenAPI AshCompare; notes: self-review agent:opus: group_by interpolated only after whitelist; A11
+
+## 2026-11-21 4.3/1 complete unit:4.3:1
+Gates: G-WEB-STATIC (tsc, eslint 0 errors, prettier); G-WEB-UNIT 231 files 2052 tests; help+i18n 48; review: self-review (agent:opus) accepted; changes: compare.ts (presets, formatRatio, values), useStatementsCompare/useAshCompare, ModeToggle, ComparePeriodPicker, QueryCompare, AshCompare, mode=compare on both pages, en/it texts, captions, help sections compare-periods, README Comparing two periods; notes: A12; self-review: hooks unconditional, no polling, B floored to the minute

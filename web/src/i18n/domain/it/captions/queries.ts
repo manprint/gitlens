@@ -261,4 +261,14 @@ export const queries: Readonly<Record<keyof typeof english, CaptionEntry>> = {
     howToRead:
       'Connettiti al database indicato nel passo 1 ed esegui lo script. Gira in una transazione di sola lettura annullata con rollback, quindi non modifica nulla. Confronta i suoi numeri con le evidenze qui sotto.',
   },
+  'queries.compare-table': {
+    what: 'Ogni statement nel periodo A e nel periodo B, con la variazione e il rapporto B / A della misura scelta.',
+    source:
+      'Campioni di pg_stat_statements sommati su ciascun periodo come nell’elenco statement, divisi per la durata del periodo in secondi.',
+    unit: 'la misura scelta al secondo; tempo medio in ms per chiamata',
+    window:
+      'Il periodo B è l’intervallo della pagina; il periodo A viene dal preset scelto o dall’intervallo personalizzato.',
+    howToRead:
+      'Nuovo: visto solo in B; sparito: visto solo in A. Un rapporto di ×2,0 o più è evidenziato. Periodi di durata diversa si confrontano correttamente perché i valori sono al secondo.',
+  },
 }

@@ -189,3 +189,13 @@ export function comparableWithin(a: ComparableStatement, b: ComparableStatement)
     aVersion === bVersion
   )
 }
+
+/** The query inspector of a statement, in its database when known. */
+export function queryPath(
+  instanceId: string,
+  queryid: number | string,
+  datname?: string | null,
+): string {
+  const path = `/instances/${encodeURIComponent(instanceId)}/queries/${encodeURIComponent(String(queryid))}`
+  return datname ? `${path}?db=${encodeURIComponent(datname)}` : path
+}
