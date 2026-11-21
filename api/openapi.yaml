@@ -419,6 +419,7 @@ components:
             that ended inside the window and was followed by a complete result is
             not reported.
         comparable_scope: { type: string, enum: [cluster] }
+        resolution: { $ref: '#/components/schemas/Resolution' }
         has_more:
           type: boolean
           description: >-
@@ -478,10 +479,21 @@ components:
       required: [buckets, resolution_seconds, statistical]
       properties:
         buckets: { type: array, items: { $ref: '#/components/schemas/AshBucket' } }
-        resolution_seconds: { type: integer, format: int32, description: Seconds between rows. Without group_by each row is one agent window, 10 seconds. With group_by it is the bucket size, a multiple of 10. }
+        resolution_seconds: { type: integer, format: int32, description: Seconds between rows. Without group_by each row is one agent window, 10 seconds. With group_by it is the bucket size, a multiple of 10. On the hourly rollup (resolution 1h) both are whole hours. }
         statistical: { type: boolean }
         warning: { type: string }
         enabled: { type: boolean, description: Present as false when ASH is disabled. }
+        resolution: { $ref: '#/components/schemas/Resolution' }
+    Resolution:
+      type: string
+      enum: [raw, 1h]
+      description: >-
+        Where the answer was read. 1h when the range starts before the raw
+        retention horizon plus one hour of its family: the whole answer then
+        comes from the hourly rollup (hourly averages; ASH without state,
+        user, client and application). Statements, ASH and the statements
+        workload source have a rollup; tables and indexes always read raw.
+        Older servers omit it.
     AshTopEntry:
       type: object
       required: [queryid, query_text, samples, ticks, avg_active_sessions]
@@ -496,10 +508,11 @@ components:
       required: [entries, resolution_seconds, statistical]
       properties:
         entries: { type: array, items: { $ref: '#/components/schemas/AshTopEntry' } }
-        resolution_seconds: { type: integer, format: int32, description: Always 1. Each entry aggregates the whole range, so the answer has no time spacing to report. }
+        resolution_seconds: { type: integer, format: int32, description: 1, or 3600 on the hourly rollup (resolution 1h). Each entry aggregates the whole range, so the answer has no time spacing to report. }
         statistical: { type: boolean }
         warning: { type: string }
         enabled: { type: boolean }
+        resolution: { $ref: '#/components/schemas/Resolution' }
     Plan:
       type: object
       required: [plan_id, plan_hash, captured_at, analyzed, plan, changed]
@@ -1363,8 +1376,9 @@ components:
           type: integer
           format: int64
           minimum: 120
-          description: The effective step, after raising it to two samples of the source and to at most 1000 buckets.
+          description: The effective step, after raising it to two samples of the source, to one hour on the hourly rollup, and to at most 1000 buckets.
         source: { type: string, enum: [statements, tables, indexes] }
+        resolution: { $ref: '#/components/schemas/Resolution' }
         series:
           type: array
           items: { $ref: '#/components/schemas/WorkloadSeries' }

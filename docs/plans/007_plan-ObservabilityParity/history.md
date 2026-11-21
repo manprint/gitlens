@@ -80,3 +80,6 @@ Gates: G-GO-INT ./internal/store/ race (TestINTRLP001-003 + all store integratio
 
 ## 2026-11-21 5.2/1 complete unit:5.2:1
 Gates: G-GO-FOCUS ./internal/server race+shuffle pass (TestRET*, TestRLP001-003); G-GO-INT TestRETINT* + TestINTRLP004 pass; golangci-lint 0 (plain + integration); G-API regenerated (docs/api.md unchanged); tsc clean; vitest settings + retention 14 files/112 tests; review: self-review (agent:opus) accepted; changes: retentionFamily MinDays/MaxDays/Rollup, three rollup families (730 d, 31..1825), preview resolves the materialization hypertable, row field rollup; OpenAPI enum/rollup/max_days; console labels; notes: A14
+
+## 2026-11-21 5.3/1 complete unit:5.3:1
+Gates: G-GO-FOCUS server ok (race, shuffle); TestINTRLP005 + TestWSERINT/TestINTRET/ASH/TestINTADV integration ok; lint (both tags) 0; G-API regenerated (docs/api.md unchanged); web tsc + vitest src/lib src/api 641 ok; review: self-review (agent:opus) accepted; changes: rollup_route.go (rollupFor, rawRetentionDays, routeToRollup, rollupSources), statements/ASH/workload read the rollup on old ranges, `resolution` field; notes: A15, A16.

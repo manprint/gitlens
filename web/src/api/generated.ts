@@ -1626,6 +1626,7 @@ export interface components {
             truncated: components["schemas"]["Truncated"];
             /** @enum {string} */
             comparable_scope: "cluster";
+            resolution?: components["schemas"]["Resolution"];
             /** @description Sent only with q: true when more statements match q in the window than limit returned, false when all of them were returned. It says nothing about what the agent collected; truncated does. */
             has_more?: boolean;
             /** @description Present as true while the agent skips the stat_statements check on this instance; statements collected before are still returned. */
@@ -1687,7 +1688,13 @@ export interface components {
             warning?: string;
             /** @description Present as false when ASH is disabled. */
             enabled?: boolean;
+            resolution?: components["schemas"]["Resolution"];
         };
+        /**
+         * @description Where the answer was read. 1h when the range starts before the raw retention horizon plus one hour of its family: the whole answer then comes from the hourly rollup (hourly averages; ASH without state, user, client and application). Statements, ASH and the statements workload source have a rollup; tables and indexes always read raw. Older servers omit it.
+         * @enum {string}
+         */
+        Resolution: "raw" | "1h";
         AshTopEntry: {
             /** @description PostgreSQL query ID as a decimal string. */
             queryid: string;
@@ -1706,12 +1713,13 @@ export interface components {
             entries: components["schemas"]["AshTopEntry"][];
             /**
              * Format: int32
-             * @description Always 1. Each entry aggregates the whole range
+             * @description 1
              */
             resolution_seconds: number;
             statistical: boolean;
             warning?: string;
             enabled?: boolean;
+            resolution?: components["schemas"]["Resolution"];
         };
         Plan: {
             /** Format: int64 */
@@ -2572,11 +2580,12 @@ export interface components {
         WorkloadSeriesResponse: {
             /**
              * Format: int64
-             * @description The effective step, after raising it to two samples of the source and to at most 1000 buckets.
+             * @description The effective step, after raising it to two samples of the source, to one hour on the hourly rollup, and to at most 1000 buckets.
              */
             step_seconds: number;
             /** @enum {string} */
             source: "statements" | "tables" | "indexes";
+            resolution?: components["schemas"]["Resolution"];
             series: components["schemas"]["WorkloadSeries"][];
         };
         WorkloadSeries: {

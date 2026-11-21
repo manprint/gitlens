@@ -23,6 +23,7 @@ import (
 func ensureFindingTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `CREATE TABLE IF NOT EXISTS findings (finding_id text NOT NULL, tenant_id text NOT NULL DEFAULT 'default', rule_id text NOT NULL, severity text NOT NULL, state text NOT NULL, scope text NOT NULL, cluster_id bigint, instance_id uuid, datname text NOT NULL DEFAULT '', object_name text NOT NULL DEFAULT '', title text NOT NULL, detail text NOT NULL, remediation text NOT NULL DEFAULT '', evidence jsonb NOT NULL DEFAULT '{}'::jsonb, degraded_reason text, first_seen timestamptz NOT NULL, last_seen timestamptz NOT NULL, resolved_at timestamptz, muted_until timestamptz, mute_reason text, PRIMARY KEY (tenant_id, finding_id));
+		ALTER TABLE findings ADD COLUMN IF NOT EXISTS message jsonb;
 		CREATE TABLE IF NOT EXISTS query_texts (tenant_id text NOT NULL DEFAULT 'default', cluster_id bigint NOT NULL, datname text NOT NULL, queryid bigint NOT NULL, pg_major int NOT NULL, query_text text NOT NULL, first_seen timestamptz NOT NULL DEFAULT now(), last_seen timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (tenant_id, cluster_id, datname, queryid, pg_major))`)
 	require.NoError(t, err)
 }

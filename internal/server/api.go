@@ -326,6 +326,8 @@ type statementsResp struct {
 	// HasMore is sent only with q: true when more statements match than
 	// limit returned. Truncated keeps its meaning, the agent's cut.
 	HasMore *bool `json:"has_more,omitempty"`
+	// Resolution is "1h" when the range was read from the hourly rollup.
+	Resolution string `json:"resolution"`
 }
 
 // ----- /api/v1/clusters -----
@@ -1356,6 +1358,7 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 			Statements:      []statementEntry{},
 			Truncated:       false,
 			ComparableScope: "cluster",
+			Resolution:      resolutionRaw,
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -1364,6 +1367,16 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+
+	// A range older than the raw retention reads the hourly rollup; its rows
+	// start on the hour, so the hour holding from is counted whole.
+	table := "metrics_statements s"
+	rollup := routeToRollup(ctx, a.retentionStore(), "metrics_statements", *fromPtr, time.Now())
+	if rollup {
+		table = rollupSources["metrics_statements"] + " s"
+		start := fromPtr.Truncate(time.Hour)
+		fromPtr = &start
+	}
 
 	// Each row holds per-second rates over sample_seconds, so rate *
 	// sample_seconds is what that interval observed and the window's total
@@ -1389,7 +1402,7 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		       SUM(s.shared_blks_read_rate * ` + seconds + `) AS total_read,
 		       SUM(s.wal_bytes_rate * ` + seconds + `) AS total_wal,
 		       SUM(s.temp_blks_written_rate * ` + seconds + `) AS total_temp
-		FROM metrics_statements s
+		FROM ` + table + `
 		WHERE s.tenant_id='default' AND s.instance_id=$1`)
 	args = append(args, iid)
 	argIdx := 2
@@ -1516,6 +1529,7 @@ func (a *API) handleStatements(w http.ResponseWriter, r *http.Request) {
 		Disabled:        skipReason != nil,
 		DisabledReason:  skipReason,
 		HasMore:         hasMore,
+		Resolution:      resolutionOf(rollup),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

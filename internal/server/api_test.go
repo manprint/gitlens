@@ -1180,7 +1180,7 @@ func TestAPI_MockPool_Statements_DefaultWindowIsTheLastHour(t *testing.T) {
 			queryRowVals: []*mockRow{{vals: []any{false}}, {err: pgx.ErrNoRows}},
 		}}
 		r := chi.NewRouter()
-		(&API{pool: pool}).RegisterRoutes(r)
+		(&API{pool: pool, retention: &stubPolicyStore{}}).RegisterRoutes(r)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/statements?instance_id="+uuid.NewString()+query, http.NoBody)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)

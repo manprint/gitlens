@@ -278,7 +278,7 @@ func TestSearchAbsentKeepsTheStatementsQuery(t *testing.T) {
 	for _, query := range []string{"", "&q="} {
 		pool := &searchCapturePool{mockPool: &mockPool{queryRowVals: []*mockRow{{vals: []any{false}}}}}
 		r := chi.NewRouter()
-		(&API{pool: pool}).RegisterRoutes(r)
+		(&API{pool: pool, retention: &stubPolicyStore{policies: defaultPolicies()}}).RegisterRoutes(r)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/statements?instance_id="+instance+
 			"&database=app&from=2026-10-01T00:00:00Z&to=2026-10-02T00:00:00Z&limit=5"+query, http.NoBody))

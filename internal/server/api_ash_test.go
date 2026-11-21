@@ -430,7 +430,7 @@ func TestAshAPI_GroupByAggregatesAndFillsTheGroup(t *testing.T) {
 		queryRowVals: []*mockRow{nil, {vals: []any{20}}},
 	}
 	r := chi.NewRouter()
-	(&AshAPI{pool: pool}).RegisterRoutes(r)
+	(&AshAPI{pool: pool, retention: &stubPolicyStore{}}).RegisterRoutes(r)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+uuid.NewString()+"&group_by=wait_event_type&from=2026-09-01T11:00:00Z&to=2026-09-01T12:00:00Z", nil))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -457,7 +457,7 @@ func TestAPI_Ash_WaitEventSeriesCarryType(t *testing.T) {
 		queryRowVals: []*mockRow{nil, {vals: []any{20}}},
 	}
 	r := chi.NewRouter()
-	(&AshAPI{pool: pool}).RegisterRoutes(r)
+	(&AshAPI{pool: pool, retention: &stubPolicyStore{}}).RegisterRoutes(r)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/ash?instance_id="+uuid.NewString()+"&group_by=wait_event&from=2026-09-01T11:00:00Z&to=2026-09-01T12:00:00Z", nil))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

@@ -47,6 +47,9 @@ type workloadSeriesDef struct {
 
 type workloadSource struct {
 	table string
+	// family is the retention family of table; only one with a rollup
+	// source (rollupSources) is read from the rollup on old ranges.
+	family string
 	// sampleSeconds is how often the agent scrapes the source; a step is
 	// never below two samples (I-1).
 	sampleSeconds int
@@ -65,6 +68,7 @@ func gaugeSeries(component, unit string) workloadSeriesDef {
 var workloadSources = map[string]workloadSource{
 	"statements": {
 		table:         "metrics_statements",
+		family:        "metrics_statements",
 		sampleSeconds: 60,
 		components: []workloadComponent{
 			{"calls", "calls_rate"},
@@ -93,6 +97,7 @@ var workloadSources = map[string]workloadSource{
 	},
 	"tables": {
 		table:         "metrics_tables",
+		family:        "metrics_tables",
 		sampleSeconds: 300,
 		components: []workloadComponent{
 			{"seq_scans", "seq_scan"},
@@ -119,6 +124,7 @@ var workloadSources = map[string]workloadSource{
 	},
 	"indexes": {
 		table:         "metrics_indexes",
+		family:        "metrics_indexes",
 		sampleSeconds: 300,
 		components: []workloadComponent{
 			{"idx_scans", "idx_scan"},
@@ -164,6 +170,16 @@ type workloadQuery struct {
 	database string
 	from, to time.Time
 	step     time.Duration
+	// rollup reads the hourly rollup of the source (useRollup).
+	rollup bool
+}
+
+// useRollup switches the query to the hourly rollup: the step is at least
+// one hour, and the buckets stay within maxWorkloadBuckets since a longer
+// step only lowers their count.
+func (q *workloadQuery) useRollup() {
+	q.rollup = true
+	q.step = max(q.step, time.Hour)
 }
 
 type workloadRequestError struct{ msg, detail string }
@@ -292,6 +308,12 @@ func workloadBuckets(from, to time.Time, step time.Duration) []time.Time {
 // index; without a database filter, long windows on a store with many
 // instances may need an (instance_id, ts DESC) index.
 func workloadSQL(sourceName string, names []string) (string, error) {
+	return workloadSQLOn(sourceName, names, false)
+}
+
+// workloadSQLOn is workloadSQL on the raw table or, with rollup, on the hourly
+// rollup of the source, whose hourly averages stand for the scrapes.
+func workloadSQLOn(sourceName string, names []string, rollup bool) (string, error) {
 	source, ok := workloadSources[sourceName]
 	if !ok {
 		return "", fmt.Errorf("unknown source %q", sourceName)
@@ -321,9 +343,16 @@ func workloadSQL(sourceName string, names []string) (string, error) {
 	for _, name := range names {
 		outputs = append(outputs, fmt.Sprintf("(%s)::double precision", source.series[name].expr))
 	}
+	table := source.table
+	if rollup {
+		if table, ok = rollupSources[source.family]; !ok {
+			return "", fmt.Errorf("source %q has no rollup", sourceName)
+		}
+		table += " AS rollup"
+	}
 	return `WITH per_scrape AS (
 	SELECT datname, ts, ` + strings.Join(perScrape, ", ") + `
-	FROM ` + source.table + `
+	FROM ` + table + `
 	WHERE tenant_id = 'default' AND instance_id = $1 AND ts >= $2 AND ts < $3 AND ($5::text = '' OR datname = $5::text)
 	GROUP BY datname, ts
 ), per_database AS (
@@ -355,6 +384,7 @@ type workloadSeries struct {
 type workloadSeriesResponse struct {
 	StepSeconds int64            `json:"step_seconds"`
 	Source      string           `json:"source"`
+	Resolution  string           `json:"resolution"`
 	Series      []workloadSeries `json:"series"`
 }
 
@@ -395,6 +425,9 @@ func (a *API) handleWorkloadSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if routeToRollup(ctx, a.retentionStore(), workloadSources[query.source].family, query.from, time.Now()) {
+		query.useRollup()
+	}
 	resp, err := a.workloadSeries(ctx, id, query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
@@ -406,11 +439,16 @@ func (a *API) handleWorkloadSeries(w http.ResponseWriter, r *http.Request) {
 // workloadSeries reads the requested series and fills every bucket of the
 // window, with null where no scrape landed.
 func (a *API) workloadSeries(ctx context.Context, id uuid.UUID, query workloadQuery) (workloadSeriesResponse, error) {
-	sql, err := workloadSQL(query.source, query.series)
+	sql, err := workloadSQLOn(query.source, query.series, query.rollup)
 	if err != nil {
 		return workloadSeriesResponse{}, err
 	}
-	rows, err := a.pool.Query(ctx, sql, id, query.from, query.to, int64(query.step/time.Second), query.database)
+	// Rollup rows start on the hour: the hour holding from is read whole.
+	from := query.from
+	if query.rollup {
+		from = from.Truncate(time.Hour)
+	}
+	rows, err := a.pool.Query(ctx, sql, id, from, query.to, int64(query.step/time.Second), query.database)
 	if err != nil {
 		return workloadSeriesResponse{}, err
 	}
@@ -420,7 +458,7 @@ func (a *API) workloadSeries(ctx context.Context, id uuid.UUID, query workloadQu
 	}
 	buckets := workloadBuckets(query.from, query.to, query.step)
 	source := workloadSources[query.source]
-	resp := workloadSeriesResponse{StepSeconds: int64(query.step / time.Second), Source: query.source, Series: make([]workloadSeries, 0, len(query.series))}
+	resp := workloadSeriesResponse{StepSeconds: int64(query.step / time.Second), Source: query.source, Resolution: resolutionOf(query.rollup), Series: make([]workloadSeries, 0, len(query.series))}
 	for index, name := range query.series {
 		def := source.series[name]
 		points := make([]workloadPoint, 0, len(buckets))

@@ -1,7 +1,7 @@
 # ObservabilityParity — State
 
 Format: pev-state 2
-Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 10:06 UTC by agent:opus (claude-opus-5-5)
+Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze · baseline b728cb73793b479d4511e57fab1c82f7a71a34af · updated 2026-11-21 10:21 UTC by agent:opus (claude-opus-5-5)
 §0 Protocol: without this skill read PROTOCOL.md once. History: history.md (append-only, never read to resume).
 
 ## 1. Now
@@ -10,9 +10,9 @@ Plan 007 rev 1 · repo /mnt/fabio/dati/Git/SperimentazioniAI/postgres-analyze ·
 - Stop latch: none
 - Scope: plan 007 · RUNNING · overrides autonomy true, WIP on, roster agent:opus (explicit)
 - Unit: none
-- Base: HEAD b3d5738215623cfa4e6151545d0b1c9f6204c317 + tree 3ee10022cf9478f0ec22480bacb87818222d56c1 · branch main · last WIP tree none
-- Last closure: unit:5.2:1
-- Next: open 5.3 · next eligible: 5.3
+- Base: HEAD 2b43f4462be908f71e11bb533ec397dd064fc74b + tree d92de805b4d3ef73821e1e3c690c548427ef4434 · branch main · last WIP tree none
+- Last closure: unit:5.3:1
+- Next: open 5.4 · next eligible: 5.4
 - Owner: agent:opus (claude-opus-5-5) active since 2026-11-21 07:10 UTC · takeover none (previous owner released)
 
 ## 2. Readiness
@@ -69,6 +69,8 @@ none
 - A12 (4.3): compare mode is URL `mode=compare` on Query Inspector and Wait events (AshPage already uses `view`), switched by a shared `ModeToggle` radiogroup in the PageHeader actions; A preset in `compare` (`previous` default, unwritten), custom A in `a_from`/`a_to` (datetime-local in the console zone). B = page range floored to the minute (stable key); hooks `useStatementsCompare`/`useAshCompare` use `REFRESH.static` (no polling). `formatRatio(r, status?)` takes the row status to tell new/gone from a missing ratio; the views translate `new`/`gone`. Warning style = `Badge variant="warning"` on the ratio cell (DataTable has no row-class hook; not widened). Queries measure follows the list's `sort`; Activity group follows the page `group` plus its filters. Added captions `queries.compare-table`/`ash.compare-table` (en+it), `queryPath` moved to `lib/statements.ts`, hook `hooks/useComparePeriods.ts` and `ComparePeriodPicker` added to the unit's files.
 - A13 (autonomous, 2026-11-21, unit 5.1): 0034 is taken (A7), so the rollups are migration `0035_rollups.sql`. `metrics_statements_1h` also keeps `sum(sample_seconds) AS sample_seconds` (rate × seconds still gives the hour's total in the handleStatements SQL; the plan listed only the averages and samples). `metrics_1h` groups by `tenant_id, cluster_id, instance_id, datname, metric, labels, series_id` (series key of `metrics`). The refresh policy starts a job at creation, so the tests retry `refresh_continuous_aggregate` on 55P03; jobs are matched on the view or its materialization hypertable.
 - A14 (autonomous, 2026-11-21, unit 5.2): TimescaleDB 2.31 lists a continuous aggregate's policies in `timescaledb_information.jobs` under the view name (probed), so a rollup family's `Hypertable` is the view name and the policy read/alter/add SQL is unchanged; only the preview resolves the materialization hypertable (chunk sizes and ranges) through `continuous_aggregates`. Bounds: `retentionFamily.minDays(compress)` = max(MinDays, compression floor), `maxDays()` (zero = 365). The row gains `rollup` (always present), so the JSON literals of RET-001/RET-007/RET-INT and the web fixtures gain `"rollup":false`; RET-001 checks raw rows only (rollups in RLP-001); RET-005 accepts `_1h` names and 10 families. The API enum forced console labels for the three families (en/it) and the RET-UI-005 family list already in this unit. Unit 5.2 was opened after its edits (bookkeeping slip); its base tree is the 5.1 base plus the 5.1 commit's files (3ee1002), so the commit holds only 5.2 hunks.
+- A15 (5.3): workload sources are metrics_statements/tables/indexes, not `metrics`: only `statements` reads `metrics_statements_1h`; tables and indexes have no rollup and stay raw (resolution raw); `metrics_1h` has no reader yet. Rollups are read through constant subqueries shaped like the raw table (`bucket AS ts`, statements `COALESCE(sample_seconds, samples*60)`, ASH `''::text AS state`), so the raw SQL runs unchanged; `from` is floored to the hour on the rollup. Raw days = live `drop_after` floored (min 1), family default if unreadable, no policy = never rollup; ranges within `retentionFloorDays` skip the policy read. ASH rollup ticks per hour = MAX(window_ticks) of the hour's keys (exact when one key covers every window). `/ash/compare` stays raw. `resolution` optional in OpenAPI (older servers omit it); grouped ASH buckets rounded up to whole hours; ash/top `resolution_seconds` 3600 on rollup. Mock tests with old fixed dates get an empty `stubPolicyStore`.
+- A16 (5.3): pre-existing failure TestINTADV008 (since migration 0030, plan 006): `ensureFindingTables` lacked `findings.message`; added `ALTER TABLE … ADD COLUMN IF NOT EXISTS message jsonb` so G-GO-INT can be green.
 
 ## 9. Blockers
 none
@@ -88,7 +90,7 @@ none
 | 5 Rollups | IN_PROGRESS | 1 | 5.1–5.4 | — |
 | · 5.1 | DONE | 1 | — | unit:5.1:1 |
 | · 5.2 | DONE | 1 | — | unit:5.2:1 |
-| · 5.3 | TODO | 1 | — | — |
+| · 5.3 | DONE | 1 | — | unit:5.3:1 |
 | · 5.4 | TODO | 1 | — | — |
 | · P5 closure | TODO | 1 | — | — |
 | 6 Log ingest | TODO | 1 | 6.1–6.6 | — |

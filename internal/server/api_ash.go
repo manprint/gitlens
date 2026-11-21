@@ -22,6 +22,37 @@ import (
 // AshAPI provides ASH query endpoints.
 type AshAPI struct {
 	pool dbPool
+	// retention is the policy store a test sets; nil reads the pool.
+	retention policyStore
+}
+
+func (a *AshAPI) retentionStore() policyStore {
+	if a.retention != nil {
+		return a.retention
+	}
+	if a.pool == nil {
+		return nil
+	}
+	return pgPolicyStore{pool: a.pool}
+}
+
+// ashRollup decides the source of a range starting at from: the raw table, or
+// the hourly rollup (unit 5.3), which keeps none of rollupDropped. A request
+// on the rollup that groups or filters by one of them is answered 400 and
+// ok is false.
+func (a *AshAPI) ashRollup(w http.ResponseWriter, r *http.Request, from time.Time, groupByCols []string, filters *ashFilters) (rollup, ok bool) {
+	if !routeToRollup(r.Context(), a.retentionStore(), "metrics_ash", from, time.Now()) {
+		return false, true
+	}
+	q := r.URL.Query()
+	for _, name := range rollupDropped {
+		if slices.Contains(groupByCols, name) || q.Get(name) != "" {
+			writeError(w, http.StatusBadRequest, rollupDroppedMessage(name), "choose a range within the raw retention to use "+name)
+			return false, false
+		}
+	}
+	filters.source = rollupSources["metrics_ash"] + " AS ash_1h"
+	return true, true
 }
 
 // NewAshAPI creates an AshAPI backed by the given pool.
@@ -69,6 +100,8 @@ type ashResponse struct {
 	// the instance has never reported, which is indistinguishable from an
 	// idle database and therefore correctly not flagged either way.
 	Enabled *bool `json:"enabled,omitempty"`
+	// Resolution is "1h" when the range was read from the hourly rollup.
+	Resolution string `json:"resolution"`
 }
 
 type ashTopEntry struct {
@@ -84,6 +117,7 @@ type ashTopResponse struct {
 	ResolutionSeconds int           `json:"resolution_seconds"`
 	Statistical       bool          `json:"statistical"`
 	Warning           *string       `json:"warning,omitempty"`
+	Resolution        string        `json:"resolution"`
 }
 
 // ----- /api/v1/ash -----
@@ -159,6 +193,7 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 			Buckets:           []ashBucket{},
 			ResolutionSeconds: ashWindowSeconds,
 			Statistical:       true,
+			Resolution:        resolutionRaw,
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -183,17 +218,28 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 			ResolutionSeconds: ashWindowSeconds,
 			Statistical:       true,
 			Enabled:           &disabled,
+			Resolution:        resolutionRaw,
 		})
 		return
 	}
 
 	// The ungrouped rows are the agent's windows, ashWindowSeconds apart. A
 	// grouped answer replaces this with its bucket size below.
-	resp := ashResponse{ResolutionSeconds: ashWindowSeconds, Statistical: true}
+	resp := ashResponse{ResolutionSeconds: ashWindowSeconds, Statistical: true, Resolution: resolutionRaw}
 	var totalTicks int
 	if len(groupByCols) == 0 {
 		if fromPtr == nil {
 			fromPtr = ashDefaultFrom(toPtr)
+		}
+		rollup, ok := a.ashRollup(w, r, *fromPtr, nil, &filters)
+		if !ok {
+			return
+		}
+		if rollup {
+			start := fromPtr.Truncate(time.Hour)
+			fromPtr = &start
+			resp.ResolutionSeconds = 3600
+			resp.Resolution = resolutionHourly
 		}
 		resp.Buckets, totalTicks, err = a.queryASHBuckets(ctx, iid, fromPtr, toPtr, database, filters, limit)
 	} else {
@@ -205,7 +251,17 @@ func (a *AshAPI) handleASH(w http.ResponseWriter, r *http.Request) {
 		if fromPtr != nil {
 			from = *fromPtr
 		}
+		rollup, ok := a.ashRollup(w, r, from, groupByCols, &filters)
+		if !ok {
+			return
+		}
 		resp.ResolutionSeconds = ashResolution(from, to)
+		if rollup {
+			// Hourly rows fill whole hours: buckets are whole hours too.
+			from = from.Truncate(time.Hour)
+			resp.ResolutionSeconds = (resp.ResolutionSeconds + 3599) / 3600 * 3600
+			resp.Resolution = resolutionHourly
+		}
 		resp.Buckets, totalTicks, err = a.queryASHGrouped(ctx, iid, from, to, resp.ResolutionSeconds, database, filters, groupByCols, limit)
 	}
 	if err != nil {
@@ -248,7 +304,7 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 	// One row past the limit is read, because only a row beyond it shows that
 	// the answer was cut. A complete answer of exactly limit rows has none.
 	query := fmt.Sprintf(`SELECT ts, samples, window_ticks, datname, wait_event_type, wait_event, state, queryid
-		FROM metrics_ash WHERE %s AND samples > 0 ORDER BY ts DESC LIMIT %d`, where, limit+1)
+		FROM %s WHERE %s AND samples > 0 ORDER BY ts DESC LIMIT %d`, filters.table(), where, limit+1)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -287,7 +343,7 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 		oldest := buckets[limit-1].TS
 		tickFrom = &oldest
 	}
-	totalTicks, err := a.queryASHTicks(ctx, instanceID, tickFrom, to)
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, tickFrom, to, filters.table())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -299,10 +355,14 @@ func (a *AshAPI) queryASHBuckets(ctx context.Context, instanceID uuid.UUID, from
 // significance guard reads them here. Summing the rows instead, as the
 // buckets and groups did, reported zero ticks, and a false warning, whenever
 // a filter or the database matched nothing.
-func (a *AshAPI) queryASHTicks(ctx context.Context, instanceID uuid.UUID, from, to *time.Time) (int, error) {
+//
+// On the rollup a row is one key over an hour, so MAX(window_ticks) of an
+// hour is the ticks of its busiest key: exact when one key (the idle row,
+// say) was seen in every window of the hour, an undercount otherwise.
+func (a *AshAPI) queryASHTicks(ctx context.Context, instanceID uuid.UUID, from, to *time.Time, table string) (int, error) {
 	where, args := ashWhere(instanceID, from, to, "", ashFilters{})
 	var ticks int
-	err := a.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COALESCE(SUM(t), 0)::int FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %s GROUP BY ts) w`, where), args...).Scan(&ticks)
+	err := a.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COALESCE(SUM(t), 0)::int FROM (SELECT ts, MAX(window_ticks) AS t FROM %s WHERE %s GROUP BY ts) w`, table, where), args...).Scan(&ticks)
 	return ticks, err
 }
 
@@ -313,6 +373,16 @@ type ashFilters struct {
 	// dims holds the text-dimension filters by column name; the value ashUnknown
 	// matches empty. A column name is only ever one of ashDimColumns.
 	dims map[string]string
+	// source is the relation read, set to the rollup by ashRollup; empty is
+	// metrics_ash.
+	source string
+}
+
+func (f ashFilters) table() string {
+	if f.source == "" {
+		return "metrics_ash"
+	}
+	return f.source
 }
 
 // ashGroupColumns are the columns group_by may name, on /api/v1/ash and
@@ -445,18 +515,18 @@ func (a *AshAPI) queryASHGrouped(ctx context.Context, instanceID uuid.UUID, from
 WITH ticks AS (
   SELECT bucket, SUM(t)::int AS ticks
     FROM (SELECT time_bucket($%[1]d::interval, ts) AS bucket, ts, MAX(window_ticks) AS t
-            FROM metrics_ash
+            FROM %[8]s
            WHERE instance_id = $1 AND ts >= $%[2]d AND ts < $%[3]d
            GROUP BY 1, 2) w
    GROUP BY bucket
 )
 SELECT g.bucket, g.samples, t.ticks, %[4]s
   FROM (SELECT time_bucket($%[1]d::interval, ts) AS bucket, %[7]s, SUM(samples)::int AS samples
-          FROM metrics_ash
+          FROM %[8]s
          WHERE %[6]s
          GROUP BY 1, %[5]s) g
   JOIN ticks t ON t.bucket = g.bucket
- ORDER BY g.bucket`, resArg, fromArg, toArg, gcols, cols, where, selectCols)
+ ORDER BY g.bucket`, resArg, fromArg, toArg, gcols, cols, where, selectCols, filters.table())
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -521,7 +591,7 @@ SELECT g.bucket, g.samples, t.ticks, %[4]s
 		echoASHDims(&buckets[i], filters)
 		buckets[i].AvgActiveSessions = avgActive(buckets[i].Samples, buckets[i].Ticks)
 	}
-	totalTicks, err := a.queryASHTicks(ctx, instanceID, &from, &to)
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, &from, &to, filters.table())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -703,6 +773,7 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 			Entries:           []ashTopEntry{},
 			ResolutionSeconds: 1,
 			Statistical:       true,
+			Resolution:        resolutionRaw,
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -715,6 +786,14 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 	if fromPtr == nil {
 		fromPtr = ashDefaultFrom(toPtr)
 	}
+	rollup, ok := a.ashRollup(w, r, *fromPtr, nil, &filters)
+	if !ok {
+		return
+	}
+	if rollup {
+		start := fromPtr.Truncate(time.Hour)
+		fromPtr = &start
+	}
 	entries, totalTicks, err := a.queryASHTop(ctx, iid, fromPtr, toPtr, database, filters, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
@@ -725,6 +804,10 @@ func (a *AshAPI) handleASHTop(w http.ResponseWriter, r *http.Request) {
 		Entries:           entries,
 		ResolutionSeconds: 1,
 		Statistical:       true,
+		Resolution:        resolutionOf(rollup),
+	}
+	if rollup {
+		resp.ResolutionSeconds = 3600
 	}
 
 	if totalTicks < 60 {
@@ -757,20 +840,20 @@ func (a *AshAPI) queryASHTop(ctx context.Context, instanceID uuid.UUID, from, to
 	query := fmt.Sprintf(`
 WITH ticks AS (
   SELECT COALESCE(SUM(t), 0)::int AS ticks
-    FROM (SELECT ts, MAX(window_ticks) AS t FROM metrics_ash WHERE %s GROUP BY ts) w
+    FROM (SELECT ts, MAX(window_ticks) AS t FROM %[1]s WHERE %[2]s GROUP BY ts) w
 ), top AS (
   SELECT queryid, MIN(cluster_id) AS cluster_id, SUM(samples)::int AS samples
-    FROM metrics_ash
-   WHERE %s AND queryid IS NOT NULL
+    FROM %[1]s
+   WHERE %[3]s AND queryid IS NOT NULL
    GROUP BY queryid
    ORDER BY SUM(samples) DESC, queryid
-   LIMIT $%d
+   LIMIT $%[4]d
 )
 SELECT top.queryid,
-       COALESCE(%s, ''),
+       COALESCE(%[5]s, ''),
        top.samples, ticks.ticks
   FROM top CROSS JOIN ticks
- ORDER BY top.samples DESC, top.queryid`, tickWhere, where, len(args), ashTopTextSQL)
+ ORDER BY top.samples DESC, top.queryid`, filters.table(), tickWhere, where, len(args), ashTopTextSQL)
 
 	rows, err := a.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -798,7 +881,7 @@ SELECT top.queryid,
 	if len(entries) > 0 {
 		return entries, entries[0].Ticks, nil
 	}
-	totalTicks, err := a.queryASHTicks(ctx, instanceID, from, to)
+	totalTicks, err := a.queryASHTicks(ctx, instanceID, from, to, filters.table())
 	if err != nil {
 		return nil, 0, err
 	}
