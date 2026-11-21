@@ -863,7 +863,7 @@ func TestINTCMD037_ExplainAnalyzeTakesParameterValues(t *testing.T) {
 		// pg_stat_activity keeps its text and queryid.
 		app, err := pgx.Connect(ctx, pg.DSN("postgres", pgtest.RoleSuperuser))
 		require.NoError(t, err)
-		defer app.Close(ctx)
+		defer func() { _ = app.Close(ctx) }()
 		_, err = app.Exec(ctx, "SELECT count(*) FROM pglens_guard.t WHERE a = 2 AND b <> 'q'")
 		require.NoError(t, err)
 		for _, role := range []pgtest.Role{pgtest.RoleT1, pgtest.RoleT2} {
