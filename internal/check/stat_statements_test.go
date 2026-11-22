@@ -143,10 +143,15 @@ type statementsFixture struct {
 	// computeQueryID is what current_setting('compute_query_id') answers;
 	// empty means on.
 	computeQueryID string
+	// noInfo answers that pg_stat_statements_info does not exist
+	// (extension before 1.9, PostgreSQL 13).
+	noInfo    bool
+	infoReads int
 }
 
 func (f *statementsFixture) conn(query func(sql string, args []any) (pgx.Rows, error)) *mockConn {
 	return &mockConn{
+		noRelations: f.noInfo,
 		queryFunc: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			f.sqls = append(f.sqls, sql)
 			f.args = append(f.args, args)
@@ -159,6 +164,12 @@ func (f *statementsFixture) conn(query func(sql string, args []any) (pgx.Rows, e
 					setting = "on"
 				}
 				return &mockRow{vals: []any{setting}}
+			}
+			if sql == relationExistsQuery {
+				return &mockRow{vals: []any{false}}
+			}
+			if strings.Contains(sql, "pg_stat_statements_info") {
+				f.infoReads++
 			}
 			var ts *time.Time
 			return &mockRow{vals: []any{ts}}
@@ -358,6 +369,23 @@ func TestStatStatements_ComputeQueryIDOffIsAnError(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, res.Metrics)
 		})
+	}
+}
+
+// TestStatStatements_NoInfoRelationIsNotQueried keeps a PostgreSQL 13
+// extension (no pg_stat_statements_info) from logging an ERROR per scrape.
+func TestStatStatements_NoInfoRelationIsNotQueried(t *testing.T) {
+	t.Parallel()
+	text := "SELECT $1"
+	for _, noInfo := range []bool{true, false} {
+		f := &statementsFixture{
+			perDB:  statementRows([]any{int64(7), int64(3), float64(1.5), int64(3), int64(1), int64(2), int64(0), int64(0), &text, int64(1)}),
+			noInfo: noInfo,
+		}
+		res, err := newStatementsCheck(cardinality.Options{TopN: 50}).Scrape(context.Background(), f.target())
+		require.NoError(t, err)
+		require.NotEmpty(t, res.Metrics)
+		require.Equal(t, !noInfo, f.infoReads > 0, "noInfo=%v", noInfo)
 	}
 }
 

@@ -416,12 +416,21 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 		return statementsRead{}, err
 	}
 
-	// pg_stat_statements_info only exists from extension version 1.9 on; an
-	// older extension simply has no reset hint to offer.
+	// pg_stat_statements_info only exists from extension version 1.9 on
+	// (PostgreSQL 14); an older extension simply has no reset hint to offer.
+	// Its presence is looked up first: a query on a missing relation would
+	// write an ERROR to the server log on every scrape.
 	var statsReset *time.Time
-	err = conn.QueryRow(ctx, "SELECT stats_reset FROM "+pgx.Identifier{schema, "pg_stat_statements_info"}.Sanitize()).Scan(&statsReset)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) && pgErrorCode(err) != pgUndefinedTable {
+	info := pgx.Identifier{schema, "pg_stat_statements_info"}.Sanitize()
+	var hasInfo bool
+	if err := conn.QueryRow(ctx, relationExistsQuery, info).Scan(&hasInfo); err != nil {
 		return statementsRead{}, err
+	}
+	if hasInfo {
+		err = conn.QueryRow(ctx, "SELECT stats_reset FROM "+info).Scan(&statsReset)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) && pgErrorCode(err) != pgUndefinedTable {
+			return statementsRead{}, err
+		}
 	}
 	return statementsRead{rows: parsed, distinct: distinct, statsReset: statsReset, schema: schema}, nil
 }
@@ -472,3 +481,7 @@ func explainStatementsError(err error) error {
 	}
 	return err
 }
+
+// relationExistsQuery answers whether the relation named by $1 (a qualified,
+// quoted name) exists, without the ERROR a query on a missing one logs.
+const relationExistsQuery = "SELECT pg_catalog.to_regclass($1) IS NOT NULL"

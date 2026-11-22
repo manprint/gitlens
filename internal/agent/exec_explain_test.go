@@ -390,14 +390,40 @@ func TestExplain_PlaceholdersUseGenericPlanVerbatim(t *testing.T) {
 	require.JSONEq(t, `[{"Plan":{}}]`, string(payload.Plan))
 }
 
-func TestExplain_PlaceholdersBeforePG16AreRejected(t *testing.T) {
-	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`)}
+func TestExplain_PlaceholdersBeforePG16UseAPreparedGenericPlan(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1 AND x = $2", plan: []byte(`[{"Plan":{}}]`)}
+	target := &versionedTarget{dispatcherTarget: dispatcherTarget{conn: conn}, version: 130022}
+	out, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1)})
+	require.NoError(t, err)
+	var payload struct {
+		ValuesFrom string `json:"values_from"`
+	}
+	require.NoError(t, json.Unmarshal(out, &payload))
+	require.Equal(t, "generic", payload.ValuesFrom)
+	require.Contains(t, conn.execSQL, "SET LOCAL plan_cache_mode = force_generic_plan")
+	require.Equal(t, []string{"PREPARE pglens_generic_plan AS SELECT * FROM t WHERE id = $1 AND x = $2"}, conn.simpleSQL)
+	require.Contains(t, conn.execSQL, "EXPLAIN (FORMAT JSON, VERBOSE, COSTS) EXECUTE pglens_generic_plan(NULL, NULL)")
+	require.Empty(t, conn.explainArgs)
+}
+
+func TestExplain_PlaceholdersBeforePG16UnpreparableAreRejected(t *testing.T) {
+	conn := &explainConn{statement: "SELECT $1", plan: []byte(`[{"Plan":{}}]`), explainErr: errors.New("could not determine data type of parameter $1")}
 	target := &versionedTarget{dispatcherTarget: dispatcherTarget{conn: conn}, version: 150004}
 	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1)})
 	var rejected *RejectedError
 	require.True(t, errors.As(err, &rejected))
-	require.Contains(t, rejected.Error(), "PostgreSQL before 16")
-	require.Contains(t, rejected.Error(), "a value for its parameter $1")
+	require.Contains(t, rejected.Error(), "before 16")
+	require.Contains(t, rejected.Error(), "could not determine data type")
+	require.Contains(t, rejected.Error(), "enter a value for each parameter")
+}
+
+func TestExplain_AnalyzeWithPlaceholdersNeedsValues(t *testing.T) {
+	conn := &explainConn{statement: "SELECT * FROM t WHERE id = $1", plan: []byte(`[{"Plan":{}}]`)}
+	target := &versionedTarget{dispatcherTarget: dispatcherTarget{conn: conn}, version: 150004}
+	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1), Analyze: true})
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected))
+	require.Contains(t, rejected.Error(), "EXPLAIN ANALYZE needs a value for its parameter $1")
 	require.Empty(t, conn.execSQL)
 }
 

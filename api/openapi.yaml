@@ -2056,7 +2056,8 @@ components:
             The agent binds them and never splices them into the statement.
             Without them, a statement with placeholders is analyzed with the
             values of a recent execution pg_stat_activity shows, and planned
-            plan-only with GENERIC_PLAN on PostgreSQL 16+.
+            plan-only with GENERIC_PLAN on PostgreSQL 16+ (before 16, the
+            values of a recent execution or a prepared generic plan).
         settings:
           type: object
           maxProperties: 16

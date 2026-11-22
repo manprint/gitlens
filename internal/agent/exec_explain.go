@@ -73,9 +73,11 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	// the command (typed by the operator, bound as parameters, never spliced
 	// into the text), or else from a recent execution of the same statement
 	// that pg_stat_activity still shows with its constants. Plan-only EXPLAIN
-	// can do without them on PostgreSQL 16+ (GENERIC_PLAN).
+	// can do without them: GENERIC_PLAN on PostgreSQL 16+, a prepared statement
+	// planned generically (plan_cache_mode = force_generic_plan) before 16.
 	var params []*string
 	valuesFrom := ""
+	prepareGeneric := false
 	if hasParams {
 		count := placeholderCount(statement)
 		switch {
@@ -89,18 +91,18 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 			if err != nil {
 				return nil, err
 			}
-			if sample == "" {
-				what := "EXPLAIN ANALYZE"
-				if !args.Analyze {
-					what = "EXPLAIN on PostgreSQL before 16 (no GENERIC_PLAN)"
-				}
+			switch {
+			case sample != "":
+				statement, hasParams, valuesFrom = sample, false, "recent_execution"
+			case args.Analyze:
 				needs := "a value for its parameter $1"
 				if count > 1 {
 					needs = fmt.Sprintf("a value for each of its %d parameters ($1 to $%d)", count, count)
 				}
-				return nil, rejectedf("%s needs %s: enter them, or run it while the application runs the statement, so that pglens can take the values of an execution pg_stat_activity shows", what, needs)
+				return nil, rejectedf("EXPLAIN ANALYZE needs %s: enter them, or run it while the application runs the statement, so that pglens can take the values of an execution pg_stat_activity shows", needs)
+			default:
+				prepareGeneric, valuesFrom = true, "generic"
 			}
-			statement, hasParams, valuesFrom = sample, false, "recent_execution"
 		default:
 			valuesFrom = "generic"
 		}
@@ -109,7 +111,7 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	options := "FORMAT JSON, VERBOSE, COSTS"
 	if args.Analyze {
 		options = "ANALYZE, FORMAT JSON, VERBOSE, COSTS, BUFFERS"
-	} else if hasParams && params == nil {
+	} else if hasParams && params == nil && !prepareGeneric {
 		// GENERIC_PLAN plans a statement with placeholders and no values.
 		options += ", GENERIC_PLAN"
 	}
@@ -185,6 +187,24 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	}
 
 	explainSQL := fmt.Sprintf("EXPLAIN (%s) %s", options, planned)
+	if prepareGeneric {
+		// Before PostgreSQL 16 the generic plan of a prepared statement stands
+		// in for GENERIC_PLAN: PREPARE infers the parameter types, and
+		// force_generic_plan plans without looking at the NULLs EXECUTE passes.
+		// PREPARE is allowed in a READ ONLY transaction and outlives it, but
+		// the connection is discarded after the command (discardConn).
+		if _, err := conn.Exec(ctx, "SET LOCAL plan_cache_mode = force_generic_plan"); err != nil {
+			return nil, err
+		}
+		if err := execVerbatim(ctx, conn, "PREPARE "+genericStatementName+" AS "+planned); err != nil {
+			if !readOnlyExplainKeyword(keyword) && isInsufficientPrivilege(err) {
+				return nil, rejectedf("explaining a %s statement needs the privilege to run it, which the read-only monitoring role does not hold: %v", keyword, err)
+			}
+			return nil, rejectedf("normalised statement cannot be planned without values on PostgreSQL before 16: %v; enter a value for each parameter", err)
+		}
+		explainSQL = explainExecuteGenericSQL(options, placeholderCount(statement))
+		hasParams = false
+	}
 	plan, scanErr := run(ctx, explainSQL)
 	if scanErr != nil {
 		if !readOnlyExplainKeyword(keyword) && isInsufficientPrivilege(scanErr) {
@@ -221,7 +241,7 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	}
 	// values_from tells the console where the constants of the plan come
 	// from: "values" typed by the operator, a "recent_execution", "generic"
-	// (GENERIC_PLAN), or "" when the statement has none.
+	// (GENERIC_PLAN, or a prepared generic plan before 16), or "" when the statement has none.
 	result, err := json.Marshal(struct {
 		Plan       json.RawMessage   `json:"plan"`
 		PlanHash   string            `json:"plan_hash"`
@@ -254,20 +274,47 @@ func (q pgxSimpleQuerier) SimpleQuery(ctx context.Context, sql string) ([]*pgcon
 	return q.conn.PgConn().Exec(ctx, sql).ReadAll()
 }
 
+// genericStatementName names the prepared statement whose generic plan
+// stands in for GENERIC_PLAN before PostgreSQL 16.
+const genericStatementName = "pglens_generic_plan"
+
+// explainExecuteGenericSQL explains genericStatementName with a NULL for each
+// of its count parameters.
+func explainExecuteGenericSQL(options string, count int) string {
+	nulls := strings.TrimSuffix(strings.Repeat("NULL, ", count), ", ")
+	return fmt.Sprintf("EXPLAIN (%s) EXECUTE %s(%s)", options, genericStatementName, nulls)
+}
+
+func verbatimQuerier(conn check.Conn) (simpleQuerier, error) {
+	switch c := conn.(type) {
+	case simpleQuerier:
+		return c, nil
+	case interface{ Conn() *pgx.Conn }:
+		return pgxSimpleQuerier{conn: c.Conn()}, nil
+	}
+	return nil, fmt.Errorf("connection %T cannot send a statement verbatim", conn)
+}
+
+// execVerbatim runs a statement that keeps its $n placeholders (PREPARE) over
+// the simple query protocol.
+func execVerbatim(ctx context.Context, conn check.Conn, sql string) error {
+	querier, err := verbatimQuerier(conn)
+	if err != nil {
+		return err
+	}
+	_, err = querier.SimpleQuery(ctx, sql)
+	return err
+}
+
 // explainVerbatim sends an EXPLAIN whose statement keeps its $n placeholders,
 // which is what GENERIC_PLAN plans. pgx's QueryExecModeSimpleProtocol cannot
 // carry it: that mode substitutes the placeholders on the client and fails
 // with "insufficient arguments" when there are no values, so the statement
 // goes to the lower-level connection untouched.
 func explainVerbatim(ctx context.Context, conn check.Conn, sql string) (json.RawMessage, error) {
-	var querier simpleQuerier
-	switch c := conn.(type) {
-	case simpleQuerier:
-		querier = c
-	case interface{ Conn() *pgx.Conn }:
-		querier = pgxSimpleQuerier{conn: c.Conn()}
-	default:
-		return nil, fmt.Errorf("connection %T cannot send a statement verbatim", conn)
+	querier, err := verbatimQuerier(conn)
+	if err != nil {
+		return nil, err
 	}
 	results, err := querier.SimpleQuery(ctx, sql)
 	if err != nil {

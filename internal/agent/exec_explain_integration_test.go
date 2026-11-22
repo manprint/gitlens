@@ -144,7 +144,8 @@ func TestINTCMD007_ExplainAnalyzeNeverWrites(t *testing.T) {
 
 // TestINTCMD008_ExplainParameterisedStatement covers the normal case: almost
 // every pg_stat_statements entry has $n placeholders, which only
-// EXPLAIN (GENERIC_PLAN) can plan (PostgreSQL 16+).
+// EXPLAIN (GENERIC_PLAN) can plan (PostgreSQL 16+), or before 16 the generic
+// plan of a prepared statement (plan_cache_mode = force_generic_plan).
 func TestINTCMD008_ExplainParameterisedStatement(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
 		pg.Lock(t)
@@ -162,12 +163,8 @@ func TestINTCMD008_ExplainParameterisedStatement(t *testing.T) {
 		require.NoError(t, err)
 		defer mgr.Close()
 
+		// Before 16 a prepared statement's generic plan stands in for it.
 		result, err := NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: "postgres"})
-		if pg.Major < 16 {
-			var rejected *RejectedError
-			require.ErrorAs(t, err, &rejected)
-			return
-		}
 		require.NoError(t, err)
 		require.NotEmpty(t, result)
 	})

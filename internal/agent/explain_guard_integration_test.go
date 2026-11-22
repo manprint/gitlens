@@ -883,16 +883,13 @@ func TestINTCMD037_ExplainAnalyzeTakesParameterValues(t *testing.T) {
 			require.Equal(t, "recent_execution", valuesFrom(t, result))
 		}
 
-		// Plan-only needs no values on PostgreSQL 16+ (GENERIC_PLAN); before
-		// 16 it takes the recent execution's.
+		// Plan-only needs no values on PostgreSQL 16+ (GENERIC_PLAN); 14 and
+		// 15 take the recent execution's; 13, which cannot find it, plans the
+		// prepared statement generically.
 		result, err := explainWith(t, pg, pgtest.RoleT1, command.Args{QueryID: &queryID})
-		if pg.Major < 14 {
-			requireRefused(t, err, "a value for each of its 2 parameters")
-			return
-		}
 		require.NoError(t, err)
 		want := "generic"
-		if pg.Major < 16 {
+		if pg.Major == 14 || pg.Major == 15 {
 			want = "recent_execution"
 		}
 		require.Equal(t, want, valuesFrom(t, result))

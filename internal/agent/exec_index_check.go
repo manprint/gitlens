@@ -172,10 +172,11 @@ func (e *IndexCheckExecutor) Execute(ctx context.Context, target check.Target, a
 
 // indexCheckPlanner returns how the statement is planned, exactly as a
 // plan-only explain plans it: placeholders take GENERIC_PLAN on PostgreSQL 16+
-// and the constants of a recent execution before that.
+// and the constants of a recent execution before that, or else the generic
+// plan of a prepared statement.
 func indexCheckPlanner(ctx context.Context, conn check.Conn, major int, queryID int64, statement, keyword string) (func(context.Context) (json.RawMessage, error), error) {
 	options := "FORMAT JSON, VERBOSE, COSTS"
-	generic := false
+	generic, prepared := false, false
 	if hasParameterPlaceholders(statement) {
 		if major < 16 {
 			sample, err := recentExecution(ctx, conn, major, queryID, keyword)
@@ -183,9 +184,10 @@ func indexCheckPlanner(ctx context.Context, conn check.Conn, major int, queryID 
 				return nil, err
 			}
 			if sample == "" {
-				return nil, rejectedf("%s: the statement has parameters and PostgreSQL before 16 has no GENERIC_PLAN; run it while the application runs the statement", indexCheckStatementUnavailable)
+				prepared = true
+			} else {
+				statement = sample
 			}
-			statement = sample
 		} else {
 			options += ", GENERIC_PLAN"
 			generic = true
@@ -195,9 +197,23 @@ func indexCheckPlanner(ctx context.Context, conn check.Conn, major int, queryID 
 	return func(ctx context.Context) (json.RawMessage, error) {
 		var plan json.RawMessage
 		var err error
-		if generic {
+		switch {
+		case generic:
 			plan, err = explainVerbatim(ctx, conn, sql)
-		} else {
+		case prepared:
+			// Prepared afresh for each plan: a cached generic plan would not
+			// see the hypothetical index created between the two.
+			if _, err := conn.Exec(ctx, "SET LOCAL plan_cache_mode = force_generic_plan"); err != nil {
+				return nil, err
+			}
+			if err := execVerbatim(ctx, conn, "PREPARE "+genericStatementName+" AS "+statement); err != nil {
+				return nil, rejectedf("normalised statement cannot be planned without values on PostgreSQL before 16: %v", err)
+			}
+			err = conn.QueryRow(ctx, explainExecuteGenericSQL(options, placeholderCount(statement))).Scan(&plan)
+			if err == nil {
+				err = execVerbatim(ctx, conn, "DEALLOCATE "+genericStatementName)
+			}
+		default:
 			err = conn.QueryRow(ctx, sql).Scan(&plan)
 		}
 		if err != nil {

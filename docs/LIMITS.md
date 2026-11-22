@@ -35,8 +35,11 @@ Plans are captured on demand from normalized statement text in
 `pg_stat_statements`, which replaces every constant with a placeholder. On
 PostgreSQL 16 and later such a statement is planned with `GENERIC_PLAN`: a plan
 for unknown values, which can differ from the one PostgreSQL picks for
-particular values. On PostgreSQL 15 it cannot be explained and is reported as
-such. pglens does not invent parameter values, so a returned plan describes a
+particular values. Before 16 pglens takes the constants of a recent execution
+that `pg_stat_activity` still shows (14 and 15), or else plans the statement as
+a prepared statement with `plan_cache_mode = force_generic_plan`, the same
+generic plan; a statement whose parameter types PostgreSQL cannot infer needs
+its values typed in. pglens does not invent parameter values, so a returned plan describes a
 statement that PostgreSQL actually recorded, not an imagined query with guessed
 parameters.
 
@@ -175,9 +178,10 @@ compute_query_id) and those panels stay empty; a lock
 wait on 13 is measured from the statement's start. Statistics before 15 reach
 the views up to 500 ms late. The agent's sessions run with jit = off (JIT
 compiled catalog queries for about a second each on 13); EXPLAIN restores the
-database's own setting. Without query_id,
-EXPLAIN of a statement with parameters on 13 needs the values typed in: no
-recent execution can be found for it. PostgreSQL 13 has
+database's own setting. Without query_id no
+recent execution can be found on 13, so EXPLAIN ANALYZE of a statement with
+parameters needs the values typed in; plan-only EXPLAIN uses the prepared
+generic plan. PostgreSQL 13 has
 no pg_read_all_data: tier 1 is the NOLOGIN role pglens_read_all_data that
 deploy/sql/monitoring_user.sql creates per database. Newer versions are untested
 until their system-view column sets have been probed and verified in the same

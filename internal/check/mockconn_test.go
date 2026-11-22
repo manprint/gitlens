@@ -114,6 +114,9 @@ type mockConn struct {
 	releaseCalls    int
 	extensionSchema string
 	noExtensions    bool
+	// noRelations hands relationExistsQuery to queryRowFunc instead of
+	// answering that every relation exists.
+	noRelations bool
 }
 
 func (m *mockConn) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -132,6 +135,9 @@ func (m *mockConn) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 			return &mockRow{vals: []any{m.extensionSchema}}
 		}
 		return &mockRow{vals: []any{"public"}}
+	}
+	if sql == relationExistsQuery && !m.noRelations {
+		return &mockRow{vals: []any{true}}
 	}
 	if m.queryRowFunc != nil {
 		return m.queryRowFunc(ctx, sql, args...)

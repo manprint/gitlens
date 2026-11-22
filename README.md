@@ -916,8 +916,9 @@ text with the same `queryid`); when that database has no view, the text is
 read through the database the agent reads statements through, and the plan is
 still made in `datname`. Plan-only `EXPLAIN` requires permission tier
 T1. `pg_stat_statements` replaces constants with `$n` placeholders, so a
-normalised statement is planned with `GENERIC_PLAN`, which needs PostgreSQL 16
-or later; on PostgreSQL 15 such a statement is rejected with that reason.
+normalised statement is planned with `GENERIC_PLAN` on PostgreSQL 16 or later;
+before 16 with the constants of a recent execution `pg_stat_activity` shows, or
+else as a prepared statement planned with `plan_cache_mode = force_generic_plan`.
 `EXPLAIN ANALYZE` executes the statement: the agent accepts it at T1 only
 when the target sets `allow_explain_analyze: true`, only for a read-only
 statement (`SELECT`, `VALUES`, `WITH`, `TABLE`) without placeholders whose
