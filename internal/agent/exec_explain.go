@@ -196,7 +196,7 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 		if _, err := conn.Exec(ctx, "SET LOCAL plan_cache_mode = force_generic_plan"); err != nil {
 			return nil, err
 		}
-		if err := execVerbatim(ctx, conn, "PREPARE "+genericStatementName+" AS "+planned); err != nil {
+		if err := prepareGenericStatement(ctx, conn, planned, placeholderCount(statement)); err != nil {
 			if !readOnlyExplainKeyword(keyword) && isInsufficientPrivilege(err) {
 				return nil, rejectedf("explaining a %s statement needs the privilege to run it, which the read-only monitoring role does not hold: %v", keyword, err)
 			}
@@ -277,6 +277,47 @@ func (q pgxSimpleQuerier) SimpleQuery(ctx context.Context, sql string) ([]*pgcon
 // genericStatementName names the prepared statement whose generic plan
 // stands in for GENERIC_PLAN before PostgreSQL 16.
 const genericStatementName = "pglens_generic_plan"
+
+// undeterminedParameter matches the error PREPARE gives for a parameter whose
+// type nothing in the statement implies (SELECT $1, $1 IS NULL).
+var undeterminedParameter = regexp.MustCompile(`could not determine data type of parameter \$(\d+)`)
+
+// prepareGenericStatement prepares statement as genericStatementName, leaving the
+// parameter types to PostgreSQL; a parameter it cannot type is declared text
+// and the statement prepared again, under a savepoint so that the failed
+// attempt does not end the transaction.
+func prepareGenericStatement(ctx context.Context, conn check.Conn, statement string, count int) error {
+	types := make([]string, count)
+	for i := range types {
+		types[i] = "unknown"
+	}
+	for {
+		if _, err := conn.Exec(ctx, "SAVEPOINT pglens_prepare"); err != nil {
+			return err
+		}
+		sql := "PREPARE " + genericStatementName
+		if count > 0 {
+			sql += "(" + strings.Join(types, ", ") + ")"
+		}
+		err := execVerbatim(ctx, conn, sql+" AS "+statement)
+		if err == nil {
+			_, err = conn.Exec(ctx, "RELEASE SAVEPOINT pglens_prepare")
+			return err
+		}
+		if _, rbErr := conn.Exec(ctx, "ROLLBACK TO SAVEPOINT pglens_prepare"); rbErr != nil {
+			return err
+		}
+		m := undeterminedParameter.FindStringSubmatch(err.Error())
+		if m == nil {
+			return err
+		}
+		n, convErr := strconv.Atoi(m[1])
+		if convErr != nil || n < 1 || n > count || types[n-1] == "text" {
+			return err
+		}
+		types[n-1] = "text"
+	}
+}
 
 // explainExecuteGenericSQL explains genericStatementName with a NULL for each
 // of its count parameters.

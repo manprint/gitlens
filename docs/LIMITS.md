@@ -38,8 +38,8 @@ for unknown values, which can differ from the one PostgreSQL picks for
 particular values. Before 16 pglens takes the constants of a recent execution
 that `pg_stat_activity` still shows (14 and 15), or else plans the statement as
 a prepared statement with `plan_cache_mode = force_generic_plan`, the same
-generic plan; a statement whose parameter types PostgreSQL cannot infer needs
-its values typed in. pglens does not invent parameter values, so a returned plan describes a
+generic plan (a parameter PostgreSQL cannot type is declared text); a
+statement that still cannot be prepared needs its values typed in. pglens does not invent parameter values, so a returned plan describes a
 statement that PostgreSQL actually recorded, not an imagined query with guessed
 parameters.
 

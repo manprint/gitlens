@@ -26,6 +26,8 @@ type explainConn struct {
 	lookupArgs  []any
 	explainArgs []any
 	simpleSQL   []string
+	// simpleErrs are answered, in order, before explainErr by SimpleQuery.
+	simpleErrs []error
 
 	// The explain guard's answers: the session's privileges, the functions
 	// the planner may run in the database, the pg_proc rows for the names it
@@ -79,6 +81,13 @@ func (c *explainConn) guardAnswer(sql string) string {
 func (c *explainConn) SimpleQuery(_ context.Context, sql string) ([]*pgconn.Result, error) {
 	c.execSQL = append(c.execSQL, sql)
 	c.simpleSQL = append(c.simpleSQL, sql)
+	if len(c.simpleErrs) > 0 {
+		err := c.simpleErrs[0]
+		c.simpleErrs = c.simpleErrs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if c.explainErr != nil {
 		return nil, c.explainErr
 	}
@@ -401,9 +410,26 @@ func TestExplain_PlaceholdersBeforePG16UseAPreparedGenericPlan(t *testing.T) {
 	require.NoError(t, json.Unmarshal(out, &payload))
 	require.Equal(t, "generic", payload.ValuesFrom)
 	require.Contains(t, conn.execSQL, "SET LOCAL plan_cache_mode = force_generic_plan")
-	require.Equal(t, []string{"PREPARE pglens_generic_plan AS SELECT * FROM t WHERE id = $1 AND x = $2"}, conn.simpleSQL)
+	require.Equal(t, []string{"PREPARE pglens_generic_plan(unknown, unknown) AS SELECT * FROM t WHERE id = $1 AND x = $2"}, conn.simpleSQL)
 	require.Contains(t, conn.execSQL, "EXPLAIN (FORMAT JSON, VERBOSE, COSTS) EXECUTE pglens_generic_plan(NULL, NULL)")
 	require.Empty(t, conn.explainArgs)
+}
+
+func TestExplain_PlaceholdersBeforePG16UntypedParameterIsText(t *testing.T) {
+	conn := &explainConn{
+		statement:  "SELECT $1, a FROM t WHERE b = $2",
+		plan:       []byte(`[{"Plan":{}}]`),
+		simpleErrs: []error{errors.New("ERROR: could not determine data type of parameter $1 (SQLSTATE 42P18)")},
+	}
+	target := &versionedTarget{dispatcherTarget: dispatcherTarget{conn: conn}, version: 140010}
+	_, err := NewExplainExecutor().Execute(context.Background(), target, command.Args{QueryID: int64Ptr(1)})
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"PREPARE pglens_generic_plan(unknown, unknown) AS SELECT $1, a FROM t WHERE b = $2",
+		"PREPARE pglens_generic_plan(text, unknown) AS SELECT $1, a FROM t WHERE b = $2",
+	}, conn.simpleSQL)
+	require.Contains(t, conn.execSQL, "ROLLBACK TO SAVEPOINT pglens_prepare")
+	require.Contains(t, conn.execSQL, "EXPLAIN (FORMAT JSON, VERBOSE, COSTS) EXECUTE pglens_generic_plan(NULL, NULL)")
 }
 
 func TestExplain_PlaceholdersBeforePG16UnpreparableAreRejected(t *testing.T) {

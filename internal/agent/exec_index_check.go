@@ -206,7 +206,7 @@ func indexCheckPlanner(ctx context.Context, conn check.Conn, major int, queryID 
 			if _, err := conn.Exec(ctx, "SET LOCAL plan_cache_mode = force_generic_plan"); err != nil {
 				return nil, err
 			}
-			if err := execVerbatim(ctx, conn, "PREPARE "+genericStatementName+" AS "+statement); err != nil {
+			if err := prepareGenericStatement(ctx, conn, statement, placeholderCount(statement)); err != nil {
 				return nil, rejectedf("normalised statement cannot be planned without values on PostgreSQL before 16: %v", err)
 			}
 			err = conn.QueryRow(ctx, explainExecuteGenericSQL(options, placeholderCount(statement))).Scan(&plan)

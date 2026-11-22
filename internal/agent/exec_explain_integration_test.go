@@ -167,6 +167,18 @@ func TestINTCMD008_ExplainParameterisedStatement(t *testing.T) {
 		result, err := NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: "postgres"})
 		require.NoError(t, err)
 		require.NotEmpty(t, result)
+		if pg.Major >= 16 {
+			return
+		}
+		// A constant in the select list normalises to a parameter nothing types:
+		// it is prepared as text.
+		_, err = admin.Exec(ctx, "SELECT relname, 'tag' FROM pg_class WHERE relpages > 9 AND relname <> 'pglens'")
+		require.NoError(t, err)
+		require.NoError(t, admin.QueryRow(ctx, `SELECT queryid FROM pg_stat_statements
+			WHERE query LIKE 'SELECT relname, $1 FROM pg_class WHERE relpages > $2%' LIMIT 1`).Scan(&queryID))
+		result, err = NewExplainExecutor().Execute(ctx, mgr, command.Args{QueryID: &queryID, Datname: "postgres"})
+		require.NoError(t, err)
+		require.Contains(t, string(result), `"values_from":"generic"`)
 	})
 }
 
