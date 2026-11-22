@@ -103,7 +103,7 @@ export const settingsTopic: HelpTopic = {
                 {
                   term: 'PostgreSQL',
                   meaning:
-                    'The PostgreSQL version of the instance. The supported versions are 15 to 19, see [{{ui:settings.views.server}}](/help/settings#server-info).',
+                    'The PostgreSQL version of the instance. The supported versions are 13 to 19, see [{{ui:settings.views.server}}](/help/settings#server-info).',
                 },
                 {
                   term: '{{ui:settings.inventory.colPermTier}}',
@@ -715,7 +715,7 @@ export const settingsTopic: HelpTopic = {
                 },
                 {
                   term: '{{ui:settings.limits.postgresVersions.label}}',
-                  meaning: 'PostgreSQL 15 through 19 are supported.',
+                  meaning: 'PostgreSQL 13 through 19 are supported.',
                 },
                 {
                   term: '{{ui:settings.limits.replication.label}}',

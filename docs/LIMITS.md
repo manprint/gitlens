@@ -164,9 +164,22 @@ is enabled; it does not eliminate the gap.
 
 ## 9. Supported PostgreSQL versions are limited
 
-The supported and verified range is PostgreSQL 15 through 19; 19 is verified
+The supported and verified range is PostgreSQL 13 through 19; 19 is verified
 on its release candidate (19rc1) and is verified again at its release. Older
-versions lack views or columns used by this plan. Newer versions are untested
+versions lack views or columns used by this plan. On 13 and 14 the agent
+skips what arrives later (pg_stat_recovery_prefetch, pg_stat_subscription_stats,
+the last ANALYZE of a partitioned table and jsonlog, so the log reader needs
+csvlog; on 13 also pg_stat_wal, pg_stat_replication_slots,
+pg_stat_statements_info, query_id in ASH and locks, pg_locks.waitstart and
+compute_query_id) and those panels stay empty; a lock
+wait on 13 is measured from the statement's start. Statistics before 15 reach
+the views up to 500 ms late. The agent's sessions run with jit = off (JIT
+compiled catalog queries for about a second each on 13); EXPLAIN restores the
+database's own setting. Without query_id,
+EXPLAIN of a statement with parameters on 13 needs the values typed in: no
+recent execution can be found for it. PostgreSQL 13 has
+no pg_read_all_data: tier 1 is the NOLOGIN role pglens_read_all_data that
+deploy/sql/monitoring_user.sql creates per database. Newer versions are untested
 until their system-view column sets have been probed and verified in the same
 way as the PostgreSQL 18 and 19 compatibility work.
 

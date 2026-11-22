@@ -234,7 +234,7 @@ func TestGuard_RefusesCallsInTheStatementBeforePlanning(t *testing.T) {
 
 func TestGuard_RefusesSuperuserSession(t *testing.T) {
 	conn := analyzeConn()
-	conn.session = `{"superuser":true,"signal":true,"read_all_data":true}`
+	conn.session = `{"superuser":true,"signal":true,"read_all_data":true,"read_all_data_role":"pg_read_all_data"}`
 	err := runAnalyze(t, conn)
 	requireRefusedBeforeAnalyze(t, conn, err, "superuser")
 }
@@ -273,7 +273,7 @@ func TestGuard_SignalSessionWithoutReadAllDataIsRefused(t *testing.T) {
 func TestGuard_SignalSessionPlansAsReadAllData(t *testing.T) {
 	for _, analyze := range []bool{false, true} {
 		conn := analyzeConn()
-		conn.session = `{"superuser":false,"signal":true,"read_all_data":true}`
+		conn.session = `{"superuser":false,"signal":true,"read_all_data":true,"read_all_data_role":"pg_read_all_data"}`
 		_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1), Analyze: analyze})
 		require.NoError(t, err)
 		require.Contains(t, conn.execSQL, "SET LOCAL ROLE pg_read_all_data")
@@ -329,4 +329,25 @@ func TestDiscardConn_ReleasesWhatCannotBeHijacked(t *testing.T) {
 	conn := analyzeConn()
 	discardConn(context.Background(), conn)
 	require.True(t, conn.released)
+}
+
+// On PostgreSQL 13 a session that can signal plans as the stand-in role.
+func TestGuard_SignalSessionPlansAsReadAllDataStandIn(t *testing.T) {
+	conn := analyzeConn()
+	conn.session = `{"superuser":false,"signal":true,"read_all_data":true,"read_all_data_role":"pglens_read_all_data"}`
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	require.NoError(t, err)
+	require.Contains(t, conn.execSQL, "SET LOCAL ROLE pglens_read_all_data")
+}
+
+// Any other role name is refused before the role switch.
+func TestGuard_SignalSessionRefusesUnknownReadAllDataRole(t *testing.T) {
+	conn := analyzeConn()
+	conn.session = `{"superuser":false,"signal":true,"read_all_data":true,"read_all_data_role":"app_owner"}`
+	_, err := NewExplainExecutor().Execute(context.Background(), &dispatcherTarget{conn: conn}, command.Args{QueryID: int64Ptr(1)})
+	require.Error(t, err)
+	for _, sql := range conn.execSQL {
+		require.NotContains(t, sql, "SET LOCAL ROLE")
+		require.NotContains(t, sql, "EXPLAIN")
+	}
 }

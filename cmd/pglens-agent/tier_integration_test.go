@@ -29,7 +29,7 @@ func TestINTCLI001_CheckTierKeepsMixedCaseRole(t *testing.T) {
 		require.NoError(t, err)
 		_, err = admin.Exec(ctx, "CREATE ROLE "+quoted+" LOGIN PASSWORD 'test'")
 		require.NoError(t, err)
-		_, err = admin.Exec(ctx, "GRANT pg_monitor, pg_read_all_data TO "+quoted)
+		_, err = admin.Exec(ctx, "GRANT pg_monitor, "+pg.ReadAllData()+" TO "+quoted)
 		require.NoError(t, err)
 		// Roles are cluster-wide and the snapshot restore does not drop them.
 		t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS "+quoted) })
@@ -65,7 +65,7 @@ func TestINTCLI002_CheckTierFollowsGroupRole(t *testing.T) {
 		require.NoError(t, err)
 		_, err = admin.Exec(ctx, "CREATE ROLE "+group+" NOLOGIN")
 		require.NoError(t, err)
-		_, err = admin.Exec(ctx, "GRANT pg_monitor, pg_read_all_data, pg_signal_backend TO "+group)
+		_, err = admin.Exec(ctx, "GRANT pg_monitor, "+pg.ReadAllData()+", pg_signal_backend TO "+group)
 		require.NoError(t, err)
 		_, err = admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN PASSWORD 'test'")
 		require.NoError(t, err)

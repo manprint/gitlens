@@ -3,6 +3,7 @@ package ash
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -69,6 +70,7 @@ type Sampler struct {
 	onTick   func(success bool) // invoked exactly once per tick attempt, success or not; nil is valid
 	onBatch  func([]SampleRow)  // invoked with the rows of each successful tick, after its deadline is released; nil is valid
 	tags     bool               // read the statement tail for the service and endpoint tags
+	queryID  func() bool        // whether pg_stat_activity has query_id (PostgreSQL 14+); nil means it has
 
 	mu          sync.Mutex
 	running     bool
@@ -101,6 +103,16 @@ func (s *Sampler) SetInterval(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.interval = d
+}
+
+// SetQueryIDAvailable tells the sampler whether pg_stat_activity has the
+// query_id column, which PostgreSQL 13 lacks; without it samples carry no
+// queryid. It is asked on every tick, so a server whose version is learned
+// after Start is followed. Must be called before Start.
+func (s *Sampler) SetQueryIDAvailable(f func() bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queryID = f
 }
 
 // SetQueryTags makes each tick also read the last 700 bytes of the statement
@@ -252,12 +264,17 @@ SELECT COALESCE(datname, '')             AS datname,
 
 // sampleQuery is the tick's statement. Without tags it is the statement of
 // phase 2, byte for byte; with tags it also reads the statement's tail, which
-// PostgreSQL has already cut at track_activity_query_size.
-func sampleQuery(tags bool) string {
-	if tags {
-		return sampleColumns + sampleTagColumn + sampleFrom
+// PostgreSQL has already cut at track_activity_query_size. Without queryID
+// (PostgreSQL 13) the query_id column reads NULL.
+func sampleQuery(tags, queryID bool) string {
+	columns := sampleColumns
+	if !queryID {
+		columns = strings.Replace(columns, "       query_id,", "       NULL::bigint                      AS query_id,", 1)
 	}
-	return sampleColumns + sampleFrom
+	if tags {
+		return columns + sampleTagColumn + sampleFrom
+	}
+	return columns + sampleFrom
 }
 
 // doSample executes one ASH sample query.
@@ -276,9 +293,9 @@ func (s *Sampler) doSample(ctx context.Context) error {
 // to onSample.
 func (s *Sampler) sampleBatch(ctx context.Context) ([]SampleRow, error) {
 	s.mu.Lock()
-	tags := s.tags
+	tags, queryID := s.tags, s.queryID
 	s.mu.Unlock()
-	rows, err := s.conn.Query(ctx, sampleQuery(tags))
+	rows, err := s.conn.Query(ctx, sampleQuery(tags, queryID == nil || queryID()))
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +374,9 @@ func SessionsVisible(ctx context.Context, q querier) (bool, error) {
 // sample's query_id is null whenever the setting leaves it unset, so the
 // setting is what the agent reports, rather than a guess from null samples.
 func ComputeQueryIDSetting(ctx context.Context, q querier) (string, error) {
-	rows, err := q.Query(ctx, `SELECT pg_catalog.current_setting('compute_query_id')`)
+	// missing_ok: PostgreSQL 13 has no compute_query_id; the answer is then
+	// empty and pg_stat_statements computes query IDs on its own.
+	rows, err := q.Query(ctx, `SELECT COALESCE(pg_catalog.current_setting('compute_query_id', true), '')`)
 	if err != nil {
 		return "", err
 	}

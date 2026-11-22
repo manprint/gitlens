@@ -562,8 +562,9 @@ func buildLog01(in Input) Item {
 		switch note {
 		case "logs_no_structured_format":
 			fixes = append(fixes, Fix{Channel: ChannelPostgresConfig, Title: in.say(key+".fix", nil), RequiresRestart: true,
-				Steps:   in.sayAll("log01.step.connect", "step.run_below", "step.restart_pg_at_start"),
-				Snippet: "ALTER SYSTEM SET logging_collector = on;\nALTER SYSTEM SET log_destination = 'jsonlog';"})
+				Steps: in.sayAll("log01.step.connect", "step.run_below", "step.restart_pg_at_start"),
+				Snippet: "ALTER SYSTEM SET logging_collector = on;\nALTER SYSTEM SET log_destination = 'jsonlog';\n" +
+					"-- PostgreSQL 13 and 14 have no jsonlog: ALTER SYSTEM SET log_destination = 'csvlog';"})
 		case "logs_sql_denied":
 			role := roleName(in)
 			fixes = append(fixes, Fix{Channel: ChannelSQL, Title: in.say(key+".fix", nil),

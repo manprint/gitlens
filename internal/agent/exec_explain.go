@@ -141,6 +141,10 @@ func (e *ExplainExecutor) Execute(ctx context.Context, target check.Target, args
 	if _, err := conn.Exec(ctx, "SET LOCAL search_path TO DEFAULT"); err != nil {
 		return nil, err
 	}
+	// The session turns JIT off (ReadOnlySession); the plan shows the database's own.
+	if _, err := conn.Exec(ctx, "SET LOCAL jit TO DEFAULT"); err != nil {
+		return nil, err
+	}
 	run := func(ctx context.Context, sql string) (json.RawMessage, error) {
 		switch {
 		case params != nil:

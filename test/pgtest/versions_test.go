@@ -37,7 +37,7 @@ func TestVersions_ParsesEveryMajorInTheList(t *testing.T) {
 func TestVersions_PanicsOnAMajorWithoutAnImage(t *testing.T) {
 	t.Setenv("PGLENS_PG_VERSIONS", "15,20")
 	msg := panicMessage(func() { Versions() })
-	if !strings.Contains(msg, "PostgreSQL 20 has no image") || !strings.Contains(msg, "[15 16 17 18 19]") {
+	if !strings.Contains(msg, "PostgreSQL 20 has no image") || !strings.Contains(msg, "[13 14 15 16 17 18 19]") {
 		t.Fatalf("Versions() with 15,20 panicked with %q, want a message naming 20 and the supported majors", msg)
 	}
 }

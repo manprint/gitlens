@@ -133,7 +133,9 @@ BEGIN
       -- below reports it.
       AND g.rolname <> 'pg_database_owner'
       AND g.rolname NOT IN ('pg_monitor', 'pg_read_all_settings', 'pg_read_all_stats',
-                            'pg_stat_scan_tables', 'pg_read_all_data', 'pg_signal_backend')
+                            'pg_stat_scan_tables', 'pg_read_all_data', 'pg_signal_backend',
+                            -- Tier 1 on PostgreSQL 13, checked where it is granted.
+                            'pglens_read_all_data')
       AND pg_catalog.pg_has_role(monitor, g.oid, 'MEMBER')
     ORDER BY g.rolname
   LOOP
@@ -207,14 +209,22 @@ BEGIN
     SELECT format('%s ON LARGE OBJECT %s', a.privilege_type, l.oid)
     FROM pg_catalog.pg_largeobject_metadata l, pg_catalog.aclexplode(l.lomacl) a
     WHERE a.grantee = monitor AND a.privilege_type <> 'SELECT' AND l.lomowner <> monitor
-    UNION ALL
-    SELECT format('%s ON PARAMETER %s', a.privilege_type, p.parname)
-    FROM pg_catalog.pg_parameter_acl p, pg_catalog.aclexplode(p.paracl) a
-    WHERE a.grantee = monitor
     ORDER BY 1
   LOOP
     problems := problems || format('%1$s holds %2$s: REVOKE %2$s FROM %1$s;', who, item.what);
   END LOOP;
+  -- pg_parameter_acl arrives in PostgreSQL 15; the query is dynamic so that
+  -- 13 and 14 never plan it.
+  IF current_setting('server_version_num')::int >= 150000 THEN
+    FOR item IN EXECUTE
+      $q$SELECT format('%s ON PARAMETER %s', a.privilege_type, p.parname) AS what
+           FROM pg_catalog.pg_parameter_acl p, pg_catalog.aclexplode(p.paracl) a
+          WHERE a.grantee = $1
+          ORDER BY 1$q$ USING monitor
+    LOOP
+      problems := problems || format('%1$s holds %2$s: REVOKE %2$s FROM %1$s;', who, item.what);
+    END LOOP;
+  END IF;
 
   -- Default privileges hand the role the privilege on every future object.
   FOR item IN
@@ -309,9 +319,56 @@ GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO :"role";
 -- pg_read_all_stats is already implied by pg_monitor; it is listed for
 -- clarity. pg_read_all_data is the actual table-read privilege required by
 -- PostgreSQL for EXPLAIN on relations and is the agent's T1 capability gate.
+-- PostgreSQL 13 has no pg_read_all_data: the NOLOGIN role
+-- pglens_read_all_data stands in for it, with USAGE on every schema and
+-- SELECT on every table and sequence of THIS database, also for the ones
+-- their owners create later. Run the script in each monitored database.
 \if :tier1_on
 GRANT pg_read_all_stats TO :"role";
+SELECT pg_catalog.to_regrole('pg_read_all_data') IS NOT NULL AS has_read_all_data \gset
+\if :has_read_all_data
 GRANT pg_read_all_data TO :"role";
+\else
+DO $$
+DECLARE
+  standin text := 'pglens_read_all_data';
+  item record;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = standin) THEN
+    EXECUTE format('CREATE ROLE %I NOLOGIN', standin);
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = standin
+             AND (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'refusing to use %: it must be a NOLOGIN role without attributes', standin;
+  END IF;
+  FOR item IN
+    SELECT n.nspname, pg_catalog.pg_get_userbyid(n.nspowner) AS owner
+    FROM pg_catalog.pg_namespace n
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+      AND n.nspname NOT LIKE 'pg\_temp\_%' AND n.nspname NOT LIKE 'pg\_toast\_temp\_%'
+  LOOP
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', item.nspname, standin);
+    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I', item.nspname, standin);
+    EXECUTE format('GRANT SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', item.nspname, standin);
+  END LOOP;
+  -- Tables created later by any role that owns a schema or a table here.
+  FOR item IN
+    SELECT DISTINCT pg_catalog.pg_get_userbyid(o.owner) AS owner
+    FROM (SELECT n.nspowner AS owner FROM pg_catalog.pg_namespace n
+           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+             AND n.nspname NOT LIKE 'pg\_%'
+          UNION
+          SELECT c.relowner FROM pg_catalog.pg_class c
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\_%') o
+  LOOP
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I GRANT SELECT ON TABLES TO %I', item.owner, standin);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I GRANT SELECT ON SEQUENCES TO %I', item.owner, standin);
+  END LOOP;
+END
+$$;
+GRANT pglens_read_all_data TO :"role";
+\endif
 \endif
 
 -- ========================================================================

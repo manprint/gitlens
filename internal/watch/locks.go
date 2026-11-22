@@ -22,7 +22,8 @@ import (
 // connection's own database or is shared: in another database the OID names
 // nothing here, or an unrelated table, so it is sent with its database name
 // for the resolver to name. waitstart (PostgreSQL 14) is read through to_jsonb
-// so the query also runs on older servers, where it is NULL.
+// so the query also runs on older servers. PostgreSQL 13 has none: the wait is
+// then measured from the start of the waiting statement, an upper bound.
 const lockGraphQuery = `
 WITH me AS (SELECT oid FROM pg_database WHERE datname = current_database()),
 waiting AS (
@@ -40,7 +41,8 @@ locks AS (
          l.relation, d.datname AS database, l.transactionid::text AS transactionid,
          CASE WHEN l.relation IS NOT NULL AND l.database IN (0, (SELECT oid FROM me))
               THEN COALESCE(quote_ident(n.nspname) || '.' || quote_ident(c.relname), l.relation::text) END AS relname,
-         EXTRACT(epoch FROM now() - (to_jsonb(l) ->> 'waitstart')::timestamptz) AS wait_seconds
+         EXTRACT(epoch FROM now() - (to_jsonb(l) ->> 'waitstart')::timestamptz) AS wait_seconds,
+         NOT (to_jsonb(l) ? 'waitstart') AS no_waitstart
     FROM pg_locks l
     LEFT JOIN pg_index i ON i.indexrelid = l.relation AND l.database IN (0, (SELECT oid FROM me))
     LEFT JOIN pg_class c ON c.oid = COALESCE(i.indrelid, l.relation) AND l.database IN (0, (SELECT oid FROM me))
@@ -72,7 +74,8 @@ SELECT COALESCE(json_agg(s ORDER BY s.pid), '[]') FROM (
          (SELECT json_build_object('locktype', l.locktype, 'mode', l.mode, 'relation', l.relname,
                                    'relation_oid', l.relation::bigint, 'database', l.database,
                                    'page', l.page, 'tuple', l.tuple, 'transactionid', l.transactionid,
-                                   'wait_seconds', l.wait_seconds)
+                                   'wait_seconds', COALESCE(l.wait_seconds,
+                                     CASE WHEN l.no_waitstart THEN EXTRACT(epoch FROM now() - a.query_start) END))
             FROM locks l WHERE l.pid = a.pid AND NOT l.granted LIMIT 1) AS wait,
          (SELECT json_build_object('locktype', l.locktype, 'mode', l.mode, 'relation', l.relname,
                                    'relation_oid', l.relation::bigint, 'database', l.database,

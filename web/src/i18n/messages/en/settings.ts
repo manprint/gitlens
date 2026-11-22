@@ -132,7 +132,7 @@ export const settings = {
   'settings.limits.rawRetention.detail':
     'Raw data is retained for 30 days by default (bloat estimates 90 days); the Data retention tab shows and sets the live value of each group of metrics. pglens keeps no summaries: data older than its retention is deleted, not condensed into a coarser history.',
   'settings.limits.postgresVersions.label': 'PostgreSQL versions',
-  'settings.limits.postgresVersions.detail': 'PostgreSQL 15 through 19 are supported.',
+  'settings.limits.postgresVersions.detail': 'PostgreSQL 13 through 19 are supported.',
   'settings.limits.replication.label': 'Replication',
   'settings.limits.replication.detail':
     'Streaming replication is supported; other replication modes are not.',

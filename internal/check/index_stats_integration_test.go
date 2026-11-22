@@ -221,8 +221,7 @@ func TestINTIDX006_LastScanAndResetLabels(t *testing.T) {
 		require.NoError(t, err)
 		_, err = session.Exec(ctx, fmt.Sprintf("SELECT count(*) FROM %s WHERE a = 1", table))
 		require.NoError(t, err)
-		_, err = session.Exec(ctx, "SELECT pg_stat_force_next_flush()")
-		require.NoError(t, err)
+		flushStats(t, ctx, session, pg.Version)
 		session.Release()
 
 		conn, err := pool.Acquire(ctx)

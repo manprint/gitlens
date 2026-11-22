@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// csvlog column positions, in the documented order (PostgreSQL 15 to 18).
+// csvlog column positions, in the documented order (PostgreSQL 13 to 19; 13 ends at backend_type).
 const (
 	csvTime = iota
 	csvUser

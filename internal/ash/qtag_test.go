@@ -119,13 +119,30 @@ SELECT COALESCE(datname, '')             AS datname,
    AND pid <> pg_backend_pid()
    AND COALESCE(application_name, '') NOT LIKE 'pglens/%'
 	`
-	require.Equal(t, phase2, sampleQuery(false))
-	require.NotContains(t, sampleQuery(false), "query_tail")
+	require.Equal(t, phase2, sampleQuery(false, true))
+	require.NotContains(t, sampleQuery(false, true), "query_tail")
 
 	q := &mockQuerier{rows: &mockRows{}}
 	s := NewSampler(q, clock.NewFake(time.Unix(0, 0)), nil)
 	_, err := s.sampleBatch(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, phase2, q.lastSQL)
-	require.True(t, strings.HasSuffix(sampleQuery(true), sampleFrom))
+	require.True(t, strings.HasSuffix(sampleQuery(true, true), sampleFrom))
+}
+
+// PostgreSQL 13 has no pg_stat_activity.query_id: the sample reads NULL in
+// its place and keeps the column order.
+func TestSampleQueryWithoutQueryID(t *testing.T) {
+	for _, tags := range []bool{false, true} {
+		q := sampleQuery(tags, false)
+		require.NotContains(t, q, "       query_id,")
+		require.Contains(t, q, "NULL::bigint")
+		require.Equal(t, strings.Count(sampleQuery(tags, true), ","), strings.Count(q, ","))
+	}
+	q := &mockQuerier{rows: &mockRows{}}
+	s := NewSampler(q, clock.NewFake(time.Unix(0, 0)), nil)
+	s.SetQueryIDAvailable(func() bool { return false })
+	_, err := s.sampleBatch(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, sampleQuery(false, false), q.lastSQL)
 }

@@ -10,10 +10,12 @@ const processQueryTimeout = 3 * time.Second
 
 const backendPIDQuery = `/* pglens: host processes, backend pid */ SELECT pg_backend_pid()`
 
+// query_id is read through to_jsonb: PostgreSQL 13 has no such column and
+// reads NULL.
 const processSessionsQuery = `/* pglens: host processes, sessions */
-SELECT pid, COALESCE(backend_type, ''), COALESCE(datname, ''), COALESCE(usename, ''),
-       COALESCE(application_name, ''), COALESCE(state, ''), query_id
-FROM pg_stat_activity`
+SELECT a.pid, COALESCE(a.backend_type, ''), COALESCE(a.datname, ''), COALESCE(a.usename, ''),
+       COALESCE(a.application_name, ''), COALESCE(a.state, ''), (pg_catalog.to_jsonb(a) ->> 'query_id')::bigint
+FROM pg_stat_activity a`
 
 // ProcessSession is the pg_stat_activity row of one server process.
 type ProcessSession struct {

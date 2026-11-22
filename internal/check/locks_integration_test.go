@@ -110,6 +110,11 @@ func TestINTLOCK001_BlockingSessionIsReported(t *testing.T) {
 				require.Equal(t, "transactionid", node.WaitEvent)
 				// pg_locks.waitstart is set for the waiting lock, and the
 				// duration is measured on the server from that moment.
+				// PostgreSQL 13 has no waitstart: the wait has no start.
+				if pg.Major < 14 {
+					require.Nil(t, node.WaitStartedAt)
+					continue
+				}
 				require.NotNil(t, node.WaitStartedAt, "a blocked node names the start of its wait")
 				require.NotNil(t, node.WaitDuration, "a blocked node names how long it has waited")
 				require.Greater(t, *node.WaitDuration, 0.0)

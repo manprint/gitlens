@@ -86,12 +86,20 @@ func DefaultDatabaseExcludes() []*regexp.Regexp {
 // read privileges. Objects an extension created are named with their schema
 // instead (check.ExtensionSchema); EXPLAIN alone plans the user's statement
 // with the database's own search_path, behind its guard.
+//
+// JIT is off: the agent's queries read catalogs and statistics, whose row
+// estimates can cross jit_above_cost, and compiling them costs about a second
+// a query on PostgreSQL 13 (default jit = on) for no gain. EXPLAIN puts the
+// database's own setting back for the user's statement.
 func ReadOnlySession(ctx context.Context, conn *pgx.Conn) error {
 	if _, err := conn.Exec(ctx, "SET default_transaction_read_only = on"); err != nil {
 		return fmt.Errorf("enforce read-only session: %w", err)
 	}
 	if _, err := conn.Exec(ctx, "SET search_path = pg_catalog, pg_temp"); err != nil {
 		return fmt.Errorf("restrict session search_path: %w", err)
+	}
+	if _, err := conn.Exec(ctx, "SET jit = off"); err != nil {
+		return fmt.Errorf("turn off session jit: %w", err)
 	}
 	return nil
 }
@@ -577,7 +585,7 @@ func (m *Manager) queryCapabilities(ctx context.Context, conn capabilityConn) (p
 	// monitoring role, and the deploy script refuses a superuser as one.
 	tier := pgtype.TierReadOnly
 	var hasReadAllData bool
-	if err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT COALESCE(pg_catalog.pg_has_role(`+pgtype.ReadAllDataRoleSQL+`, 'USAGE'), false) AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData); err != nil {
 		return pgtype.TierReadOnly, nil, fmt.Errorf("query pg_read_all_data membership: %w", err)
 	}
 	if hasReadAllData {

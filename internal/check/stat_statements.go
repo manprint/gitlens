@@ -384,9 +384,10 @@ func readStatements(ctx context.Context, conn Conn, timeout time.Duration, datab
 	// With compute_query_id off PostgreSQL computes no query ID, so the view
 	// records no statement that runs from then on and keeps the rows it had.
 	// Reading those rows would present frozen counters as current, so the
-	// check names the setting instead.
+	// check names the setting instead. PostgreSQL 13 has no such setting:
+	// pg_stat_statements computes query IDs itself, and missing_ok reads ''.
 	var queryIDSetting string
-	err = conn.QueryRow(ctx, "SELECT current_setting('compute_query_id')").Scan(&queryIDSetting)
+	err = conn.QueryRow(ctx, "SELECT COALESCE(current_setting('compute_query_id', true), '')").Scan(&queryIDSetting)
 	if err != nil {
 		return statementsRead{}, err
 	}

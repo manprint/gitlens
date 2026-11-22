@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/manprint/pglens/internal/check"
+	"github.com/manprint/pglens/internal/pgtype"
 )
 
 // The EXPLAIN guard. pglens never modifies a monitored database, and EXPLAIN
@@ -327,15 +328,19 @@ const sessionPrivileges = `/* pglens: explain guard, session */
 SELECT pg_catalog.json_build_object(
 	'superuser', pg_catalog.current_setting('is_superuser') = 'on',
 	'signal', pg_catalog.pg_has_role('pg_signal_backend', 'USAGE'),
-	'read_all_data', pg_catalog.pg_has_role('pg_read_all_data', $1))`
+	'read_all_data', COALESCE(pg_catalog.pg_has_role(` + pgtype.ReadAllDataRoleSQL + `, $1), false),
+	'read_all_data_role', ` + pgtype.ReadAllDataRoleSQL + `::pg_catalog.regrole::text)`
 
 type explainSession struct {
 	Superuser   bool `json:"superuser"`
 	Signal      bool `json:"signal"`
 	ReadAllData bool `json:"read_all_data"`
+	// ReadAllDataRole is pg_read_all_data, or its stand-in on PostgreSQL 13.
+	ReadAllDataRole string `json:"read_all_data_role"`
 }
 
-// dropExplainPrivileges switches the transaction to pg_read_all_data, which
+// dropExplainPrivileges switches the transaction to pg_read_all_data (on
+// PostgreSQL 13 its stand-in, pgtype.ReadAllDataStandIn), which
 // can read every table and do nothing else, before anything is planned, when
 // the session could otherwise act on other sessions: a tier 2 session holds
 // pg_signal_backend, and a function run by the statement — or folded by the
@@ -368,7 +373,11 @@ func dropExplainPrivileges(ctx context.Context, conn check.Conn, major int, anal
 	if !session.ReadAllData {
 		return rejectedf("EXPLAIN refused: the monitoring session can signal other backends and cannot switch to pg_read_all_data to plan without that privilege")
 	}
-	if _, err := conn.Exec(ctx, "SET LOCAL ROLE pg_read_all_data"); err != nil {
+	role := session.ReadAllDataRole
+	if role != "pg_read_all_data" && role != pgtype.ReadAllDataStandIn {
+		return fmt.Errorf("drop explain privileges: unexpected read-all-data role %q", role)
+	}
+	if _, err := conn.Exec(ctx, "SET LOCAL ROLE "+role); err != nil {
 		return fmt.Errorf("drop explain privileges: %w", err)
 	}
 	return nil

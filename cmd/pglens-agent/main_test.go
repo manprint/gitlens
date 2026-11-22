@@ -72,7 +72,7 @@ func TestCheckExitCode(t *testing.T) {
 	}{
 		{name: "all mandatory checks enabled", mandatory: 3, enabled: 3, version: supported, posture: readOnly, want: 0},
 		{name: "a mandatory check disabled", mandatory: 3, enabled: 2, version: supported, posture: readOnly, want: 1},
-		{name: "server version outside 15-19", mandatory: 3, enabled: 3, version: pgtype.PGVersion(140000), posture: readOnly, want: 1},
+		{name: "server version outside 13-19", mandatory: 3, enabled: 3, version: pgtype.PGVersion(120000), posture: readOnly, want: 1},
 		{name: "role could write", mandatory: 3, enabled: 3, version: supported, posture: couldWrite, want: 1},
 		{name: "role posture unknown", mandatory: 3, enabled: 3, version: supported, postureErr: errors.New("query"), want: 1},
 	}

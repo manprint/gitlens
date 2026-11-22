@@ -277,7 +277,7 @@ func printChecks(w io.Writer, checks []check.Check, role pgtype.Role, pgVersion 
 // checkExitCode is the exit status of `pglens-agent check`, as the README
 // documents it: 0 when every mandatory check is enabled, the server version is
 // supported and the monitoring role cannot write, 1 otherwise. The report says
-// NOT SUPPORTED for a version outside 15-19, so the status must not be 0 for it.
+// NOT SUPPORTED for a version outside 13-19, so the status must not be 0 for it.
 func checkExitCode(mandatoryCount, mandatoryEnabled int, pgVersion pgtype.PGVersion, postureErr error, posture check.RolePosture) int {
 	if mandatoryEnabled < mandatoryCount || !pgVersion.Supported() {
 		return 1
@@ -303,12 +303,12 @@ func formatRolePosture(posture check.RolePosture, err error) string {
 func determinePermTier(ctx context.Context, conn *pgx.Conn) pgtype.PermTier {
 	tier := pgtype.TierReadOnly
 
-	// Check for pg_read_all_data (T1). pg_has_role applies group inheritance
+	// Check for pg_read_all_data, or its stand-in on PostgreSQL 13 (T1). pg_has_role applies group inheritance
 	// and the membership's inherit option, as the agent's own probe does. It
 	// is true for a superuser without the grant, so a superuser stays at T0,
 	// as the agent's probe keeps it.
 	var hasReadAllData bool
-	err := conn.QueryRow(ctx, `SELECT pg_catalog.pg_has_role('pg_read_all_data', 'USAGE') AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData)
+	err := conn.QueryRow(ctx, `SELECT COALESCE(pg_catalog.pg_has_role(`+pgtype.ReadAllDataRoleSQL+`, 'USAGE'), false) AND pg_catalog.current_setting('is_superuser') = 'off'`).Scan(&hasReadAllData)
 	if err == nil && hasReadAllData {
 		tier = pgtype.TierExplain
 	}

@@ -37,7 +37,7 @@ with an SBOM and build provenance. Every one of them goes through the whole of
 verification (`go mod verify` plus `govulncheck`), unit tests under `-race
 -shuffle=on` with per-package coverage floors, ten repeated shuffled race
 rounds over the concurrency-sensitive packages, a container image build with a
-`--version` smoke test, and the integration matrix across PostgreSQL 15 to 19 in
+`--version` smoke test, and the integration matrix across PostgreSQL 13 to 19 in
 both `vanilla` and `rds-like` permission profiles. The E2E and Playwright
 acceptance suites run nightly and on every pull request into `main`.
 
@@ -51,7 +51,7 @@ acceptance suites run nightly and on every pull request into `main`.
 - Node 22.12+ and pnpm 12.15.0, only to build the web interface from
   source. CI and the container images build on Node 24.
 - Docker and Docker Compose for the test suites and for the server's storage
-- PostgreSQL 15 to 19 as monitoring targets (19 verified on its release candidate)
+- PostgreSQL 13 to 19 as monitoring targets (19 verified on its release candidate)
 - PostgreSQL 17 with TimescaleDB 2.31 for the server's own storage (see Running the server)
 
 ## Building
@@ -1803,7 +1803,7 @@ warnings
 
 **How to read the output:**
 
-- **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 15–19
+- **server version** — PostgreSQL version; `— NOT SUPPORTED` means it is outside 13–19
 - **role** — `primary`, `standby`, or `read-only replica`; determines which replication checks run
 - **system_identifier** — stable cluster identity; if it says `N/A (requires pg_control_system privilege)`, the agent's read of `pg_control_system()` failed, which in practice means `EXECUTE` on it has been revoked from `PUBLIC` for this role; the grant from `monitoring_user.sql` fixes it
 - **permission tier**:
@@ -2507,7 +2507,7 @@ This stable identifier is how pglens proves that a promoted standby is the same 
 
 ### The `pg_control_system()` grant
 
-Membership in `pg_monitor` does not grant `pg_control_system()`, but on PostgreSQL 15 to 19 `PUBLIC` holds `EXECUTE` on it by default, so every role can read `system_identifier`. The grant is needed only where that default has been revoked:
+Membership in `pg_monitor` does not grant `pg_control_system()`, but on PostgreSQL 13 to 19 `PUBLIC` holds `EXECUTE` on it by default, so every role can read `system_identifier`. The grant is needed only where that default has been revoked:
 
 ```sql
 GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens;
@@ -3053,7 +3053,7 @@ the server is rejected, so upgrade the server before upgrading agents.
 - **Host metrics are local-only** — they are attached only to targets declared or inferred as local to the agent. Remote targets report host metrics as unavailable, never as zero. In a container with a memory limit, the reported total is the cgroup limit rather than the machine's memory. Per-device IOPS, disk latency and network metrics are not collected.
 
 **Server and replication:**
-- PostgreSQL 15 to 19 only; 13 and 14 are not supported, and 19 is verified on its release candidate
+- PostgreSQL 13 to 19 only; on 13, tier 1 uses the `pglens_read_all_data` stand-in role (no `pg_read_all_data`), ASH and locks have no query_id or waitstart, and 19 is verified on its release candidate
 - Only streaming replication is supported; logical, Patroni, and Aurora topologies are not detected
 - Raw retention is 30 days by default (bloat estimates 90 days), settable per metrics family from 3 days (8 for bloat estimates) to 365 days in Settings → Data retention; hourly rollups of metrics, statements and ASH keep 730 days by default (31 to 1825, see [Retention and rollups](#retention-and-rollups)); compression after 48h (`buffer 6h < sample_age 12h < compress_after 48h`). Events, unseen query texts, alert history and resolved findings are purged after a fixed 90 days; see [limit 14](docs/LIMITS.md#14-history-is-deleted-by-retention-policies-and-fixed-purges)
 - **Every in-memory structure has a fixed ceiling and drops data past it** — 32 MiB per push on the wire and 256 MiB after gzip, 64 KiB of request headers, 2-minute read/write/idle timeouts, delta and topology state evicted one hour after an instance's last sample, and at most 4 096 live sessions. None of these are configurable; see [limit 13](docs/LIMITS.md#13-every-in-memory-structure-is-bounded-and-a-bound-that-trips-drops-data) for what each one trades away.

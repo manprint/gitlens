@@ -32,11 +32,15 @@ func TestINTWL002_DistinctQueries500Queryids(t *testing.T) {
 		// Now use RoleT0 for the actual workload queries
 		pool := pg.Pool(t, "app", pgtest.RoleT0)
 
-		// Verify that compute_query_id is on (needed for stable queryid)
-		var setting string
-		err = pool.QueryRow(ctx, "SELECT current_setting('compute_query_id')").Scan(&setting)
-		require.NoError(t, err)
-		require.Equal(t, "on", setting, "compute_query_id must be on")
+		// Verify that compute_query_id is on (needed for stable queryid).
+		// PostgreSQL 13 has no such setting: pg_stat_statements computes
+		// the queryid itself.
+		if pg.Major >= 14 {
+			var setting string
+			err = pool.QueryRow(ctx, "SELECT current_setting('compute_query_id')").Scan(&setting)
+			require.NoError(t, err)
+			require.Equal(t, "on", setting, "compute_query_id must be on")
+		}
 
 		// Run the distinct queries workload with count=500, duration=0 (one-shot, no rotation)
 		report := &Report{Details: make(map[string]any)}

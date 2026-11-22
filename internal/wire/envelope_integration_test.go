@@ -81,6 +81,9 @@ func normalizeEnvelope(env *wire.Envelope) *wire.Envelope {
 			normRes := res
 			// Zero out timestamps
 			normRes.TS = time.Time{}
+			if res.StatsReset != nil {
+				normRes.StatsReset = &time.Time{}
+			}
 			// Normalize metrics: keep structure (check name, metric names, label keys)
 			// but zero out values and label values, since these vary per run based on
 			// database state/identity. The meaningful test is that the schema is

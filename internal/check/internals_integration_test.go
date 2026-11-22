@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/test/pgtest"
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,20 @@ func scrapeAsT0(t *testing.T, pg *pgtest.PG, c Check, role pgtype.Role) Result {
 	result, err := c.Scrape(context.Background(), &registryTestTarget{conn: conn, version: pg.Version, database: "app", role: role, permTier: pgtype.TierReadOnly})
 	require.NoError(t, err)
 	return result
+}
+
+// flushStats sends the session's pending statistics now. Before PostgreSQL
+// 15 there is no such call: a backend reports when it goes idle, at most
+// every 500 ms, so a statement run after that interval sends what is pending.
+func flushStats(t *testing.T, ctx context.Context, conn *pgxpool.Conn, version pgtype.PGVersion) {
+	t.Helper()
+	sql := "SELECT pg_stat_force_next_flush()"
+	if version != 0 && version < pgtype.PG15 {
+		time.Sleep(600 * time.Millisecond)
+		sql = "SELECT 1"
+	}
+	_, err := conn.Exec(ctx, sql)
+	require.NoError(t, err)
 }
 
 // INT-INT-001: at T0 on a primary, slru reports the eight caches under the
@@ -72,8 +87,7 @@ func TestINTINT001_InternalsOnPrimary(t *testing.T) {
 		require.NoError(t, err)
 		_, err = admin.Exec(ctx, "SELECT g FROM generate_series(1, 200000) g ORDER BY g DESC")
 		require.NoError(t, err)
-		_, err = admin.Exec(ctx, "SELECT pg_stat_force_next_flush()")
-		require.NoError(t, err)
+		flushStats(t, ctx, admin, pg.Version)
 		require.Eventually(t, func() bool {
 			after := metricValue(scrapeAsT0(t, pg, &databaseStatsCheck{}, pgtype.RolePrimary), "pg_temp_files_total", map[string]string{"database": "app"})
 			return after > before
@@ -95,7 +109,9 @@ func TestINTREC001_RecoveryOnStandby(t *testing.T) {
 			running := scrapeAsT0(t, standby, &recoveryCheck{}, pgtype.RoleStandby)
 			require.Equal(t, 0.0, metricValue(running, "pg_recovery_replay_paused", nil))
 			require.Equal(t, 0.0, metricValue(running, "pg_recovery_conflicts_total", map[string]string{"database": "app", "reason": "lock"}))
-			require.GreaterOrEqual(t, metricValue(running, "pg_recovery_prefetch_blocks_total", map[string]string{"outcome": "hit"}), 0.0)
+			if major >= 15 {
+				require.GreaterOrEqual(t, metricValue(running, "pg_recovery_prefetch_blocks_total", map[string]string{"outcome": "hit"}), 0.0)
+			}
 
 			_, err := standbyAdmin.Exec(ctx, "SELECT pg_wal_replay_pause()")
 			require.NoError(t, err)

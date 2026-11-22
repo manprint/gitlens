@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/stretchr/testify/require"
@@ -101,16 +102,17 @@ func getOrCreateImage(t *testing.T, major int, img string, cache map[int]*PG, pr
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(90*time.Second)),
-		testcontainers.WithCmd("postgres",
-			"-c", "shared_preload_libraries="+preload,
-			"-c", "compute_query_id=on",
-			"-c", "track_io_timing=on",
-			"-c", "fsync=off",
-			"-c", "full_page_writes=off",
-			"-c", "synchronous_commit=off",
-			// Logical slots and subscriptions, for the logical_replication
-			// check; it costs a little more WAL and nothing else.
-			"-c", "wal_level=logical",
+		testcontainers.WithCmd(append([]string{"postgres",
+			"-c", "shared_preload_libraries=" + preload},
+			append(queryIDFlags(major),
+				"-c", "track_io_timing=on",
+				"-c", "fsync=off",
+				"-c", "full_page_writes=off",
+				"-c", "synchronous_commit=off",
+				// Logical slots and subscriptions, for the logical_replication
+				// check; it costs a little more WAL and nothing else.
+				"-c", "wal_level=logical",
+			)...)...,
 		),
 	)
 	require.NoError(t, err)
@@ -121,7 +123,7 @@ func getOrCreateImage(t *testing.T, major int, img string, cache map[int]*PG, pr
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	// Setup roles and apply rds-like profile if needed
-	require.NoError(t, setupRoles(ctx, pool))
+	require.NoError(t, setupRoles(ctx, pool, major))
 	if profile := os.Getenv("PGLENS_PG_PROFILE"); profile == "rds-like" {
 		_, fname, _, _ := runtime.Caller(0)
 		script := filepath.Join(filepath.Dir(fname), "../fixtures/sql/02_rds_like.sql")
@@ -220,9 +222,9 @@ echo "Primary replication setup complete"
 			},
 			Networks:       []string{net.Name},
 			NetworkAliases: map[string][]string{net.Name: {"primary"}},
-			Cmd: []string{"postgres",
-				"-c", "shared_preload_libraries=pg_stat_statements",
-				"-c", "compute_query_id=on",
+			Cmd: append(append([]string{"postgres",
+				"-c", "shared_preload_libraries=pg_stat_statements"},
+				queryIDFlags(major)...),
 				"-c", "track_io_timing=on",
 				"-c", "fsync=off",
 				"-c", "full_page_writes=off",
@@ -230,7 +232,7 @@ echo "Primary replication setup complete"
 				"-c", "wal_level=replica",
 				"-c", "max_wal_senders=10",
 				"-c", "hot_standby=on",
-			},
+			),
 			WaitingFor: wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
 				WithStartupTimeout(90 * time.Second),
@@ -269,7 +271,7 @@ echo "Primary replication setup complete"
 	// Set up roles on primary
 	primaryPool, err := pgxpool.New(ctx, primaryDSN)
 	require.NoError(t, err)
-	require.NoError(t, setupRoles(ctx, primaryPool))
+	require.NoError(t, setupRoles(ctx, primaryPool, major))
 	primaryPool.Close()
 
 	// ============ STANDBY CONTAINER ============
@@ -398,10 +400,56 @@ exec gosu postgres postgres
 // setupRoles creates the permission tiers the integration tests connect as.
 // It stops at the first statement that fails: a half-applied setup would have
 // the permission tests check a privilege set other than the one they name.
-func setupRoles(ctx context.Context, pool *pgxpool.Pool) error {
+// queryIDFlags turns on query IDs in core. compute_query_id exists from
+// PostgreSQL 14; on 13 pg_stat_statements computes them itself and the server
+// refuses to start with an unknown setting.
+func queryIDFlags(major int) []string {
+	if major < 14 {
+		return nil
+	}
+	return []string{"-c", "compute_query_id=on"}
+}
+
+// readAllDataRole is the tier-1 role: pg_read_all_data from PostgreSQL 14, and
+// on 13 the group role deploy/sql/monitoring_user.sql creates in its place.
+// ReadAllData names the tier 1 read role of this instance: pg_read_all_data,
+// or its stand-in on PostgreSQL 13.
+func (p *PG) ReadAllData() string { return readAllDataRole(p.Major) }
+
+func readAllDataRole(major int) string {
+	if major < 14 {
+		return "pglens_read_all_data"
+	}
+	return "pg_read_all_data"
+}
+
+// readAllDataStandIn creates, on PostgreSQL 13, the group role that stands in
+// for pg_read_all_data, as deploy/sql/monitoring_user.sql does: USAGE on every
+// schema, SELECT on every table and sequence, and the same on what postgres
+// creates later, since the tests create their tables after this runs.
+func readAllDataStandIn(major int) []string {
+	if major >= 14 {
+		return nil
+	}
+	return []string{
+		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_read_all_data') THEN CREATE ROLE pglens_read_all_data NOLOGIN; END IF; END $$`,
+		`DO $$ DECLARE s text; BEGIN
+		   FOR s IN SELECT nspname FROM pg_namespace WHERE nspname <> 'information_schema' AND nspname !~ '^pg_(toast|temp_|toast_temp_)' LOOP
+		     EXECUTE format('GRANT USAGE ON SCHEMA %I TO pglens_read_all_data', s);
+		     EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO pglens_read_all_data', s);
+		     EXECUTE format('GRANT SELECT ON ALL SEQUENCES IN SCHEMA %I TO pglens_read_all_data', s);
+		   END LOOP; END $$`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT USAGE ON SCHEMAS TO pglens_read_all_data`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT SELECT ON TABLES TO pglens_read_all_data`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT SELECT ON SEQUENCES TO pglens_read_all_data`,
+	}
+}
+
+func setupRoles(ctx context.Context, pool *pgxpool.Pool, major int) error {
 	// Create test roles for permission tiers.
 	// All passwords are 'test'.
-	stmts := []string{
+	readAll := readAllDataRole(major)
+	stmts := append(readAllDataStandIn(major),
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='perm_victim') THEN CREATE ROLE perm_victim LOGIN PASSWORD 'test'; END IF; END $$`,
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens') THEN CREATE ROLE pglens LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens`,
@@ -425,16 +473,16 @@ func setupRoles(ctx context.Context, pool *pgxpool.Pool) error {
 		`GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens_t1`,
 		`GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens_t1`,
 		`GRANT pg_read_all_stats TO pglens_t1`,
-		`GRANT pg_read_all_data TO pglens_t1`,
+		`GRANT `+readAll+` TO pglens_t1`,
 
 		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pglens_t2') THEN CREATE ROLE pglens_t2 LOGIN PASSWORD 'test'; END IF; END $$`,
 		`GRANT pg_monitor TO pglens_t2`,
 		`GRANT EXECUTE ON FUNCTION pg_control_system() TO pglens_t2`,
 		`GRANT EXECUTE ON FUNCTION pg_control_checkpoint() TO pglens_t2`,
 		`GRANT pg_read_all_stats TO pglens_t2`,
-		`GRANT pg_read_all_data TO pglens_t2`,
+		`GRANT `+readAll+` TO pglens_t2`,
 		`GRANT pg_signal_backend TO pglens_t2`,
-	}
+	)
 	// Every monitoring role is read-only inside PostgreSQL, as the deploy
 	// script makes pglens.
 	for _, role := range []string{"pglens_nocontrol", "pglens_t1", "pglens_t2"} {
@@ -449,6 +497,32 @@ func setupRoles(ctx context.Context, pool *pgxpool.Pool) error {
 		if _, err := pool.Exec(ctx, s); err != nil {
 			return fmt.Errorf("%s: %w", s, err)
 		}
+	}
+	return standInOtherDatabases(ctx, pool, major)
+}
+
+// standInOtherDatabases repeats the per-database grants of the tier 1
+// stand-in in postgres and template1: grants and default privileges live
+// in each database, and CREATE DATABASE copies template1's.
+func standInOtherDatabases(ctx context.Context, pool *pgxpool.Pool, major int) error {
+	grants := readAllDataStandIn(major)
+	if len(grants) == 0 {
+		return nil
+	}
+	for _, datname := range []string{"postgres", "template1"} {
+		cfg := pool.Config().ConnConfig.Copy()
+		cfg.Database = datname
+		conn, err := pgx.ConnectConfig(ctx, cfg)
+		if err != nil {
+			return fmt.Errorf("connect %s: %w", datname, err)
+		}
+		for _, s := range grants[1:] {
+			if _, err := conn.Exec(ctx, s); err != nil {
+				_ = conn.Close(ctx)
+				return fmt.Errorf("%s in %s: %w", s, datname, err)
+			}
+		}
+		_ = conn.Close(ctx)
 	}
 	return nil
 }
@@ -488,7 +562,13 @@ func (p *PG) Pool(t *testing.T, datname string, role Role) *pgxpool.Pool {
 			pool2.Close()
 		}
 	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	cfg, err := pgxpool.ParseConfig(dsn)
+	require.NoError(t, err)
+	if role != RoleSuperuser {
+		// The agent's sessions run with JIT off (agent.ReadOnlySession).
+		cfg.ConnConfig.RuntimeParams["jit"] = "off"
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { pool.Close() })
 	return pool

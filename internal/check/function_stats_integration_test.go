@@ -41,9 +41,9 @@ CREATE PROCEDURE %[1]s.job() LANGUAGE sql SECURITY DEFINER SET search_path = %[1
 		require.NoError(t, err)
 		_, err = caller.Exec(ctx, fmt.Sprintf(`SET track_functions = 'pl';
 SELECT %[1]s.f(g) FROM generate_series(1, 3) g;
-SELECT %[1]s.f(g::text) FROM generate_series(1, 2) g;
-SELECT pg_stat_force_next_flush()`, schema))
+SELECT %[1]s.f(g::text) FROM generate_series(1, 2) g`, schema))
 		require.NoError(t, err)
+		flushStats(t, ctx, caller, pg.Version)
 		_, err = caller.Exec(ctx, "SELECT 1")
 		require.NoError(t, err)
 		caller.Release()

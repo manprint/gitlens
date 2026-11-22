@@ -49,11 +49,16 @@ func TestINTTBL002_TableStatsVacuumAge(t *testing.T) {
 		t.Cleanup(func() { _, _ = admin.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", name)) })
 		_, err = admin.Exec(ctx, fmt.Sprintf("VACUUM (ANALYZE) %s", name))
 		require.NoError(t, err)
-		conn, err := pool.Acquire(ctx)
-		require.NoError(t, err)
-		result, err := (&tableStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
-		require.NoError(t, err)
-		require.NotEmpty(t, findTableMetric(result, name, "pg_table_last_vacuum_age_seconds"))
+		// Before PostgreSQL 15 the statistics collector receives the VACUUM a
+		// moment later.
+		require.Eventually(t, func() bool {
+			conn, err := pool.Acquire(ctx)
+			require.NoError(t, err)
+			defer conn.Release()
+			result, err := (&tableStatsCheck{selectors: cardinalityForIntegration()}).Scrape(ctx, &registryTestTarget{conn: conn, version: pg.Version, database: "app", permTier: 0})
+			require.NoError(t, err)
+			return len(findTableMetric(result, name, "pg_table_last_vacuum_age_seconds")) > 0
+		}, 10*time.Second, 200*time.Millisecond)
 	})
 }
 

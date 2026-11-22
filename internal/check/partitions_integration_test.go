@@ -89,7 +89,10 @@ CREATE TABLE %[1]s.byhash_1 PARTITION OF %[1]s.byhash FOR VALUES WITH (MODULUS 2
 		require.Equal(t, "ev_uq", events.Labels["invalid_indexes"])
 		require.Equal(t, "1", events.Labels["invalid_unique_indexes"])
 		require.Equal(t, "2027-07-01T00:00:00Z", events.Labels["covered_until"])
-		require.NotEmpty(t, events.Labels["analyzed_at"])
+		if pg.Major >= 15 {
+			// ANALYZE of a partitioned table reaches the statistics from PostgreSQL 15.
+			require.NotEmpty(t, events.Labels["analyzed_at"])
+		}
 
 		logs := facts["logs"]
 		require.Equal(t, "list", logs.ValueText)

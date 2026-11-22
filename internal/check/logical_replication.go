@@ -77,17 +77,39 @@ func (c *logicalReplicationCheck) Scrape(ctx context.Context, t Target) (Result,
 		return Result{}, err
 	}
 	var result Result
-	if err := c.subscriptions(ctx, conn, &result); err != nil {
+	v := t.PGVersion()
+	if err := c.subscriptions(ctx, conn, &result, subscriptionsQueryFor(v)); err != nil {
 		return Result{}, err
 	}
-	if err := c.slots(ctx, conn, &result); err != nil {
-		return Result{}, err
+	// pg_stat_replication_slots arrives in PostgreSQL 14.
+	if v == 0 || v >= pgtype.PG14 {
+		if err := c.slots(ctx, conn, &result); err != nil {
+			return Result{}, err
+		}
 	}
 	return result, nil
 }
 
-func (c *logicalReplicationCheck) subscriptions(ctx context.Context, conn Conn, result *Result) error {
-	rows, err := conn.Query(ctx, subscriptionsQuery, subscriptionFactLimit+1)
+// subscriptionsQueryFor drops the statistics view before PostgreSQL 15,
+// which has no pg_stat_subscription_stats: the counters read as '{}'.
+func subscriptionsQueryFor(v pgtype.PGVersion) string {
+	if v == 0 || v >= pgtype.PG15 {
+		return subscriptionsQuery
+	}
+	q := strings.NewReplacer(
+		"COALESCE(pg_catalog.to_jsonb(st)::pg_catalog.text, '{}')", "'{}'::pg_catalog.text",
+		"  LEFT JOIN pg_catalog.pg_stat_subscription_stats st ON st.subid = s.oid\n", "",
+	).Replace(subscriptionsQuery)
+	if v < pgtype.PG14 {
+		// PostgreSQL 13 does not grant pg_subscription.oid to PUBLIC: the
+		// workers are matched by name.
+		q = strings.Replace(q, "WHERE ss.subid = s.oid", "WHERE ss.subname = s.subname", 1)
+	}
+	return q
+}
+
+func (c *logicalReplicationCheck) subscriptions(ctx context.Context, conn Conn, result *Result, query string) error {
+	rows, err := conn.Query(ctx, query, subscriptionFactLimit+1)
 	if err != nil {
 		return err
 	}

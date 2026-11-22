@@ -102,6 +102,9 @@ CREATE PUBLICATION lrep_pub FOR TABLE lrep_src`)
 				slots[m.Labels["slot_name"]] = true
 			}
 		}
-		require.True(t, slots[slot], "no decoding counters for slot %s", slot)
+		if pg.Major >= 14 {
+			// pg_stat_replication_slots arrives in PostgreSQL 14.
+			require.True(t, slots[slot], "no decoding counters for slot %s", slot)
+		}
 	})
 }

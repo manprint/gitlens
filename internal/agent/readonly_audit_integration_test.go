@@ -38,6 +38,13 @@ var dataModifying = regexp.MustCompile(`(?i)\b(INSERT\s+INTO|UPDATE\s+\S+\s+SET|
 func databaseFingerprint(t *testing.T, admin *pgxpool.Pool) []string {
 	t.Helper()
 	ctx := context.Background()
+	// pg_stat_statements_info arrives with PostgreSQL 14.
+	var hasInfo bool
+	require.NoError(t, admin.QueryRow(ctx, `SELECT to_regclass('public.pg_stat_statements_info') IS NOT NULL`).Scan(&hasInfo))
+	statementsReset := ""
+	if hasInfo {
+		statementsReset = `UNION ALL SELECT 'reset statements ' || COALESCE(stats_reset::text, '') FROM public.pg_stat_statements_info`
+	}
 	rows, err := admin.Query(ctx, `
 SELECT 'rel ' || c.oid || ' ' || c.relname || ' ' || c.relkind::text || ' ' || c.relowner || ' ' || COALESCE(c.relacl::text, '')
   FROM pg_class c
@@ -52,10 +59,11 @@ UNION ALL SELECT 'db ' || d.datname || ' ' || COALESCE(d.datacl::text, '') FROM 
 UNION ALL SELECT 'ext ' || e.extname || ' ' || e.extversion FROM pg_extension e
 UNION ALL SELECT 'trg ' || t.oid || ' ' || t.tgname || ' ' || t.tgenabled::text FROM pg_trigger t
 UNION ALL SELECT 'seq ' || s.schemaname || '.' || s.sequencename || ' ' || COALESCE(s.last_value::text, '') FROM pg_sequences s
-UNION ALL SELECT 'reset db ' || COALESCE(d.datname, '') || ' ' || COALESCE(d.stats_reset::text, '') FROM pg_stat_database d
+UNION ALL SELECT 'reset db ' || COALESCE(d.datname, '') || '|' || COALESCE(d.stats_reset::text, '') FROM pg_stat_database d
+ WHERE d.stats_reset IS NOT NULL OR current_setting('server_version_num')::int >= 150000
 UNION ALL SELECT 'reset bgwriter ' || COALESCE(stats_reset::text, '') FROM pg_stat_bgwriter
 UNION ALL SELECT 'reset archiver ' || COALESCE(stats_reset::text, '') FROM pg_stat_archiver
-UNION ALL SELECT 'reset statements ' || COALESCE(stats_reset::text, '') FROM public.pg_stat_statements_info
+`+statementsReset+`
 ORDER BY 1`)
 	require.NoError(t, err)
 	fingerprint, err := pgx.CollectRows(rows, pgx.RowTo[string])
@@ -296,7 +304,7 @@ DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 		require.NoError(t, err)
 		require.Contains(t, sessions, pid)
 
-		require.Equal(t, before, databaseFingerprint(t, admin))
+		require.Equal(t, before, withoutNewStatsEntries(pg.Major, before, databaseFingerprint(t, admin)))
 
 		rows, err := admin.Query(ctx, `SELECT s.query FROM public.pg_stat_statements s
   JOIN pg_roles r ON r.oid = s.userid WHERE r.rolname = 'pglens_t2'`)
@@ -315,4 +323,27 @@ DROP TABLE IF EXISTS ro_audit_places;`+extraFixture)
 			require.False(t, dataModifying.MatchString(statement), "pglens sent a write: %s", statement)
 		}
 	}
+}
+
+// withoutNewStatsEntries drops, before PostgreSQL 15, the stats_reset of a
+// database that had none before: the statistics collector sets it when the
+// database's first statistics arrive, which is not a reset.
+func withoutNewStatsEntries(major int, before, after []string) []string {
+	if major >= 15 {
+		return after
+	}
+	had := map[string]bool{}
+	for _, line := range before {
+		if db, _, ok := strings.Cut(line, "|"); ok && strings.HasPrefix(line, "reset db ") {
+			had[db] = true
+		}
+	}
+	kept := make([]string, 0, len(after))
+	for _, line := range after {
+		if db, _, ok := strings.Cut(line, "|"); ok && strings.HasPrefix(line, "reset db ") && !had[db] {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return kept
 }

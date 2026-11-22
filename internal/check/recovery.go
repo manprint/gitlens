@@ -19,6 +19,12 @@ func init() { Register(&recoveryCheck{}) }
 const recoveryStateQuery = `SELECT pg_catalog.pg_is_in_recovery(),
        CASE WHEN pg_catalog.pg_is_in_recovery() THEN pg_catalog.pg_get_wal_replay_pause_state() END`
 
+// recoveryStateQuery13 is recoveryStateQuery for PostgreSQL 13, which has
+// only the boolean pg_is_wal_replay_paused (no pause request state).
+const recoveryStateQuery13 = `SELECT pg_catalog.pg_is_in_recovery(),
+       CASE WHEN pg_catalog.pg_is_in_recovery() THEN
+            CASE WHEN pg_catalog.pg_is_wal_replay_paused() THEN 'paused' ELSE 'not paused' END END`
+
 // recoveryConflictsQuery reads the queries each database's standby sessions
 // lost to recovery conflicts, by reason. It is read as JSON because 16 adds
 // confl_active_logicalslot.
@@ -65,7 +71,12 @@ func (c *recoveryCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	}
 	var inRecovery bool
 	var pauseState *string
-	if err := conn.QueryRow(ctx, recoveryStateQuery).Scan(&inRecovery, &pauseState); err != nil {
+	v := t.PGVersion()
+	stateQuery := recoveryStateQuery
+	if v != 0 && v < pgtype.PG14 {
+		stateQuery = recoveryStateQuery13
+	}
+	if err := conn.QueryRow(ctx, stateQuery).Scan(&inRecovery, &pauseState); err != nil {
 		return Result{}, err
 	}
 	if !inRecovery {
@@ -82,11 +93,14 @@ func (c *recoveryCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 		return Result{}, err
 	}
 	result.Metrics = append(result.Metrics, conflicts...)
-	prefetch, err := recoveryPrefetchMetrics(ctx, conn)
-	if err != nil {
-		return Result{}, err
+	// pg_stat_recovery_prefetch arrives in PostgreSQL 15.
+	if v == 0 || v >= pgtype.PG15 {
+		prefetch, err := recoveryPrefetchMetrics(ctx, conn)
+		if err != nil {
+			return Result{}, err
+		}
+		result.Metrics = append(result.Metrics, prefetch...)
 	}
-	result.Metrics = append(result.Metrics, prefetch...)
 	return result, nil
 }
 

@@ -27,8 +27,10 @@ const triggerFactLimit = 1000
 // partitioned table is reported only when its state differs from the
 // parent's: a 365-partition table would otherwise report every trigger 366
 // times. Everything is read from the catalogs, which any role can read.
+// PostgreSQL 13 and 14 mark a user trigger a partition inherits as internal:
+// only a trigger with no parent, or one enforcing a constraint, counts as one.
 const triggerInventoryQuery = `SELECT pg_catalog.quote_ident(n.nspname) || '.' || pg_catalog.quote_ident(c.relname) || '.' || pg_catalog.quote_ident(t.tgname),
-       n.nspname, c.relname, t.tgname, t.tgenabled::pg_catalog.text, t.tgisinternal,
+       n.nspname, c.relname, t.tgname, t.tgenabled::pg_catalog.text, (t.tgisinternal AND (t.tgparentid = 0 OR t.tgconstraint <> 0)),
        pn.nspname || '.' || p.proname, t.tgtype::pg_catalog.int4,
        COALESCE(con.conname, ''), COALESCE(con.contype::pg_catalog.text, '')
   FROM pg_catalog.pg_trigger t
@@ -40,14 +42,14 @@ const triggerInventoryQuery = `SELECT pg_catalog.quote_ident(n.nspname) || '.' |
   LEFT JOIN pg_catalog.pg_trigger parent ON parent.oid = t.tgparentid
  WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
    AND n.nspname !~ '^pg_(toast|temp_|toast_temp_)'
-   AND (NOT t.tgisinternal OR t.tgenabled = 'D')
+   AND (NOT (t.tgisinternal AND (t.tgparentid = 0 OR t.tgconstraint <> 0)) OR t.tgenabled = 'D')
    AND (parent.oid IS NULL OR parent.tgenabled <> t.tgenabled)
- ORDER BY (t.tgenabled = 'D') DESC, t.tgisinternal DESC, 1
+ ORDER BY (t.tgenabled = 'D') DESC, (t.tgisinternal AND (t.tgparentid = 0 OR t.tgconstraint <> 0)) DESC, 1
  LIMIT $1`
 
 // triggerCountQuery counts every trigger of user tables by kind and state,
 // internal and inherited ones included.
-const triggerCountQuery = `SELECT t.tgisinternal, t.tgenabled::pg_catalog.text, pg_catalog.count(*)::pg_catalog.int8
+const triggerCountQuery = `SELECT (t.tgisinternal AND (t.tgparentid = 0 OR t.tgconstraint <> 0)), t.tgenabled::pg_catalog.text, pg_catalog.count(*)::pg_catalog.int8
   FROM pg_catalog.pg_trigger t
   JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
   JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace

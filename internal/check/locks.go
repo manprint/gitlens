@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -138,7 +139,8 @@ type lockNode struct {
 // every ten seconds.
 //
 // The wait columns come from the waiting lock of each session: pg_locks.waitstart
-// is PostgreSQL 14 and later, so every supported version has it. The wait
+// is PostgreSQL 14 and later; on 13 locksQueryFor reads it, and query_id,
+// as NULL, so the wait has no start or duration there. The wait
 // duration is measured on the server with now(), as is the transaction age, so
 // the two clocks agree. A session that waits on no lock has NULL in both.
 //
@@ -204,6 +206,18 @@ LEFT JOIN (SELECT l.pid,
 WHERE a.backend_type = 'client backend'
   AND a.pid <> pg_backend_pid()`
 
+// locksQueryFor is locksQuery for the server's version: PostgreSQL 13 has
+// neither pg_stat_activity.query_id nor pg_locks.waitstart.
+func locksQueryFor(v pgtype.PGVersion) string {
+	if v == 0 || v >= pgtype.PG14 {
+		return locksQuery
+	}
+	return strings.NewReplacer(
+		"       a.query_id,\n", "       NULL::bigint,\n",
+		"min(l.waitstart) AS waitstart", "NULL::timestamptz AS waitstart",
+	).Replace(locksQuery)
+}
+
 func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	conn, err := t.Conn(ctx)
 	if err != nil {
@@ -213,7 +227,7 @@ func (c *locksCheck) Scrape(ctx context.Context, t Target) (Result, error) {
 	if err := ApplySessionLimits(ctx, conn, c.Timeout()); err != nil {
 		return Result{}, err
 	}
-	rows, err := conn.Query(ctx, locksQuery)
+	rows, err := conn.Query(ctx, locksQueryFor(t.PGVersion()))
 	if err != nil {
 		return Result{}, err
 	}

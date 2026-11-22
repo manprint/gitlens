@@ -5,6 +5,7 @@ package check
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/manprint/pglens/internal/pgtype"
 	"github.com/manprint/pglens/test/pgtest"
@@ -22,11 +23,16 @@ func TestINTBGW001_CheckpointRequestCounterAdvances(t *testing.T) {
 		require.NoError(t, err)
 		_, err = admin.Exec(ctx, "CHECKPOINT")
 		require.NoError(t, err)
-		conn2, err := pg.Pool(t, "app", pgtest.RoleT0).Acquire(ctx)
-		require.NoError(t, err)
-		after, err := (&checkpointerCheck{}).Scrape(ctx, &registryTestTarget{conn: conn2, version: pg.Version, database: "app", permTier: pgtype.TierReadOnly})
-		require.NoError(t, err)
-		require.Greater(t, metricValue(after, "pg_checkpoints_requested_total", nil), metricValue(before, "pg_checkpoints_requested_total", nil))
+		// Before PostgreSQL 15 the statistics collector receives the count a
+		// moment later.
+		require.Eventually(t, func() bool {
+			conn2, err := pg.Pool(t, "app", pgtest.RoleT0).Acquire(ctx)
+			require.NoError(t, err)
+			defer conn2.Release()
+			after, err := (&checkpointerCheck{}).Scrape(ctx, &registryTestTarget{conn: conn2, version: pg.Version, database: "app", permTier: pgtype.TierReadOnly})
+			require.NoError(t, err)
+			return metricValue(after, "pg_checkpoints_requested_total", nil) > metricValue(before, "pg_checkpoints_requested_total", nil)
+		}, 10*time.Second, 200*time.Millisecond)
 	})
 }
 

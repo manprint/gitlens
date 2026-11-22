@@ -187,7 +187,11 @@ func TestStatStatements_IntegrationCardinalityCap(t *testing.T) {
 		// without pg_stat_statements_info at all), so StatsReset was always
 		// nil in production despite this test's own pg_stat_statements_reset()
 		// call above. Found live while investigating SYS-LOAD-008.
-		require.NotNil(t, result.StatsReset, "stats_reset should be populated after pg_stat_statements_reset()")
+		if pg.Major >= 14 {
+			require.NotNil(t, result.StatsReset, "stats_reset should be populated after pg_stat_statements_reset()")
+		} else {
+			require.Nil(t, result.StatsReset, "PostgreSQL 13 has no pg_stat_statements_info")
+		}
 
 		require.True(t, result.Truncated, "expected truncation with 500 distinct queries")
 		require.True(t, result.Partial, "500 distinct queries cannot all be reported")
@@ -465,6 +469,9 @@ func TestStatStatements_IntegrationUnionOfRankings(t *testing.T) {
 func TestStatStatements_IntegrationStatsResetChanges(t *testing.T) {
 	t.Parallel()
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		if pg.Major < 14 {
+			t.Skip("PostgreSQL 13 has no pg_stat_statements_info")
+		}
 		pg.Lock(t)
 		ctx := context.Background()
 
@@ -807,6 +814,9 @@ func TestStatStatements_IntegrationAggregatesAcrossRoles(t *testing.T) {
 // closes at cleanup.
 func TestStatStatements_IntegrationComputeQueryIDOff(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		if pg.Major < 14 {
+			t.Skip("PostgreSQL 13 has no compute_query_id")
+		}
 		pg.Lock(t)
 		ctx := context.Background()
 		admin := pg.Pool(t, "app", pgtest.RoleSuperuser)

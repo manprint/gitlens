@@ -39,7 +39,7 @@ const monitoringRoleQuery = `SELECT r.rolname,
             AND pg_catalog.pg_has_role(r.oid, g.oid, 'MEMBER')
             AND g.rolname NOT IN ('pg_monitor', 'pg_read_all_settings', 'pg_read_all_stats',
                                   'pg_stat_scan_tables', 'pg_read_all_data', 'pg_signal_backend',
-                                  'pg_database_owner')
+                                  'pg_database_owner', 'pglens_read_all_data')
           ORDER BY 1) END,
        (SELECT pg_catalog.count(*)
           FROM pg_catalog.pg_shdepend d

@@ -138,7 +138,7 @@ export const settings: Translation<typeof english> = {
   'settings.limits.rawRetention.detail':
     'I dati grezzi si conservano per 30 giorni per impostazione predefinita (le stime di bloat per 90 giorni); la scheda Conservazione dati mostra e imposta il valore attivo di ogni gruppo di metriche. pglens non conserva riepiloghi: i dati più vecchi della loro conservazione vengono eliminati, non condensati in una storia più sintetica.',
   'settings.limits.postgresVersions.label': 'Versioni di PostgreSQL',
-  'settings.limits.postgresVersions.detail': 'Sono supportate le versioni da PostgreSQL 15 a 19.',
+  'settings.limits.postgresVersions.detail': 'Sono supportate le versioni da PostgreSQL 13 a 19.',
   'settings.limits.replication.label': 'Replica',
   'settings.limits.replication.detail':
     'La replica in streaming è supportata; le altre modalità di replica no.',

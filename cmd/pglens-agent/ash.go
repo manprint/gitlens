@@ -39,6 +39,10 @@ func startASH(ctx context.Context, mgr *agent.Manager, targetName string, cfg, w
 
 	agg := ash.New(clk, ashWindow, ashMaxKeys)
 	sampler := ash.NewSampler(conn, clk, ashRowFilter(cfg, agg.Add))
+	sampler.SetQueryIDAvailable(func() bool { //nolint:contextcheck // Manager caches the version; the accessor takes no context
+		v := mgr.PGVersion()
+		return v == 0 || v >= pgtype.PG14
+	})
 	if service, endpoint := cfg.ASHTagDimensions(); service || endpoint {
 		sampler.SetQueryTags(true)
 	}
@@ -253,6 +257,10 @@ func (c *ashConn) logQueryIDSetting(ctx context.Context, conn *pgxpool.Conn) {
 		return
 	}
 	c.loggedQueryID = true
+	if setting == "" {
+		fmt.Fprintf(os.Stderr, "ash: %s has no compute_query_id (PostgreSQL 13); samples carry no queryid\n", c.mgr.TargetName())
+		return
+	}
 	note := ""
 	switch setting {
 	case "off":

@@ -6,11 +6,14 @@ import (
 	"context"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
+
+	"github.com/manprint/pglens/internal/pgtype"
 )
 
 // scriptRole is the role these tests let deploy/sql/monitoring_user.sql
@@ -121,7 +124,6 @@ CREATE SEQUENCE perm_script_s`)
 			"ALTER TABLE perm_script_t ADD COLUMN b int",
 			"COMMENT ON TABLE perm_script_t IS 'changed'",
 			"DROP TABLE perm_script_t",
-			"CREATE TABLE public.perm_script_new (a int)",
 			"CREATE SCHEMA perm_script_schema",
 			"CREATE DATABASE perm_script_db",
 			"CREATE ROLE perm_script_role",
@@ -131,6 +133,17 @@ CREATE SEQUENCE perm_script_s`)
 		} {
 			_, err := conn.Exec(ctx, statement)
 			require.True(t, isSQLState(err, "42501"), "%s: %v", statement, err)
+		}
+		// Before PostgreSQL 15 PUBLIC may create in schema public; the script
+		// reports it and revokes it only with harden_public=1.
+		_, err = conn.Exec(ctx, "CREATE TABLE public.perm_script_new (a int)")
+		if pg.Major >= 15 {
+			require.True(t, isSQLState(err, "42501"), "%v", err)
+		} else {
+			require.NoError(t, err)
+			_, err = admin.Exec(ctx, "DROP TABLE public.perm_script_new")
+			require.NoError(t, err)
+			require.Contains(t, out, "new objects in schema public")
 		}
 		var rows int
 		require.NoError(t, admin.QueryRow(ctx, "SELECT count(*) FROM perm_script_t WHERE a = 1").Scan(&rows))
@@ -178,6 +191,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT INSERT ON TABLES TO pglens_scri
 		admin := pg.Pool(t, "app", RoleSuperuser)
 		t.Cleanup(func() { dropScriptRoles(t, admin) })
 		for _, tc := range cases {
+			// pg_write_all_data arrives in PostgreSQL 14, parameter grants in 15.
+			if (pg.Major < 14 && strings.Contains(tc.setup, "pg_write_all_data")) ||
+				(pg.Major < 15 && strings.Contains(tc.setup, "ON PARAMETER")) {
+				continue
+			}
 			dropScriptRoles(t, admin)
 			_, err := admin.Exec(ctx, "DROP TABLE IF EXISTS perm_script_t, perm_script_owned; DROP SEQUENCE IF EXISTS perm_script_s")
 			require.NoError(t, err)
@@ -194,7 +212,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT INSERT ON TABLES TO pglens_scri
 			var canLogin, monitor, readAll, signal bool
 			require.NoError(t, admin.QueryRow(ctx, `SELECT rolcanlogin,
        pg_has_role(oid, 'pg_monitor', 'MEMBER') AND NOT rolsuper,
-       pg_has_role(oid, 'pg_read_all_data', 'MEMBER') AND NOT rolsuper,
+       COALESCE(pg_has_role(oid, `+pgtype.ReadAllDataRoleSQL+`, 'MEMBER'), false) AND NOT rolsuper,
        pg_has_role(oid, 'pg_signal_backend', 'MEMBER') AND NOT rolsuper
 FROM pg_roles WHERE rolname = $1`, scriptRole).Scan(&canLogin, &monitor, &readAll, &signal))
 			require.False(t, canLogin, tc.name)
@@ -374,7 +392,7 @@ ALTER DATABASE app SET search_path = perm_hijack, pg_catalog, public`)
 // privilege and the tier 2 signal privilege.
 func scriptTierGrants(t *testing.T, admin *pgxpool.Pool) (readAll, signal bool) {
 	t.Helper()
-	require.NoError(t, admin.QueryRow(context.Background(), `SELECT pg_has_role($1::name, 'pg_read_all_data', 'MEMBER'),
+	require.NoError(t, admin.QueryRow(context.Background(), `SELECT COALESCE(pg_has_role($1::name, `+pgtype.ReadAllDataRoleSQL+`, 'MEMBER'), false),
        pg_has_role($1::name, 'pg_signal_backend', 'MEMBER')`, scriptRole).Scan(&readAll, &signal))
 	return readAll, signal
 }

@@ -55,8 +55,13 @@ DROP ROLE IF EXISTS check_role_group`)
 		require.Contains(t, f.ValueText, "has SUPERUSER")
 		require.NotContains(t, f.ValueText, "is a member of")
 
+		// pg_write_all_data arrives in PostgreSQL 14.
+		writeRole := "pg_write_all_data"
+		if pg.Major < 14 {
+			writeRole = "pg_execute_server_program"
+		}
 		_, err := admin.Exec(ctx, `CREATE ROLE check_role_group;
-GRANT pg_write_all_data TO check_role_group;
+GRANT `+writeRole+` TO check_role_group;
 CREATE ROLE check_role_writer LOGIN PASSWORD 'test' IN ROLE check_role_group;
 GRANT pg_monitor TO check_role_writer;
 ALTER ROLE check_role_writer SET default_transaction_read_only = on;
@@ -74,7 +79,7 @@ ALTER TABLE check_role_owned OWNER TO check_role_writer`)
 		// The agent's own session is read-only whatever the role says; the
 		// check reads the value the role would get without it.
 		f = scrapeMonitoringRole(t, pg, writer, "SET default_transaction_read_only = on")
-		require.Equal(t, "is a member of check_role_group; is a member of pg_write_all_data; owns 1 object(s)", f.ValueText)
+		require.Equal(t, "is a member of check_role_group; is a member of "+writeRole+"; owns 1 object(s)", f.ValueText)
 		require.Equal(t, "off", f.Labels["read_only_default"])
 		require.Equal(t, "check_role_writer", f.Labels["role"])
 	})

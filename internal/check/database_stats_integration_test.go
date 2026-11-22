@@ -5,6 +5,7 @@ package check
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -95,24 +96,23 @@ func TestDatabaseStats_INT_CHECK_014_ResetDetection(t *testing.T) {
 		require.NoError(t, err, "pg_stat_reset() should succeed")
 		adminConn.Release()
 
-		// Second scrape - should have newer StatsReset
-		dataConn, err = dataPool.Acquire(ctx)
-		require.NoError(t, err)
-		mockTarget2 := &testTarget{
-			conn:       dataConn,
-			version:    pg.Version,
-			database:   "app",
-			instanceID: uuid.New(),
-			clusterID:  pgtype.ClusterID(1),
-		}
-
-		result2, err := check.Scrape(ctx, mockTarget2)
-		require.NoError(t, err, "second scrape should succeed")
-		require.NotNil(t, result2.StatsReset, "StatsReset should still not be nil after reset")
-		dataConn.Release()
-
-		statsReset2 := *result2.StatsReset
-
-		require.True(t, statsReset2.After(statsReset1), "stats_reset should be strictly later after pg_stat_reset() call")
+		// Second scrape - should have newer StatsReset. Before PostgreSQL 15
+		// the statistics collector applies the reset a moment later.
+		require.Eventually(t, func() bool {
+			dataConn, err := dataPool.Acquire(ctx)
+			require.NoError(t, err)
+			defer dataConn.Release()
+			mockTarget2 := &testTarget{
+				conn:       dataConn,
+				version:    pg.Version,
+				database:   "app",
+				instanceID: uuid.New(),
+				clusterID:  pgtype.ClusterID(1),
+			}
+			result2, err := check.Scrape(ctx, mockTarget2)
+			require.NoError(t, err, "second scrape should succeed")
+			require.NotNil(t, result2.StatsReset, "StatsReset should still not be nil after reset")
+			return result2.StatsReset.After(statsReset1)
+		}, 10*time.Second, 100*time.Millisecond, "stats_reset should be strictly later after pg_stat_reset() call")
 	})
 }

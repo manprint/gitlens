@@ -60,6 +60,7 @@ func TestINTASH001_SampleExcludesSelf(t *testing.T) {
 
 		var rows []SampleRow
 		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		s.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 		require.NoError(t, s.doSample(ctx))
 
 		require.Len(t, rows, 3, "expected exactly the 3 sleeping backends (self must be excluded), got %+v", rows)
@@ -100,6 +101,7 @@ func TestINTASH002_IdleInTransactionAppears(t *testing.T) {
 
 		var rows []SampleRow
 		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		s.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 		require.NoError(t, s.doSample(ctx))
 
 		found := false
@@ -119,6 +121,9 @@ func TestINTASH002_IdleInTransactionAppears(t *testing.T) {
 // makes ASH useful.
 func TestINTASH003_QueryIDMatchesStatStatements(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		if pg.Major < 14 {
+			t.Skip("PostgreSQL 13 has no compute_query_id")
+		}
 		pg.Lock(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -153,6 +158,7 @@ func TestINTASH003_QueryIDMatchesStatStatements(t *testing.T) {
 
 		var rows []SampleRow
 		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		s.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 		require.NoError(t, s.doSample(ctx))
 
 		var sampledQueryID *int64
@@ -179,6 +185,9 @@ func TestINTASH003_QueryIDMatchesStatStatements(t *testing.T) {
 // emitted at most once regardless of how many affected rows appear.
 func TestINTASH004_NoQueryIDWhenDisabled(t *testing.T) {
 	pgtest.ForEach(t, func(t *testing.T, pg *pgtest.PG) {
+		if pg.Major < 14 {
+			t.Skip("PostgreSQL 13 has no compute_query_id")
+		}
 		pg.Lock(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -212,6 +221,7 @@ func TestINTASH004_NoQueryIDWhenDisabled(t *testing.T) {
 
 		var rows []SampleRow
 		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		s.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 		require.NoError(t, s.doSample(ctx))
 		require.NoError(t, s.doSample(ctx)) // second tick must not warn again (tested via no panic/race; log dedup asserted structurally)
 
@@ -272,15 +282,21 @@ func TestINTASH005_SampleIncludesParallelWorkers(t *testing.T) {
 
 		var rows []SampleRow
 		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		s.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 		require.NoError(t, s.doSample(ctx))
 		require.GreaterOrEqual(t, len(rows), 2, "expected the leader and at least one worker, got %+v", rows)
 		// A worker reports its leader's query id and database, so the leader and
 		// its workers fall into one bucket and add to its samples.
-		require.NotNil(t, rows[0].QueryID)
+		// PostgreSQL 13 samples no query id.
+		if pg.Major >= 14 {
+			require.NotNil(t, rows[0].QueryID)
+		}
 		for _, r := range rows {
 			require.Equal(t, "app", r.Datname)
-			require.NotNil(t, r.QueryID, "a worker must carry its leader's query id")
-			require.Equal(t, *rows[0].QueryID, *r.QueryID)
+			if pg.Major >= 14 {
+				require.NotNil(t, r.QueryID, "a worker must carry its leader's query id")
+				require.Equal(t, *rows[0].QueryID, *r.QueryID)
+			}
 		}
 	})
 }
@@ -320,6 +336,7 @@ func TestINTASH006_HiddenSessionsDetected(t *testing.T) {
 
 		var plainRows []SampleRow
 		plain := NewSampler(plainConn, clock.System(), func(r SampleRow) { plainRows = append(plainRows, r) })
+		plain.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 		require.NoError(t, plain.doSample(ctx))
 		require.Empty(t, plainRows, "the hidden session must not be sampled")
 
@@ -332,6 +349,7 @@ func TestINTASH006_HiddenSessionsDetected(t *testing.T) {
 			require.True(t, ok, "role %s must see every session", role)
 			var rows []SampleRow
 			s := NewSampler(conn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+			s.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 			require.NoError(t, s.doSample(ctx))
 			require.NotEmpty(t, rows, "role %s must sample the active session", role)
 			conn.Release()
@@ -378,6 +396,7 @@ func TestINTASH007_AgentSessionsNotSampled(t *testing.T) {
 
 		var rows []SampleRow
 		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		s.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 		require.NoError(t, s.doSample(ctx))
 
 		var sleeping int
@@ -403,6 +422,12 @@ func TestINTASH008_ComputeQueryIDSettingReadsServer(t *testing.T) {
 		require.NoError(t, err)
 		defer conn.Release()
 
+		if pg.Major < 14 {
+			got, err := ComputeQueryIDSetting(ctx, conn)
+			require.NoError(t, err)
+			require.Empty(t, got, "PostgreSQL 13 has no compute_query_id")
+			return
+		}
 		var want string
 		require.NoError(t, conn.QueryRow(ctx, "SHOW compute_query_id").Scan(&want))
 		got, err := ComputeQueryIDSetting(ctx, conn)
@@ -435,6 +460,7 @@ func TestINTASHD001_SampleCarriesDimensions(t *testing.T) {
 
 		var rows []SampleRow
 		s := NewSampler(samplerConn, clock.System(), func(r SampleRow) { rows = append(rows, r) })
+		s.SetQueryIDAvailable(func() bool { return pg.Major >= 14 })
 		require.NoError(t, s.doSample(ctx))
 
 		found := false

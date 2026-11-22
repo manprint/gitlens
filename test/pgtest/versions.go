@@ -8,10 +8,12 @@ import (
 	"strings"
 )
 
-// Supported range is PostgreSQL 15 through 19 (decision D11). 19 runs its
+// Supported range is PostgreSQL 13 through 19 (decision D11, extended down to 13). 19 runs its
 // release candidate until it is released.
 // Minors are chosen above the reverted-ABI releases documented in R2.
 var images = map[int]string{
+	13: "postgres:13.23-alpine",
+	14: "postgres:14.25-alpine",
 	15: "postgres:15.19-alpine",
 	16: "postgres:16.15-alpine",
 	17: "postgres:17.11-alpine",
@@ -21,7 +23,7 @@ var images = map[int]string{
 
 // Versions returns the majors to exercise. PGLENS_PG_VERSIONS overrides it.
 // Unset, it is the local fast pair, 15 and 18, so a run on a laptop does not
-// start every major; the integration job in ci.yml sets the full 15 to 19
+// start every major; the integration job in ci.yml sets the full 13 to 19
 // range on every PR. A major without an image is a panic, not a skip: a run
 // that quietly drops it reports green while testing a different matrix than
 // the one that was asked for.

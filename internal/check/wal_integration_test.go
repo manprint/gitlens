@@ -50,6 +50,11 @@ func TestINTWAL002_StandbyReplayLSNIsAvailable(t *testing.T) {
 			result, err := (&walCheck{}).Scrape(context.Background(), &registryTestTarget{conn: conn, version: standby.Version, database: "app", role: pgtype.RoleStandby, permTier: pgtype.TierReadOnly})
 			require.NoError(t, err)
 			require.NotNil(t, primary)
+			if major < 14 {
+				// pg_stat_wal arrives in PostgreSQL 14.
+				require.Equal(t, 0.0, metricValue(result, "pg_wal_stats_columns_available", nil))
+				return
+			}
 			require.GreaterOrEqual(t, metricValue(result, "pg_wal_stats_columns_available", nil), 1.0)
 		})
 	}
