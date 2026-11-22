@@ -10,7 +10,7 @@ module github.com/manprint/pglens
 // directive: with the two equal, `go mod tidy` drops it as redundant.
 // `make vuln` is what proves the pin still holds; raise it whenever
 // govulncheck says otherwise, never lower it.
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.13.0

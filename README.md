@@ -43,7 +43,7 @@ acceptance suites run nightly and on every pull request into `main`.
 
 ## Requirements
 
-- Go 1.27.3 or later to build. `go.mod` declares the exact patch, `go 1.27.3`,
+- Go 1.27.4 or later to build. `go.mod` declares the exact patch, `go 1.27.4`,
   so an older toolchain fetches a compatible one instead of building; the pin is
   what keeps the standard library clear of the advisories `make vuln` checks
   for. Linting needs golangci-lint v2.15.0 or later, built with that same
